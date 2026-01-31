@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+'use client';
 
 // ============================================
 // DATA MODELS
@@ -477,7 +477,7 @@ function TodoCard({ todo, onToggle, onSelectPerson, onSelectMeeting, onDelete, d
 // MAIN APP
 // ============================================
 
-export default function ReminderVaultPro() {
+export default function MindFlowApp({ userId, userEmail }: { userId?: string; userEmail?: string | null }) {
   const [activeTab, setActiveTab] = useState('tasks');
   const [todos, setTodos] = useState(mockTodos);
   const [selectedCategories, setSelectedCategories] = useState(['arbeit']);
