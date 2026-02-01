@@ -1442,7 +1442,7 @@ export default function MindFlowApp() {
   const [newCategoryName, setNewCategoryName] = useState<string>('');
   const [newCategoryColor, setNewCategoryColor] = useState<string>(colors.mint);
   const [showColorPicker, setShowColorPicker] = useState<boolean>(false);
-  const [todos, setTodos] = useState<Todo[]>(onboardingTodos);
+  const [todos, setTodos] = useState<Todo[]>([]); // Empty until user logs in
   const [calendarModal, setCalendarModal] = useState<CalendarModalState>({ show: false, todo: null });
   const [dateFilterDropdown, setDateFilterDropdown] = useState<boolean>(false);
   const [selectedDateFilter, setSelectedDateFilter] = useState<string>('Heute');
@@ -1534,6 +1534,10 @@ export default function MindFlowApp() {
     setTimeout(() => {
       // For demo: accept any email/password
       setUser({ email: authEmail });
+      
+      // Load user data from localStorage
+      loadUserData(authEmail);
+      
       setShowAuthModal(false);
       setAuthEmail('');
       setAuthPassword('');
@@ -1555,7 +1559,31 @@ export default function MindFlowApp() {
     
     // Simulate registration - in production this would call Supabase
     setTimeout(() => {
-      setUser({ email: authEmail });
+      const newUser = { email: authEmail };
+      setUser(newUser);
+      
+      // Initialize empty data for new user
+      const userKey = `mindflow_${authEmail}`;
+      const userData = {
+        todos: onboardingTodos,
+        selectedCategories: ['arbeit', 'privat', 'finanzen', 'gesundheit'],
+        customCategories: [],
+        hiddenCategories: [],
+        customPersons: [],
+        customMeetings: [],
+        customActions: [],
+      };
+      localStorage.setItem(userKey, JSON.stringify(userData));
+      
+      // Load the initial data
+      setTodos(onboardingTodos);
+      setSelectedCategories(['arbeit', 'privat', 'finanzen', 'gesundheit']);
+      setCustomCategories([]);
+      setHiddenCategories([]);
+      setCustomPersons([]);
+      setCustomMeetings([]);
+      setCustomActions([]);
+      
       setShowAuthModal(false);
       setAuthEmail('');
       setAuthPassword('');
@@ -1564,9 +1592,79 @@ export default function MindFlowApp() {
   };
 
   const handleLogout = () => {
+    // Save current user data before logout
+    if (user) {
+      const userKey = `mindflow_${user.email}`;
+      const userData = {
+        todos,
+        selectedCategories,
+        customCategories,
+        hiddenCategories,
+        customPersons,
+        customMeetings,
+        customActions,
+      };
+      localStorage.setItem(userKey, JSON.stringify(userData));
+    }
+    
+    // Clear user and reset to guest state
     setUser(null);
     setShowProfileDropdown(false);
+    
+    // Reset to empty/guest state
+    setTodos([]);
+    setSelectedCategories(['arbeit', 'privat', 'finanzen', 'gesundheit']);
+    setCustomCategories([]);
+    setHiddenCategories([]);
+    setCustomPersons([]);
+    setCustomMeetings([]);
+    setCustomActions([]);
+    setActiveStatFilter(null);
+    setSearchQuery('');
+    setShowSearch(false);
   };
+
+  // Load user data when logging in
+  const loadUserData = (email: string) => {
+    const userKey = `mindflow_${email}`;
+    const savedData = localStorage.getItem(userKey);
+    
+    if (savedData) {
+      try {
+        const userData = JSON.parse(savedData);
+        setTodos(userData.todos || []);
+        setSelectedCategories(userData.selectedCategories || ['arbeit', 'privat', 'finanzen', 'gesundheit']);
+        setCustomCategories(userData.customCategories || []);
+        setHiddenCategories(userData.hiddenCategories || []);
+        setCustomPersons(userData.customPersons || []);
+        setCustomMeetings(userData.customMeetings || []);
+        setCustomActions(userData.customActions || []);
+      } catch (e) {
+        console.error('Error loading user data:', e);
+      }
+    } else {
+      // New user - initialize with onboarding
+      setTodos(onboardingTodos);
+      setSelectedCategories(['arbeit', 'privat', 'finanzen', 'gesundheit']);
+    }
+  };
+
+  // Auto-save user data on changes
+  useEffect(() => {
+    if (user) {
+      const userKey = `mindflow_${user.email}`;
+      const userData = {
+        todos,
+        selectedCategories,
+        customCategories,
+        hiddenCategories,
+        customPersons,
+        customMeetings,
+        customActions,
+      };
+      localStorage.setItem(userKey, JSON.stringify(userData));
+    }
+  }, [user, todos, selectedCategories, customCategories, hiddenCategories, customPersons, customMeetings, customActions]);
 
   // Reset to home view - all filters cleared, sorted by priority then date
   // Note: Categories (Arbeit, Privat, etc.) are kept as selected
@@ -2220,6 +2318,145 @@ END:VCALENDAR`;
   const handleVoiceCommand = async (text: string) => {
     const lower = text.toLowerCase().trim();
     
+    console.log('=== Voice Command Debug ===');
+    console.log('Original text:', text);
+    console.log('Lowercase:', lower);
+    
+    // ============ ABSOLUTE PRIORITY: PERSON/MEETING/AKTION HINZUFÜGEN ============
+    // These MUST be processed FIRST - no exceptions!
+    
+    // Check for PERSON command - "füge Person Mia hinzu", "Person Mia hinzufügen", etc.
+    const hasPersonKeyword = lower.includes('person') || lower.includes('kontakt');
+    console.log('Has person keyword:', hasPersonKeyword);
+    
+    if (hasPersonKeyword) {
+      console.log('>>> Processing PERSON command');
+      
+      // Try to extract the person name - it should be the word AFTER "person" or "kontakt"
+      const words = lower.split(/\s+/);
+      console.log('Words:', words);
+      
+      const personIndex = words.findIndex(w => w === 'person' || w === 'kontakt');
+      console.log('Person index:', personIndex);
+      
+      if (personIndex !== -1 && personIndex < words.length - 1) {
+        let personName = words[personIndex + 1];
+        console.log('Raw person name:', personName);
+        
+        // Clean up the name - keep only letters
+        personName = personName.replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
+        console.log('Cleaned person name:', personName);
+        
+        // Skip if it's a common word
+        const skipWords = ['hinzu', 'hinzufügen', 'bitte', 'eine', 'einen', 'zur', 'liste', 'erstellen', 'anlegen', 'neue', 'neuen', 'die', 'der', 'das', 'namens', 'mit', 'dem', 'namen'];
+        
+        const shouldSkip = skipWords.includes(personName.toLowerCase());
+        console.log('Should skip:', shouldSkip);
+        
+        if (personName && personName.length > 1 && !shouldSkip) {
+          const capitalizedName = personName.charAt(0).toUpperCase() + personName.slice(1).toLowerCase();
+          const allPersonsList = [...defaultPersons, ...customPersons];
+          
+          console.log('All persons:', allPersonsList);
+          console.log('Adding:', capitalizedName);
+          
+          if (!allPersonsList.some(p => p.toLowerCase() === personName.toLowerCase())) {
+            setCustomPersons(prev => [...prev, capitalizedName]);
+            setVoiceFeedback(`✓ @${capitalizedName} zur Personenliste hinzugefügt`);
+            console.log('SUCCESS: Person added:', capitalizedName);
+          } else {
+            setVoiceFeedback(`ℹ️ @${capitalizedName} existiert bereits`);
+            console.log('INFO: Person already exists');
+          }
+          setTimeout(() => setShowVoiceModal(false), 2000);
+          return; // STOP HERE - don't continue to AI
+        }
+      }
+    }
+    
+    // Check for MEETING command - "füge Meeting Standup hinzu", etc.
+    const hasMeetingKeyword = lower.includes('meeting') || lower.includes('termin');
+    console.log('Has meeting keyword:', hasMeetingKeyword);
+    
+    if (hasMeetingKeyword) {
+      console.log('>>> Processing MEETING command');
+      
+      const words = lower.split(/\s+/);
+      const meetingIndex = words.findIndex(w => w === 'meeting' || w === 'termin');
+      console.log('Meeting index:', meetingIndex);
+      
+      if (meetingIndex !== -1 && meetingIndex < words.length - 1) {
+        // Get all words after "meeting" until we hit a stop word
+        const stopWords = ['hinzu', 'hinzufügen', 'bitte', 'erstellen', 'anlegen'];
+        let meetingWords: string[] = [];
+        
+        for (let i = meetingIndex + 1; i < words.length; i++) {
+          const word = words[i].replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
+          if (stopWords.includes(word.toLowerCase()) || !word) break;
+          if (!['ein', 'eine', 'einen', 'neues', 'neuen', 'zur', 'liste'].includes(word.toLowerCase())) {
+            meetingWords.push(word);
+          }
+        }
+        
+        console.log('Meeting words:', meetingWords);
+        
+        if (meetingWords.length > 0) {
+          const meetingName = meetingWords.join(' ');
+          const capitalizedName = meetingWords.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+          const allMeetingsList = [...defaultMeetings, ...customMeetings];
+          
+          console.log('Adding meeting:', capitalizedName);
+          
+          if (!allMeetingsList.some(m => m.toLowerCase() === meetingName.toLowerCase())) {
+            setCustomMeetings(prev => [...prev, capitalizedName]);
+            setVoiceFeedback(`✓ #${capitalizedName} zur Meetingliste hinzugefügt`);
+            console.log('SUCCESS: Meeting added:', capitalizedName);
+          } else {
+            setVoiceFeedback(`ℹ️ #${capitalizedName} existiert bereits`);
+          }
+          setTimeout(() => setShowVoiceModal(false), 2000);
+          return; // STOP HERE
+        }
+      }
+    }
+    
+    // Check for AKTION command - "füge Aktion Review hinzu", etc.
+    const hasAktionKeyword = lower.includes('aktion');
+    console.log('Has aktion keyword:', hasAktionKeyword);
+    
+    if (hasAktionKeyword) {
+      console.log('>>> Processing AKTION command');
+      
+      const words = lower.split(/\s+/);
+      const actionIndex = words.findIndex(w => w === 'aktion');
+      console.log('Action index:', actionIndex);
+      
+      if (actionIndex !== -1 && actionIndex < words.length - 1) {
+        let actionName = words[actionIndex + 1];
+        actionName = actionName.replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
+        console.log('Action name:', actionName);
+        
+        const skipWords = ['hinzu', 'hinzufügen', 'bitte', 'eine', 'einen', 'zur', 'liste', 'erstellen', 'anlegen', 'neue', 'neuen'];
+        
+        if (actionName && actionName.length > 1 && !skipWords.includes(actionName.toLowerCase())) {
+          const capitalizedName = actionName.charAt(0).toUpperCase() + actionName.slice(1).toLowerCase();
+          const allActionsList = [...defaultActions, ...customActions];
+          
+          if (!allActionsList.some(a => a.toLowerCase() === actionName.toLowerCase())) {
+            setCustomActions(prev => [...prev, capitalizedName]);
+            setVoiceFeedback(`✓ "${capitalizedName}" zur Aktionsliste hinzugefügt`);
+            console.log('SUCCESS: Action added:', capitalizedName);
+          } else {
+            setVoiceFeedback(`ℹ️ "${capitalizedName}" existiert bereits`);
+          }
+          setTimeout(() => setShowVoiceModal(false), 2000);
+          return; // STOP HERE
+        }
+      }
+    }
+    
+    console.log('>>> No person/meeting/action detected, continuing...');
+    
     // ============ CHECK IF COMPLEX → USE AI ============
     if (isComplexCommand(text)) {
       await parseWithAI(text);
@@ -2229,7 +2466,7 @@ END:VCALENDAR`;
     // ============ SIMPLE COMMANDS (LOCAL) ============
     
     // ============ NEUE AUFGABE ERSTELLEN (einfach) ============
-    if (lower.match(/^(neue aufgabe|neues todo|erstelle|erstell|hinzufügen)\s*[:\s]?\s*\w/i)) {
+    if (lower.match(/^(neue aufgabe|neues todo|erstelle|erstell)\s*[:\s]?\s*\w/i)) {
       const title = text
         .replace(/^(neue aufgabe|neues todo|erstelle|erstell|hinzufügen)\s*[:\s]?\s*/i, '')
         .replace(/\s*(bitte|mal|doch)\s*/gi, ' ')
@@ -2495,127 +2732,6 @@ END:VCALENDAR`;
       
       setTimeout(() => setShowVoiceModal(false), 2000);
       return;
-    }
-    
-    // ============ PERSON ZUR LISTE HINZUFÜGEN ============
-    if (lower.match(/(füge|add|neue).*(person|kontakt)/i) ||
-        lower.match(/(person|kontakt)\s+\w+\s*(hinzu|erstellen|anlegen)?/i) ||
-        lower.match(/@(\w+)\s*(hinzufügen|zur liste|als person)/i)) {
-      // Extract person name - try multiple patterns
-      let personName = '';
-      
-      // Pattern 1: "füge Person Mia hinzu" - name after "person/kontakt"
-      const pattern1 = lower.match(/(person|kontakt)\s+@?([a-zäöüß]+)/i);
-      // Pattern 2: "@Mia hinzufügen"
-      const pattern2 = lower.match(/@([a-zäöüß]+)/i);
-      // Pattern 3: "neue Person Mia"
-      const pattern3 = lower.match(/neue\s*(person|kontakt)\s+@?([a-zäöüß]+)/i);
-      
-      if (pattern3) {
-        personName = pattern3[2];
-      } else if (pattern1) {
-        personName = pattern1[2];
-      } else if (pattern2) {
-        personName = pattern2[1];
-      }
-      
-      // Remove trailing words like "hinzu", "bitte" etc.
-      personName = personName.replace(/\s*(hinzu|bitte|zur|liste|erstellen|anlegen)$/i, '').trim();
-      
-      if (personName && personName.length > 1 && !['hinzu', 'bitte', 'eine', 'einen', 'zur', 'liste'].includes(personName.toLowerCase())) {
-        const capitalizedName = personName.charAt(0).toUpperCase() + personName.slice(1);
-        
-        // Check if already exists
-        const allPersons = [...defaultPersons, ...customPersons];
-        if (!allPersons.some(p => p.toLowerCase() === personName.toLowerCase())) {
-          setCustomPersons(prev => [...prev, capitalizedName]);
-          setVoiceFeedback(`✓ @${capitalizedName} zur Personenliste hinzugefügt`);
-        } else {
-          setVoiceFeedback(`ℹ️ @${capitalizedName} existiert bereits`);
-        }
-        
-        setTimeout(() => setShowVoiceModal(false), 2000);
-        return;
-      }
-    }
-    
-    // ============ MEETING ZUR LISTE HINZUFÜGEN ============
-    if (lower.match(/(füge|add|neues).*(meeting|termin)/i) ||
-        lower.match(/(meeting|termin)\s+[\w\s]+\s*(hinzu|erstellen|anlegen)?/i) ||
-        lower.match(/#([\w\s]+)\s*(hinzufügen|zur liste|als meeting)/i)) {
-      // Extract meeting name - try multiple patterns
-      let meetingName = '';
-      
-      // Pattern 1: "füge Meeting Standup hinzu" - name after "meeting/termin"
-      const pattern1 = lower.match(/(meeting|termin)\s+#?([a-zäöüß\s]+)/i);
-      // Pattern 2: "#Standup hinzufügen"
-      const pattern2 = lower.match(/#([a-zäöüß\s]+)/i);
-      // Pattern 3: "neues Meeting Standup"
-      const pattern3 = lower.match(/neues?\s*(meeting|termin)\s+#?([a-zäöüß\s]+)/i);
-      
-      if (pattern3) {
-        meetingName = pattern3[2];
-      } else if (pattern1) {
-        meetingName = pattern1[2];
-      } else if (pattern2) {
-        meetingName = pattern2[1];
-      }
-      
-      // Remove trailing words like "hinzu", "bitte" etc.
-      meetingName = meetingName.replace(/\s*(hinzu|bitte|zur|liste|erstellen|anlegen)$/i, '').trim();
-      
-      if (meetingName && meetingName.length > 1 && !['hinzu', 'bitte', 'ein', 'einen', 'zur', 'liste'].includes(meetingName.toLowerCase())) {
-        const capitalizedName = meetingName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-        
-        // Check if already exists
-        const allMeetings = [...defaultMeetings, ...customMeetings];
-        if (!allMeetings.some(m => m.toLowerCase() === meetingName.toLowerCase())) {
-          setCustomMeetings(prev => [...prev, capitalizedName]);
-          setVoiceFeedback(`✓ #${capitalizedName} zur Meetingliste hinzugefügt`);
-        } else {
-          setVoiceFeedback(`ℹ️ #${capitalizedName} existiert bereits`);
-        }
-        
-        setTimeout(() => setShowVoiceModal(false), 2000);
-        return;
-      }
-    }
-    
-    // ============ AKTION ZUR LISTE HINZUFÜGEN ============
-    if (lower.match(/(füge|add|neue).*(aktion)/i) ||
-        lower.match(/aktion\s+[\w]+\s*(hinzu|erstellen|anlegen)?/i)) {
-      // Extract action name - try multiple patterns
-      let actionName = '';
-      
-      // Pattern 1: "füge Aktion Review hinzu" - name after "aktion"
-      const pattern1 = lower.match(/aktion\s+([a-zäöüß]+)/i);
-      // Pattern 2: "neue Aktion Review"
-      const pattern2 = lower.match(/neue\s*aktion\s+([a-zäöüß]+)/i);
-      
-      if (pattern2) {
-        actionName = pattern2[1];
-      } else if (pattern1) {
-        actionName = pattern1[1];
-      }
-      
-      // Remove trailing words like "hinzu", "bitte" etc.
-      actionName = actionName.replace(/\s*(hinzu|bitte|zur|liste|erstellen|anlegen)$/i, '').trim();
-      
-      if (actionName && actionName.length > 1 && !['hinzu', 'bitte', 'eine', 'einen', 'zur', 'liste'].includes(actionName.toLowerCase())) {
-        const capitalizedName = actionName.charAt(0).toUpperCase() + actionName.slice(1);
-        
-        // Check if already exists
-        const allActions = [...defaultActions, ...customActions];
-        if (!allActions.some(a => a.toLowerCase() === actionName.toLowerCase())) {
-          setCustomActions(prev => [...prev, capitalizedName]);
-          setVoiceFeedback(`✓ "${capitalizedName}" zur Aktionsliste hinzugefügt`);
-        } else {
-          setVoiceFeedback(`ℹ️ "${capitalizedName}" existiert bereits`);
-        }
-        
-        setTimeout(() => setShowVoiceModal(false), 2000);
-        return;
-      }
     }
     
     // ============ AUFGABEN VORLESEN ============
