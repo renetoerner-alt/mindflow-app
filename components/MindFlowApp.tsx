@@ -1437,6 +1437,7 @@ export default function MindFlowApp() {
   const [selectedCategories, setSelectedCategories] = useState<string[]>(['arbeit', 'privat', 'finanzen', 'gesundheit']);
   const [isScrolled, setIsScrolled] = useState<boolean>(false);
   const [customCategories, setCustomCategories] = useState<Category[]>([]);
+  const [hiddenCategories, setHiddenCategories] = useState<string[]>([]); // Track deleted default categories
   const [addingCategory, setAddingCategory] = useState<boolean>(false);
   const [newCategoryName, setNewCategoryName] = useState<string>('');
   const [newCategoryColor, setNewCategoryColor] = useState<string>(colors.mint);
@@ -1845,7 +1846,7 @@ END:VCALENDAR`;
     return () => document.removeEventListener('click', handleClickOutside);
   }, [showProfileDropdown]);
 
-  const allCategories = [...categories, ...customCategories];
+  const allCategories = [...categories.filter(c => !hiddenCategories.includes(c.id)), ...customCategories];
   
   const toggleCategory = (catId: string) => {
     if (selectedCategories.includes(catId)) {
@@ -1858,9 +1859,14 @@ END:VCALENDAR`;
   };
 
   const deleteCategory = (catId: string) => {
+    // Check if it's a custom category
     if (customCategories.find(c => c.id === catId)) {
       setCustomCategories(customCategories.filter(c => c.id !== catId));
+    } else {
+      // It's a default category - add to hidden list
+      setHiddenCategories([...hiddenCategories, catId]);
     }
+    // Remove from selected categories
     setSelectedCategories(selectedCategories.filter(c => c !== catId));
   };
 
@@ -2089,12 +2095,7 @@ END:VCALENDAR`;
     const wordCount = text.split(' ').length;
     const lower = text.toLowerCase();
     
-    // Complex indicators
-    const hasDescription = lower.includes('beschreibung') || lower.includes('details') || lower.includes('hinzufügen dass') || lower.includes('füge hinzu');
-    const hasMultipleClauses = lower.includes(' und ') || lower.includes(' weil ') || lower.includes(' damit ') || lower.includes(' dass ');
-    const isLongText = wordCount > 12;
-    
-    // Simple command patterns (should NOT use AI)
+    // Simple command patterns (should NOT use AI) - check these FIRST
     const simplePatterns = [
       /^(erledigt|fertig|done|abhaken)/i,
       /^(lösche|entferne|delete)/i,
@@ -2111,14 +2112,26 @@ END:VCALENDAR`;
       /(was|welche)\s*(sind|habe ich|gibt es)\s*(für)?\s*(aufgaben|todos)/i,
       /(aufgaben|todos).*(vorlesen|lesen|ansagen)/i,
       /(lies|lese|vorlesen).*(heute|hoch|kritisch|priorität|person)/i,
-      // Add person/meeting to list commands
-      /(füge|add|neue)\s*(eine)?\s*(person|kontakt|meeting|termin)/i,
-      /(person|kontakt|meeting|termin)\s+\w+\s*(hinzufügen|erstellen)/i,
+      // Add person/meeting/action to list commands - should NOT use AI
+      /(füge|add|neue).*(person|kontakt|meeting|termin|aktion)\s*(hinzu)?/i,
+      /(person|kontakt)\s+\w+/i,
+      /(meeting|termin)\s+\w+/i,
+      /neue\s*(person|kontakt|meeting|termin|aktion)/i,
     ];
     
     const isSimple = simplePatterns.some(pattern => pattern.test(lower));
     
-    return !isSimple && (hasDescription || hasMultipleClauses || isLongText);
+    // If it's a simple command, return false immediately
+    if (isSimple) {
+      return false;
+    }
+    
+    // Complex indicators (only check if not already identified as simple)
+    const hasDescription = lower.includes('beschreibung') || lower.includes('details') || lower.includes('hinzufügen dass');
+    const hasMultipleClauses = lower.includes(' und ') || lower.includes(' weil ') || lower.includes(' damit ') || lower.includes(' dass ');
+    const isLongText = wordCount > 12;
+    
+    return hasDescription || hasMultipleClauses || isLongText;
   };
 
   // Get the currently selected category for new tasks
@@ -2485,28 +2498,31 @@ END:VCALENDAR`;
     }
     
     // ============ PERSON ZUR LISTE HINZUFÜGEN ============
-    if (lower.match(/(füge|add|neue)\s*(eine)?\s*(person|kontakt)\s*(hinzu)?\s*@?(\w+)/i) ||
-        lower.match(/@(\w+)\s*(hinzufügen|zur liste|als person)/i) ||
-        lower.match(/(neue person|neuer kontakt)\s*@?(\w+)/i) ||
-        lower.match(/(person|kontakt)\s+(\w+)\s*(hinzufügen|zur liste|erstellen)/i)) {
+    if (lower.match(/(füge|add|neue).*(person|kontakt)/i) ||
+        lower.match(/(person|kontakt)\s+\w+\s*(hinzu|erstellen|anlegen)?/i) ||
+        lower.match(/@(\w+)\s*(hinzufügen|zur liste|als person)/i)) {
       // Extract person name - try multiple patterns
       let personName = '';
       
-      // Pattern: "@Name"
-      const pattern1 = lower.match(/@(\w+)/i);
-      // Pattern: "füge person XYZ hinzu" or "neue person XYZ"
-      const pattern2 = lower.match(/(person|kontakt)\s+@?(\w+?)(\s+hinzu|\s+zur liste|\s+erstellen|$)/i);
+      // Pattern 1: "füge Person Mia hinzu" - name after "person/kontakt"
+      const pattern1 = lower.match(/(person|kontakt)\s+@?([a-zäöüß]+)/i);
+      // Pattern 2: "@Mia hinzufügen"
+      const pattern2 = lower.match(/@([a-zäöüß]+)/i);
+      // Pattern 3: "neue Person Mia"
+      const pattern3 = lower.match(/neue\s*(person|kontakt)\s+@?([a-zäöüß]+)/i);
       
-      if (pattern1) {
-        personName = pattern1[1].trim();
+      if (pattern3) {
+        personName = pattern3[2];
+      } else if (pattern1) {
+        personName = pattern1[2];
       } else if (pattern2) {
-        personName = pattern2[2].trim();
+        personName = pattern2[1];
       }
       
       // Remove trailing words like "hinzu", "bitte" etc.
-      personName = personName.replace(/\s*(hinzu|bitte|zur|liste|erstellen)$/i, '').trim();
+      personName = personName.replace(/\s*(hinzu|bitte|zur|liste|erstellen|anlegen)$/i, '').trim();
       
-      if (personName && personName.length > 1) {
+      if (personName && personName.length > 1 && !['hinzu', 'bitte', 'eine', 'einen', 'zur', 'liste'].includes(personName.toLowerCase())) {
         const capitalizedName = personName.charAt(0).toUpperCase() + personName.slice(1);
         
         // Check if already exists
@@ -2517,35 +2533,38 @@ END:VCALENDAR`;
         } else {
           setVoiceFeedback(`ℹ️ @${capitalizedName} existiert bereits`);
         }
+        
+        setTimeout(() => setShowVoiceModal(false), 2000);
+        return;
       }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
     }
     
     // ============ MEETING ZUR LISTE HINZUFÜGEN ============
-    if (lower.match(/(füge|add|neues)\s*(ein)?\s*(meeting|termin)\s*(hinzu)?\s*#?([\w\s]+)/i) ||
-        lower.match(/#([\w\s]+)\s*(hinzufügen|zur liste|als meeting)/i) ||
-        lower.match(/(neues meeting|neuer termin)\s*#?([\w\s]+)/i) ||
-        lower.match(/(meeting|termin)\s+([\w\s]+)\s*(hinzufügen|zur liste|erstellen)/i)) {
+    if (lower.match(/(füge|add|neues).*(meeting|termin)/i) ||
+        lower.match(/(meeting|termin)\s+[\w\s]+\s*(hinzu|erstellen|anlegen)?/i) ||
+        lower.match(/#([\w\s]+)\s*(hinzufügen|zur liste|als meeting)/i)) {
       // Extract meeting name - try multiple patterns
       let meetingName = '';
       
-      // Pattern: "füge meeting XYZ hinzu" or "neues meeting XYZ"
-      const pattern1 = lower.match(/(meeting|termin)\s+#?([\w\s]+?)(\s+hinzu|\s+zur liste|\s+erstellen|$)/i);
-      // Pattern: "#MeetingName"
-      const pattern2 = lower.match(/#([\w\s]+)/i);
+      // Pattern 1: "füge Meeting Standup hinzu" - name after "meeting/termin"
+      const pattern1 = lower.match(/(meeting|termin)\s+#?([a-zäöüß\s]+)/i);
+      // Pattern 2: "#Standup hinzufügen"
+      const pattern2 = lower.match(/#([a-zäöüß\s]+)/i);
+      // Pattern 3: "neues Meeting Standup"
+      const pattern3 = lower.match(/neues?\s*(meeting|termin)\s+#?([a-zäöüß\s]+)/i);
       
-      if (pattern1) {
-        meetingName = pattern1[2].trim();
+      if (pattern3) {
+        meetingName = pattern3[2];
+      } else if (pattern1) {
+        meetingName = pattern1[2];
       } else if (pattern2) {
-        meetingName = pattern2[1].trim();
+        meetingName = pattern2[1];
       }
       
       // Remove trailing words like "hinzu", "bitte" etc.
-      meetingName = meetingName.replace(/\s*(hinzu|bitte|zur|liste|erstellen)$/i, '').trim();
+      meetingName = meetingName.replace(/\s*(hinzu|bitte|zur|liste|erstellen|anlegen)$/i, '').trim();
       
-      if (meetingName && meetingName.length > 1) {
+      if (meetingName && meetingName.length > 1 && !['hinzu', 'bitte', 'ein', 'einen', 'zur', 'liste'].includes(meetingName.toLowerCase())) {
         const capitalizedName = meetingName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
         
         // Check if already exists
@@ -2556,18 +2575,33 @@ END:VCALENDAR`;
         } else {
           setVoiceFeedback(`ℹ️ #${capitalizedName} existiert bereits`);
         }
+        
+        setTimeout(() => setShowVoiceModal(false), 2000);
+        return;
       }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
     }
     
     // ============ AKTION ZUR LISTE HINZUFÜGEN ============
-    if (lower.match(/(füge|add|neue)\s*(eine)?\s*(aktion)?\s*(hinzu)?\s*(\w+)/i) && 
-        lower.includes('aktion')) {
-      const actionMatch = lower.match(/aktion\s*(hinzu)?\s*(\w+)/i) || lower.match(/(\w+)\s*als aktion/i);
-      if (actionMatch) {
-        const actionName = actionMatch[2] || actionMatch[1];
+    if (lower.match(/(füge|add|neue).*(aktion)/i) ||
+        lower.match(/aktion\s+[\w]+\s*(hinzu|erstellen|anlegen)?/i)) {
+      // Extract action name - try multiple patterns
+      let actionName = '';
+      
+      // Pattern 1: "füge Aktion Review hinzu" - name after "aktion"
+      const pattern1 = lower.match(/aktion\s+([a-zäöüß]+)/i);
+      // Pattern 2: "neue Aktion Review"
+      const pattern2 = lower.match(/neue\s*aktion\s+([a-zäöüß]+)/i);
+      
+      if (pattern2) {
+        actionName = pattern2[1];
+      } else if (pattern1) {
+        actionName = pattern1[1];
+      }
+      
+      // Remove trailing words like "hinzu", "bitte" etc.
+      actionName = actionName.replace(/\s*(hinzu|bitte|zur|liste|erstellen|anlegen)$/i, '').trim();
+      
+      if (actionName && actionName.length > 1 && !['hinzu', 'bitte', 'eine', 'einen', 'zur', 'liste'].includes(actionName.toLowerCase())) {
         const capitalizedName = actionName.charAt(0).toUpperCase() + actionName.slice(1);
         
         // Check if already exists
@@ -2578,10 +2612,10 @@ END:VCALENDAR`;
         } else {
           setVoiceFeedback(`ℹ️ "${capitalizedName}" existiert bereits`);
         }
+        
+        setTimeout(() => setShowVoiceModal(false), 2000);
+        return;
       }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
     }
     
     // ============ AUFGABEN VORLESEN ============
