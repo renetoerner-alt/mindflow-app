@@ -1392,8 +1392,29 @@ export default function MindFlowApp() {
   const [personFilter, setPersonFilter] = useState<string | null>(null);
   const [meetingFilter, setMeetingFilter] = useState<string | null>(null);
 
+  // Custom Items States (Aktionen, Personen, Meetings)
+  const [customActions, setCustomActions] = useState<string[]>([]);
+  const [customPersons, setCustomPersons] = useState<string[]>([]);
+  const [customMeetings, setCustomMeetings] = useState<string[]>([]);
+  const [addingAction, setAddingAction] = useState<boolean>(false);
+  const [addingPerson, setAddingPerson] = useState<boolean>(false);
+  const [addingMeeting, setAddingMeeting] = useState<boolean>(false);
+  const [newActionName, setNewActionName] = useState<string>('');
+  const [newPersonName, setNewPersonName] = useState<string>('');
+  const [newMeetingName, setNewMeetingName] = useState<string>('');
+
   const dateFilterOptions: string[] = ['Heute', 'Diese Woche', 'Nächste Woche', 'Diesen Monat', 'Alle'];
   const statusFilterOptions: string[] = ['Rückmeldung', 'Offen', 'In Bearbeitung', 'Alle Status'];
+
+  // Default items
+  const defaultActions: string[] = ['E-Mail', 'Anruf', 'Gespräch', 'Dokument', 'Recherche', 'Prüfen'];
+  const defaultPersons: string[] = ['Sarah', 'Michael', 'Lisa', 'Thomas', 'Anna'];
+  const defaultMeetings: string[] = ['Daily Standup', 'Team Weekly', 'Projekt App', 'Quartalsreview'];
+
+  // Combined items (default + custom)
+  const allActions = [...defaultActions, ...customActions];
+  const allPersons = [...defaultPersons, ...customPersons];
+  const allMeetings = [...defaultMeetings, ...customMeetings];
 
   // Calculate task counts based on date filter
   const getTaskCountForDateFilter = (filter: string): number => {
@@ -1435,20 +1456,39 @@ export default function MindFlowApp() {
       );
     }
     
-    // Apply person filter (from voice command)
+    // Apply category filter
+    if (selectedCategories.length > 0) {
+      filtered = filtered.filter(t => selectedCategories.includes(t.category.toLowerCase()));
+    }
+    
+    // Apply person filter (from voice command or filter modal)
     if (personFilter) {
       filtered = filtered.filter(t => 
         t.persons && t.persons.some(p => p.toLowerCase().includes(personFilter.toLowerCase()))
       );
     }
     
-    // Apply meeting filter (from voice command)
+    // Apply meeting filter (from voice command or filter modal)
     if (meetingFilter) {
       filtered = filtered.filter(t => 
         t.meetings && t.meetings.some(m => m.toLowerCase().includes(meetingFilter.toLowerCase()))
       );
     }
     
+    // Apply date filter based on selectedDateFilter
+    if (selectedDateFilter && selectedDateFilter !== 'Alle') {
+      if (selectedDateFilter === 'Heute') {
+        filtered = filtered.filter(t => t.date === 'Heute');
+      } else if (selectedDateFilter === 'Diese Woche') {
+        filtered = filtered.filter(t => ['Heute', 'Morgen', 'Diese Woche'].includes(t.date));
+      } else if (selectedDateFilter === 'Nächste Woche') {
+        filtered = filtered.filter(t => t.date === 'Nächste Woche');
+      } else if (selectedDateFilter === 'Diesen Monat') {
+        filtered = filtered.filter(t => ['Heute', 'Morgen', 'Diese Woche', 'Nächste Woche', 'Diesen Monat'].includes(t.date));
+      }
+    }
+    
+    // Apply stat filter (from stat cards)
     if (activeStatFilter === 'date') {
       if (selectedDateFilter === 'Heute') filtered = filtered.filter(t => t.date === 'Heute');
       else if (selectedDateFilter === 'Diese Woche') filtered = filtered.filter(t => ['Heute', 'Morgen', 'Diese Woche'].includes(t.date));
@@ -1462,6 +1502,10 @@ export default function MindFlowApp() {
       if (selectedStatusFilter === 'Rückmeldung') filtered = filtered.filter(t => t.status === 'Auf Rückmeldung');
       else if (selectedStatusFilter === 'Offen') filtered = filtered.filter(t => t.status === 'Offen');
       else if (selectedStatusFilter === 'In Bearbeitung') filtered = filtered.filter(t => t.status === 'In Bearbeitung');
+      else if (selectedStatusFilter === 'Erledigt') filtered = filtered.filter(t => t.status === 'Erledigt');
+    } else if (activeStatFilter?.startsWith('prio-')) {
+      const prioLevel = parseInt(activeStatFilter.replace('prio-', ''));
+      filtered = filtered.filter(t => t.priority === prioLevel);
     }
     
     return filtered;
@@ -1846,17 +1890,130 @@ END:VCALENDAR`;
     return found;
   };
 
+  // Check if command is complex (should use AI)
+  const isComplexCommand = (text: string): boolean => {
+    const wordCount = text.split(' ').length;
+    const lower = text.toLowerCase();
+    
+    // Complex indicators
+    const hasDescription = lower.includes('beschreibung') || lower.includes('details') || lower.includes('hinzufügen dass') || lower.includes('füge hinzu');
+    const hasMultipleClauses = lower.includes(' und ') || lower.includes(' weil ') || lower.includes(' damit ') || lower.includes(' dass ');
+    const isLongText = wordCount > 12;
+    
+    // Simple command patterns (should NOT use AI)
+    const simplePatterns = [
+      /^(erledigt|fertig|done|abhaken)/i,
+      /^(lösche|entferne|delete)/i,
+      /^(zeige|filter|nur)\s*(aufgaben)?\s*(@|#|arbeit|privat|finanz|offen|kritisch)/i,
+      /^(alle aufgaben|alles anzeigen|filter zurück)/i,
+      /^(suche|such|finde)/i,
+      /^@\w+/i,
+      /^#\w+/i,
+      /priorität\s*(kritisch|hoch|mittel|niedrig)/i,
+      /status\s*(offen|bearbeitung|rückmeldung|erledigt)/i,
+      /auf\s*(heute|morgen|diese woche|nächste woche)$/i,
+    ];
+    
+    const isSimple = simplePatterns.some(pattern => pattern.test(lower));
+    
+    return !isSimple && (hasDescription || hasMultipleClauses || isLongText);
+  };
+
+  // Parse complex command with AI (Haiku)
+  const parseWithAI = async (text: string): Promise<void> => {
+    setVoiceFeedback('🤖 Analysiere...');
+    
+    try {
+      const response = await fetch('/api/parse-voice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('API Fehler');
+      }
+      
+      const data = await response.json();
+      
+      // Create todo from AI response
+      const newTodo: Todo = {
+        id: `voice-ai-${Date.now()}`,
+        title: data.title,
+        description: data.description || undefined,
+        category: data.category || 'arbeit',
+        actionType: data.actionType || 'check',
+        priority: data.priority || 3,
+        status: 'Offen',
+        date: data.date || 'Heute',
+        persons: data.persons?.length > 0 ? data.persons.map((p: string) => `@${p}`) : undefined,
+        meetings: data.meetings?.length > 0 ? data.meetings.map((m: string) => `#${m}`) : undefined,
+        unread: true,
+        completed: false,
+      };
+      
+      setTodos(prev => [newTodo, ...prev]);
+      
+      // Build feedback message
+      let feedback = `✓ "${newTodo.title}"`;
+      if (newTodo.description) feedback += ` mit Beschreibung`;
+      if (newTodo.persons?.length) feedback += ` für ${newTodo.persons.join(', ')}`;
+      
+      setVoiceFeedback(feedback);
+      
+      setTimeout(() => {
+        setShowVoiceModal(false);
+        setVoiceFeedback(null);
+      }, 2500);
+      
+    } catch (error) {
+      console.error('AI parsing error:', error);
+      setVoiceFeedback('✗ KI-Analyse fehlgeschlagen, erstelle einfache Aufgabe...');
+      
+      // Fallback: create simple todo
+      setTimeout(() => {
+        const newTodo: Todo = {
+          id: `voice-${Date.now()}`,
+          title: text.substring(0, 60),
+          category: 'arbeit',
+          actionType: 'check',
+          priority: 3,
+          status: 'Offen',
+          date: 'Heute',
+          unread: true,
+          completed: false,
+        };
+        setTodos(prev => [newTodo, ...prev]);
+        setVoiceFeedback(`✓ Aufgabe erstellt: "${newTodo.title}"`);
+        
+        setTimeout(() => {
+          setShowVoiceModal(false);
+          setVoiceFeedback(null);
+        }, 2000);
+      }, 1000);
+    }
+  };
+
   // Main Voice Command Handler
-  const handleVoiceCommand = (text: string) => {
+  const handleVoiceCommand = async (text: string) => {
     const lower = text.toLowerCase().trim();
     
-    // ============ NEUE AUFGABE ERSTELLEN ============
-    if (lower.match(/^(neue aufgabe|neues todo|erstelle|erstell|hinzufügen|erinnere mich|ich muss|nicht vergessen)/i)) {
+    // ============ CHECK IF COMPLEX → USE AI ============
+    if (isComplexCommand(text)) {
+      await parseWithAI(text);
+      return;
+    }
+    
+    // ============ SIMPLE COMMANDS (LOCAL) ============
+    
+    // ============ NEUE AUFGABE ERSTELLEN (einfach) ============
+    if (lower.match(/^(neue aufgabe|neues todo|erstelle|erstell|hinzufügen)\s*[:\s]?\s*\w/i)) {
       const title = text
-        .replace(/^(neue aufgabe|neues todo|erstelle|erstell|hinzufügen|erinnere mich an|ich muss|nicht vergessen)\s*[:\s]?\s*/i, '')
+        .replace(/^(neue aufgabe|neues todo|erstelle|erstell|hinzufügen)\s*[:\s]?\s*/i, '')
+        .replace(/\s*(bitte|mal|doch)\s*/gi, ' ')
         .trim();
       
-      if (title.length > 2) {
+      if (title.length > 2 && title.split(' ').length <= 10) {
         const newTodo: Todo = {
           id: `voice-${Date.now()}`,
           title: title.charAt(0).toUpperCase() + title.slice(1),
@@ -1872,19 +2029,26 @@ END:VCALENDAR`;
         setTodos(prev => [newTodo, ...prev]);
         setVoiceFeedback(`✓ Neue Aufgabe erstellt: "${newTodo.title}"`);
         
-        // Auto-close modal after success
         setTimeout(() => {
           setShowVoiceModal(false);
           setVoiceFeedback(null);
         }, 2000);
         
         return;
+      } else {
+        // Too long for simple parsing, use AI
+        await parseWithAI(text);
+        return;
       }
     }
     
     // ============ AUFGABE ERLEDIGEN ============
-    if (lower.match(/^(erledigt|fertig|done|abhaken|check)\s*/i)) {
-      const searchText = text.replace(/^(erledigt|fertig|done|abhaken|check)\s*[:\s]?\s*/i, '').trim();
+    if (lower.match(/^(erledigt|fertig|done|abhaken|check)\s*/i) || lower.match(/ist\s*(erledigt|fertig|done)$/i)) {
+      const searchText = text
+        .replace(/^(erledigt|fertig|done|abhaken|check)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe)?\s*[:\s]?\s*/i, '')
+        .replace(/\s*(ist\s*)?(erledigt|fertig|done)$/i, '')
+        .replace(/\s*(bitte|mal|doch)\s*/gi, ' ')
+        .trim();
       
       if (searchText) {
         const found = findTodoByText(searchText);
@@ -1895,7 +2059,6 @@ END:VCALENDAR`;
           setVoiceFeedback(`✗ Aufgabe "${searchText}" nicht gefunden`);
         }
       } else {
-        // Mark most recent/first open todo as complete
         const openTodo = todos.find(t => !t.completed);
         if (openTodo) {
           handleToggleComplete(openTodo.id);
@@ -1913,9 +2076,8 @@ END:VCALENDAR`;
       const newStatus = parseStatus(lower);
       
       if (newStatus) {
-        // Try to find which todo to update
         const words = lower.split(' ').filter(w => w.length > 3 && 
-          !['status', 'setze', 'ändere', 'auf', 'offen', 'bearbeitung', 'rückmeldung', 'erledigt', 'starte', 'beginne', 'warte'].includes(w));
+          !['status', 'setze', 'ändere', 'bitte', 'auf', 'offen', 'bearbeitung', 'rückmeldung', 'erledigt', 'starte', 'beginne', 'warte'].includes(w));
         
         if (words.length > 0) {
           const found = findTodoByText(words.join(' '));
@@ -1924,7 +2086,6 @@ END:VCALENDAR`;
             setVoiceFeedback(`✓ "${found.title}" → ${newStatus}`);
           }
         } else {
-          // Update first open todo
           const openTodo = todos.find(t => !t.completed && t.status !== newStatus);
           if (openTodo) {
             handleStatusChange(openTodo.id, newStatus);
@@ -1938,13 +2099,13 @@ END:VCALENDAR`;
     }
     
     // ============ PRIORITÄT ÄNDERN ============
-    if (lower.match(/(priorität|prio).*(auf|zu|ist)\s*(kritisch|hoch|mittel|niedrig|minimal|p[1-5])/i) ||
+    if (lower.match(/(priorität|prio).*(auf|zu|ist)?\s*(kritisch|hoch|mittel|niedrig|minimal|p[1-5])/i) ||
         lower.match(/^(kritisch|hoch|dringend|wichtig)\s*[:\s]/i)) {
       const newPriority = parsePriority(lower);
       
       if (newPriority) {
         const words = lower.split(' ').filter(w => w.length > 3 &&
-          !['priorität', 'prio', 'auf', 'zu', 'ist', 'kritisch', 'hoch', 'mittel', 'niedrig', 'minimal', 'dringend', 'wichtig'].includes(w));
+          !['priorität', 'prio', 'bitte', 'auf', 'zu', 'ist', 'kritisch', 'hoch', 'mittel', 'niedrig', 'minimal', 'dringend', 'wichtig'].includes(w));
         
         if (words.length > 0) {
           const found = findTodoByText(words.join(' '));
@@ -1959,8 +2120,34 @@ END:VCALENDAR`;
       return;
     }
     
+    // ============ PERSON ZUWEISEN ============
+    if (lower.match(/@(\w+)\s*(zu|hinzufügen|bei)/i) || lower.match(/(zu|bei|hinzufügen).*@(\w+)/i)) {
+      const personMatch = lower.match(/@(\w+)/i);
+      const person = personMatch ? personMatch[1] : null;
+      
+      if (person) {
+        const words = lower.split(' ').filter(w => w.length > 3 && !w.startsWith('@') &&
+          !['bitte', 'hinzufügen', 'zu', 'bei'].includes(w));
+        
+        if (words.length > 0) {
+          const found = findTodoByText(words.join(' '));
+          if (found) {
+            const updatedTodo = {
+              ...found,
+              persons: [...(found.persons || []), `@${person}`]
+            };
+            setTodos(prev => prev.map(t => t.id === found.id ? updatedTodo : t));
+            setVoiceFeedback(`✓ @${person} zu "${found.title}" hinzugefügt`);
+          }
+        }
+      }
+      
+      setTimeout(() => setShowVoiceModal(false), 2000);
+      return;
+    }
+    
     // ============ NACH PERSON FILTERN ============
-    if (lower.match(/(zeige|filter|nur).*(von|für|mit|@)\s*(\w+)/i) || lower.startsWith('@')) {
+    if (lower.match(/(zeige|filter|nur).*(von|für|mit|@)\s*(\w+)/i) || lower.match(/^@\w+$/i)) {
       const personMatch = lower.match(/@(\w+)/i) || lower.match(/(von|für|mit)\s+(\w+)/i);
       if (personMatch) {
         const person = '@' + (personMatch[1] || personMatch[2]);
@@ -1976,7 +2163,7 @@ END:VCALENDAR`;
     }
     
     // ============ NACH MEETING FILTERN ============
-    if (lower.match(/(zeige|filter).*(meeting|#)\s*(\w+)/i) || lower.startsWith('#')) {
+    if (lower.match(/(zeige|filter).*(meeting|#)\s*(\w+)/i) || lower.match(/^#[\w\s]+$/i)) {
       const meetingMatch = lower.match(/#([\w\s]+)/i) || lower.match(/meeting\s+(\w+)/i);
       if (meetingMatch) {
         const meeting = '#' + meetingMatch[1].trim();
@@ -1992,7 +2179,7 @@ END:VCALENDAR`;
     }
     
     // ============ NACH KATEGORIE FILTERN ============
-    if (lower.match(/(zeige|filter|nur)\s*(aufgaben)?\s*(arbeit|privat|finanz)/i)) {
+    if (lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die)?\s*(aufgaben)?\s*(in|aus|von|kategorie)?\s*(arbeit|privat|finanz)/i)) {
       const category = parseVoiceCategory(lower);
       if (category) {
         setSelectedCategories([category]);
@@ -2004,8 +2191,8 @@ END:VCALENDAR`;
     }
     
     // ============ NACH STATUS FILTERN ============
-    if (lower.match(/(zeige|filter|nur)\s*(aufgaben)?\s*(offen|bearbeitung|rückmeldung|erledigt)/i) ||
-        lower.match(/^(offene|erledigte)\s*(aufgaben)?/i)) {
+    if (lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die|mir|alle)?\s*(aufgaben)?\s*(die)?\s*(offen|bearbeitung|rückmeldung|erledigt)/i) ||
+        lower.match(/^(offene|erledigte|wartende)\s*(aufgaben)?$/i)) {
       const status = parseStatus(lower);
       if (status) {
         if (status === 'Auf Rückmeldung') {
@@ -2024,8 +2211,8 @@ END:VCALENDAR`;
     }
     
     // ============ NACH PRIORITÄT FILTERN ============
-    if (lower.match(/(zeige|filter|nur)\s*(aufgaben)?\s*(kritisch|hoch|wichtig|dringend)/i) ||
-        lower.match(/^(kritische|wichtige|dringende)\s*(aufgaben)?/i)) {
+    if (lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die|mir|alle)?\s*(aufgaben)?\s*(mit)?\s*(kritisch|hoch|wichtig|dringend)/i) ||
+        lower.match(/^(kritische|wichtige|dringende)\s*(aufgaben)?$/i)) {
       const priority = parsePriority(lower);
       if (priority === 1) {
         setActiveStatFilter('critical');
@@ -2040,8 +2227,10 @@ END:VCALENDAR`;
     }
     
     // ============ SUCHE ============
-    if (lower.match(/^(suche|such|finde|find|wo ist|wo sind)\s*/i)) {
-      const query = text.replace(/^(suche|such|finde|find|wo ist|wo sind)\s*(nach)?\s*/i, '').trim();
+    if (lower.match(/^(suche|such|finde|find|wo ist|wo sind)\s*(bitte)?\s*(nach)?\s*/i)) {
+      const query = text
+        .replace(/^(suche|such|finde|find|wo ist|wo sind)\s*(bitte)?\s*(nach)?\s*/i, '')
+        .trim();
       if (query) {
         setSearchQuery(query);
         setShowSearch(true);
@@ -2053,7 +2242,7 @@ END:VCALENDAR`;
     }
     
     // ============ FILTER ZURÜCKSETZEN ============
-    if (lower.match(/(alle aufgaben|alles anzeigen|zeige alle|reset|zurücksetzen|filter löschen)/i)) {
+    if (lower.match(/(alle aufgaben|alles anzeigen|zeige alle|reset|zurücksetzen|filter löschen|filter zurück)/i)) {
       setActiveStatFilter(null);
       setPersonFilter(null);
       setMeetingFilter(null);
@@ -2067,8 +2256,10 @@ END:VCALENDAR`;
     }
     
     // ============ AUFGABE LÖSCHEN ============
-    if (lower.match(/^(lösche|entferne|delete)\s*/i)) {
-      const searchText = text.replace(/^(lösche|entferne|delete)\s*(aufgabe)?\s*/i, '').trim();
+    if (lower.match(/^(lösche|entferne|delete|remove)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo)?\s*/i)) {
+      const searchText = text
+        .replace(/^(lösche|entferne|delete|remove)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo)?\s*/i, '')
+        .trim();
       
       if (searchText) {
         const found = findTodoByText(searchText);
@@ -2084,27 +2275,9 @@ END:VCALENDAR`;
       return;
     }
     
-    // ============ FALLBACK: Als neue Aufgabe interpretieren ============
+    // ============ FALLBACK: Use AI for anything else ============
     if (lower.length > 5) {
-      const newTodo: Todo = {
-        id: `voice-${Date.now()}`,
-        title: text.charAt(0).toUpperCase() + text.slice(1),
-        category: parseVoiceCategory(lower) || 'arbeit',
-        actionType: parseActionType(lower),
-        priority: parsePriority(lower) || 3,
-        status: 'Offen',
-        date: parseDate(lower),
-        unread: true,
-        completed: false,
-      };
-      
-      setTodos(prev => [newTodo, ...prev]);
-      setVoiceFeedback(`✓ Neue Aufgabe erstellt: "${newTodo.title}"`);
-      
-      setTimeout(() => {
-        setShowVoiceModal(false);
-        setVoiceFeedback(null);
-      }, 2000);
+      await parseWithAI(text);
       return;
     }
     
@@ -2693,8 +2866,8 @@ END:VCALENDAR`;
             border: `1px solid ${darkMode ? 'rgba(255, 171, 94, 0.3)' : '#fde68a'}`,
             backdropFilter: 'blur(24px)',
           }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-              {['E-Mail', 'Anruf', 'Gespräch', 'Dokument', 'Recherche', 'Prüfen'].map(action => (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+              {allActions.map(action => (
                 <button key={action} style={{
                   padding: '6px 12px',
                   borderRadius: '9999px',
@@ -2715,19 +2888,85 @@ END:VCALENDAR`;
                   {action}
                 </button>
               ))}
-              <button style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '9999px',
-                background: darkMode ? 'rgba(255, 171, 94, 0.15)' : 'rgba(255, 171, 94, 0.3)',
-                color: darkMode ? colors.orange : '#d97706',
-                border: `2px dashed ${darkMode ? 'rgba(255, 171, 94, 0.4)' : '#fbbf24'}`,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '18px',
-              }}>+</button>
+              {addingAction ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <input
+                    type="text"
+                    value={newActionName}
+                    onChange={(e) => setNewActionName(e.target.value)}
+                    placeholder="Neue Aktion..."
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newActionName.trim()) {
+                        setCustomActions([...customActions, newActionName.trim()]);
+                        setNewActionName('');
+                        setAddingAction(false);
+                      } else if (e.key === 'Escape') {
+                        setAddingAction(false);
+                        setNewActionName('');
+                      }
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '9999px',
+                      fontSize: '13px',
+                      border: `1px solid ${colors.orange}`,
+                      background: darkMode ? 'rgba(255, 171, 94, 0.1)' : 'white',
+                      color: darkMode ? colors.orange : '#92400e',
+                      outline: 'none',
+                      width: '120px',
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (newActionName.trim()) {
+                        setCustomActions([...customActions, newActionName.trim()]);
+                        setNewActionName('');
+                        setAddingAction(false);
+                      }
+                    }}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      background: colors.orange,
+                      color: 'white',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                    }}
+                  >✓</button>
+                  <button
+                    onClick={() => { setAddingAction(false); setNewActionName(''); }}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      background: 'transparent',
+                      color: darkMode ? '#6B7280' : '#9ca3af',
+                      border: `1px solid ${darkMode ? '#6B7280' : '#9ca3af'}`,
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                    }}
+                  >✕</button>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => setAddingAction(true)}
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '9999px',
+                    background: darkMode ? 'rgba(255, 171, 94, 0.15)' : 'rgba(255, 171, 94, 0.3)',
+                    color: darkMode ? colors.orange : '#d97706',
+                    border: `2px dashed ${darkMode ? 'rgba(255, 171, 94, 0.4)' : '#fbbf24'}`,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '18px',
+                  }}>+</button>
+              )}
             </div>
           </div>
         )}
@@ -2741,35 +2980,111 @@ END:VCALENDAR`;
             border: `1px solid ${darkMode ? 'rgba(167, 139, 250, 0.3)' : '#c4b5fd'}`,
             backdropFilter: 'blur(24px)',
           }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-              {['Sarah', 'Michael', 'Lisa', 'Thomas', 'Anna'].map(person => (
-                <button key={person} style={{
-                  padding: '6px 12px',
-                  borderRadius: '9999px',
-                  fontSize: '13px',
-                  fontWeight: '500',
-                  background: darkMode ? 'rgba(167, 139, 250, 0.2)' : 'white',
-                  color: darkMode ? colors.purple : '#6d28d9',
-                  border: 'none',
-                  cursor: 'pointer',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+              {allPersons.map(person => (
+                <button 
+                  key={person} 
+                  onClick={() => {
+                    setPersonFilter(personFilter === `@${person}` ? null : `@${person}`);
+                    setSearchQuery(personFilter === `@${person}` ? '' : `@${person}`);
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '9999px',
+                    fontSize: '13px',
+                    fontWeight: '500',
+                    background: personFilter === `@${person}` 
+                      ? colors.purple 
+                      : darkMode ? 'rgba(167, 139, 250, 0.2)' : 'white',
+                    color: personFilter === `@${person}` 
+                      ? 'white' 
+                      : darkMode ? colors.purple : '#6d28d9',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                  }}>
                   @{person}
                 </button>
               ))}
-              <button style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '9999px',
-                background: darkMode ? 'rgba(167, 139, 250, 0.15)' : 'rgba(167, 139, 250, 0.3)',
-                color: darkMode ? colors.purple : '#7c3aed',
-                border: `2px dashed ${darkMode ? 'rgba(167, 139, 250, 0.4)' : '#a78bfa'}`,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '18px',
-              }}>+</button>
+              {addingPerson ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <input
+                    type="text"
+                    value={newPersonName}
+                    onChange={(e) => setNewPersonName(e.target.value)}
+                    placeholder="Name..."
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newPersonName.trim()) {
+                        setCustomPersons([...customPersons, newPersonName.trim()]);
+                        setNewPersonName('');
+                        setAddingPerson(false);
+                      } else if (e.key === 'Escape') {
+                        setAddingPerson(false);
+                        setNewPersonName('');
+                      }
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '9999px',
+                      fontSize: '13px',
+                      border: `1px solid ${colors.purple}`,
+                      background: darkMode ? 'rgba(167, 139, 250, 0.1)' : 'white',
+                      color: darkMode ? colors.purple : '#6d28d9',
+                      outline: 'none',
+                      width: '100px',
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (newPersonName.trim()) {
+                        setCustomPersons([...customPersons, newPersonName.trim()]);
+                        setNewPersonName('');
+                        setAddingPerson(false);
+                      }
+                    }}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      background: colors.purple,
+                      color: 'white',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                    }}
+                  >✓</button>
+                  <button
+                    onClick={() => { setAddingPerson(false); setNewPersonName(''); }}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      background: 'transparent',
+                      color: darkMode ? '#6B7280' : '#9ca3af',
+                      border: `1px solid ${darkMode ? '#6B7280' : '#9ca3af'}`,
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                    }}
+                  >✕</button>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => setAddingPerson(true)}
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '9999px',
+                    background: darkMode ? 'rgba(167, 139, 250, 0.15)' : 'rgba(167, 139, 250, 0.3)',
+                    color: darkMode ? colors.purple : '#7c3aed',
+                    border: `2px dashed ${darkMode ? 'rgba(167, 139, 250, 0.4)' : '#a78bfa'}`,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '18px',
+                  }}>+</button>
+              )}
             </div>
           </div>
         )}
@@ -2783,35 +3098,111 @@ END:VCALENDAR`;
             border: `1px solid ${darkMode ? 'rgba(91, 192, 235, 0.3)' : '#93c5fd'}`,
             backdropFilter: 'blur(24px)',
           }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-              {['Daily Standup', 'Team Weekly', 'Projekt App', 'Quartalsreview'].map(meeting => (
-                <button key={meeting} style={{
-                  padding: '6px 12px',
-                  borderRadius: '9999px',
-                  fontSize: '13px',
-                  fontWeight: '500',
-                  background: darkMode ? 'rgba(91, 192, 235, 0.2)' : 'white',
-                  color: darkMode ? colors.skyBlue : '#1d4ed8',
-                  border: 'none',
-                  cursor: 'pointer',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+              {allMeetings.map(meeting => (
+                <button 
+                  key={meeting} 
+                  onClick={() => {
+                    setMeetingFilter(meetingFilter === `#${meeting}` ? null : `#${meeting}`);
+                    setSearchQuery(meetingFilter === `#${meeting}` ? '' : `#${meeting}`);
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '9999px',
+                    fontSize: '13px',
+                    fontWeight: '500',
+                    background: meetingFilter === `#${meeting}` 
+                      ? colors.skyBlue 
+                      : darkMode ? 'rgba(91, 192, 235, 0.2)' : 'white',
+                    color: meetingFilter === `#${meeting}` 
+                      ? 'white' 
+                      : darkMode ? colors.skyBlue : '#1d4ed8',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                  }}>
                   #{meeting}
                 </button>
               ))}
-              <button style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '9999px',
-                background: darkMode ? 'rgba(91, 192, 235, 0.15)' : 'rgba(91, 192, 235, 0.3)',
-                color: darkMode ? colors.skyBlue : '#2563eb',
-                border: `2px dashed ${darkMode ? 'rgba(91, 192, 235, 0.4)' : '#60a5fa'}`,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '18px',
-              }}>+</button>
+              {addingMeeting ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <input
+                    type="text"
+                    value={newMeetingName}
+                    onChange={(e) => setNewMeetingName(e.target.value)}
+                    placeholder="Meeting Name..."
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newMeetingName.trim()) {
+                        setCustomMeetings([...customMeetings, newMeetingName.trim()]);
+                        setNewMeetingName('');
+                        setAddingMeeting(false);
+                      } else if (e.key === 'Escape') {
+                        setAddingMeeting(false);
+                        setNewMeetingName('');
+                      }
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '9999px',
+                      fontSize: '13px',
+                      border: `1px solid ${colors.skyBlue}`,
+                      background: darkMode ? 'rgba(91, 192, 235, 0.1)' : 'white',
+                      color: darkMode ? colors.skyBlue : '#1d4ed8',
+                      outline: 'none',
+                      width: '130px',
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (newMeetingName.trim()) {
+                        setCustomMeetings([...customMeetings, newMeetingName.trim()]);
+                        setNewMeetingName('');
+                        setAddingMeeting(false);
+                      }
+                    }}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      background: colors.skyBlue,
+                      color: 'white',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                    }}
+                  >✓</button>
+                  <button
+                    onClick={() => { setAddingMeeting(false); setNewMeetingName(''); }}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      background: 'transparent',
+                      color: darkMode ? '#6B7280' : '#9ca3af',
+                      border: `1px solid ${darkMode ? '#6B7280' : '#9ca3af'}`,
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                    }}
+                  >✕</button>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => setAddingMeeting(true)}
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '9999px',
+                    background: darkMode ? 'rgba(91, 192, 235, 0.15)' : 'rgba(91, 192, 235, 0.3)',
+                    color: darkMode ? colors.skyBlue : '#2563eb',
+                    border: `2px dashed ${darkMode ? 'rgba(91, 192, 235, 0.4)' : '#60a5fa'}`,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '18px',
+                  }}>+</button>
+              )}
             </div>
           </div>
         )}
@@ -3229,6 +3620,271 @@ END:VCALENDAR`;
               }}
             >
               Schließen
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Filter View Modal */}
+      {activeTab === 'filter' && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 60,
+          background: darkMode ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.95)',
+          backdropFilter: 'blur(20px)',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '20px',
+          paddingBottom: '120px',
+          overflowY: 'auto',
+        }}>
+          <div style={{ maxWidth: '430px', margin: '0 auto', width: '100%' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h2 style={{ fontSize: '24px', fontWeight: '700', color: theme.text }}>Filter</h2>
+              <button
+                onClick={() => setActiveTab('tasks')}
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '50%',
+                  background: darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: theme.text,
+                  fontSize: '18px',
+                }}
+              >✕</button>
+            </div>
+
+            {/* Kategorien */}
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Kategorien</h3>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {[...categories, ...customCategories].map(cat => (
+                  <button
+                    key={cat.id}
+                    onClick={() => {
+                      if (selectedCategories.includes(cat.id)) {
+                        setSelectedCategories(selectedCategories.filter(c => c !== cat.id));
+                      } else {
+                        setSelectedCategories([...selectedCategories, cat.id]);
+                      }
+                    }}
+                    style={{
+                      padding: '10px 16px',
+                      borderRadius: '12px',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      background: selectedCategories.includes(cat.id) ? cat.color : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                      color: selectedCategories.includes(cat.id) ? '#000' : theme.text,
+                      border: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Status */}
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</h3>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {['Offen', 'In Bearbeitung', 'Auf Rückmeldung', 'Erledigt'].map(status => (
+                  <button
+                    key={status}
+                    onClick={() => {
+                      if (selectedStatusFilter === status) {
+                        setSelectedStatusFilter('Alle Status');
+                        setActiveStatFilter(null);
+                      } else {
+                        setSelectedStatusFilter(status);
+                        setActiveStatFilter('status');
+                      }
+                    }}
+                    style={{
+                      padding: '10px 16px',
+                      borderRadius: '12px',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      background: selectedStatusFilter === status ? colors.mint : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                      color: selectedStatusFilter === status ? '#000' : theme.text,
+                      border: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Priorität */}
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Priorität</h3>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {priorities.map(prio => (
+                  <button
+                    key={prio.level}
+                    onClick={() => {
+                      if (activeStatFilter === `prio-${prio.level}`) {
+                        setActiveStatFilter(null);
+                      } else {
+                        setActiveStatFilter(`prio-${prio.level}`);
+                      }
+                    }}
+                    style={{
+                      padding: '10px 16px',
+                      borderRadius: '12px',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      background: activeStatFilter === `prio-${prio.level}` ? prio.color : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                      color: activeStatFilter === `prio-${prio.level}` ? '#000' : theme.text,
+                      border: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {prio.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Zeitraum */}
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Zeitraum</h3>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {dateFilterOptions.map(date => (
+                  <button
+                    key={date}
+                    onClick={() => setSelectedDateFilter(date)}
+                    style={{
+                      padding: '10px 16px',
+                      borderRadius: '12px',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      background: selectedDateFilter === date ? colors.skyBlue : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                      color: selectedDateFilter === date ? '#000' : theme.text,
+                      border: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {date}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Personen */}
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Personen</h3>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {allPersons.map(person => (
+                  <button
+                    key={person}
+                    onClick={() => {
+                      if (personFilter === `@${person}`) {
+                        setPersonFilter(null);
+                      } else {
+                        setPersonFilter(`@${person}`);
+                        setMeetingFilter(null);
+                      }
+                    }}
+                    style={{
+                      padding: '10px 16px',
+                      borderRadius: '12px',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      background: personFilter === `@${person}` ? colors.purple : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                      color: personFilter === `@${person}` ? '#000' : theme.text,
+                      border: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    @{person}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Meetings */}
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Meetings</h3>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {allMeetings.map(meeting => (
+                  <button
+                    key={meeting}
+                    onClick={() => {
+                      if (meetingFilter === `#${meeting}`) {
+                        setMeetingFilter(null);
+                      } else {
+                        setMeetingFilter(`#${meeting}`);
+                        setPersonFilter(null);
+                      }
+                    }}
+                    style={{
+                      padding: '10px 16px',
+                      borderRadius: '12px',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      background: meetingFilter === `#${meeting}` ? colors.skyBlue : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                      color: meetingFilter === `#${meeting}` ? '#000' : theme.text,
+                      border: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    #{meeting}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Reset Button */}
+            <button
+              onClick={() => {
+                setSelectedCategories(['arbeit']);
+                setSelectedStatusFilter('Rückmeldung');
+                setSelectedDateFilter('Heute');
+                setActiveStatFilter(null);
+                setPersonFilter(null);
+                setMeetingFilter(null);
+                setSearchQuery('');
+              }}
+              style={{
+                width: '100%',
+                padding: '14px',
+                borderRadius: '12px',
+                fontSize: '15px',
+                fontWeight: '600',
+                background: 'transparent',
+                color: colors.coral,
+                border: `1px solid ${colors.coral}`,
+                cursor: 'pointer',
+                marginBottom: '16px',
+              }}
+            >
+              Filter zurücksetzen
+            </button>
+
+            {/* Apply Button */}
+            <button
+              onClick={() => setActiveTab('tasks')}
+              style={{
+                width: '100%',
+                padding: '14px',
+                borderRadius: '12px',
+                fontSize: '15px',
+                fontWeight: '600',
+                background: colors.mint,
+                color: '#000',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              Filter anwenden
             </button>
           </div>
         </div>
