@@ -1532,11 +1532,12 @@ export default function MindFlowApp() {
     
     // Simulate login - in production this would call Supabase
     setTimeout(() => {
-      // For demo: accept any email/password
-      setUser({ email: authEmail });
-      
-      // Load user data from localStorage
+      // IMPORTANT: Load user data FIRST, before setting user
+      // This prevents the auto-save useEffect from overwriting saved data
       loadUserData(authEmail);
+      
+      // Then set user (this triggers useEffect, but data is already loaded)
+      setUser({ email: authEmail });
       
       setShowAuthModal(false);
       setAuthEmail('');
@@ -1627,11 +1628,18 @@ export default function MindFlowApp() {
   // Load user data when logging in
   const loadUserData = (email: string) => {
     const userKey = `mindflow_${email}`;
+    console.log('=== Loading user data ===');
+    console.log('User key:', userKey);
+    
     const savedData = localStorage.getItem(userKey);
+    console.log('Saved data exists:', !!savedData);
     
     if (savedData) {
       try {
         const userData = JSON.parse(savedData);
+        console.log('Loaded todos count:', userData.todos?.length || 0);
+        console.log('Loaded todos:', userData.todos);
+        
         setTodos(userData.todos || []);
         setSelectedCategories(userData.selectedCategories || ['arbeit', 'privat', 'finanzen', 'gesundheit']);
         setCustomCategories(userData.customCategories || []);
@@ -1643,6 +1651,7 @@ export default function MindFlowApp() {
         console.error('Error loading user data:', e);
       }
     } else {
+      console.log('No saved data - initializing with onboarding');
       // New user - initialize with onboarding
       setTodos(onboardingTodos);
       setSelectedCategories(['arbeit', 'privat', 'finanzen', 'gesundheit']);
@@ -1662,6 +1671,9 @@ export default function MindFlowApp() {
         customMeetings,
         customActions,
       };
+      console.log('=== Auto-saving user data ===');
+      console.log('User key:', userKey);
+      console.log('Saving todos count:', todos.length);
       localStorage.setItem(userKey, JSON.stringify(userData));
     }
   }, [user, todos, selectedCategories, customCategories, hiddenCategories, customPersons, customMeetings, customActions]);
@@ -2325,35 +2337,52 @@ END:VCALENDAR`;
     // ============ ABSOLUTE PRIORITY: PERSON/MEETING/AKTION HINZUFÜGEN ============
     // These MUST be processed FIRST - no exceptions!
     
-    // Check for PERSON command - "füge Person Mia hinzu", "Person Mia hinzufügen", etc.
-    const hasPersonKeyword = lower.includes('person') || lower.includes('kontakt');
+    // Check for PERSON command - "füge Person Mia hinzu", "füge Mia hinzu bei Personen", etc.
+    const hasPersonKeyword = lower.includes('person');
     console.log('Has person keyword:', hasPersonKeyword);
     
     if (hasPersonKeyword) {
       console.log('>>> Processing PERSON command');
       
-      // Try to extract the person name - it should be the word AFTER "person" or "kontakt"
       const words = lower.split(/\s+/);
       console.log('Words:', words);
       
-      const personIndex = words.findIndex(w => w === 'person' || w === 'kontakt');
-      console.log('Person index:', personIndex);
+      // Find "person" or "personen" in words
+      const personIndex = words.findIndex(w => w === 'person' || w === 'personen' || w === 'kontakt' || w === 'kontakte');
+      console.log('Person keyword index:', personIndex);
       
+      let personName = '';
+      
+      // Strategy 1: Name is AFTER "person" (e.g., "füge Person Mia hinzu")
       if (personIndex !== -1 && personIndex < words.length - 1) {
-        let personName = words[personIndex + 1];
-        console.log('Raw person name:', personName);
-        
-        // Clean up the name - keep only letters
+        const nextWord = words[personIndex + 1];
+        const skipWords = ['hinzu', 'hinzufügen', 'bitte', 'eine', 'einen', 'zur', 'liste', 'erstellen', 'anlegen', 'neue', 'neuen', 'die', 'der', 'das', 'namens', 'mit', 'dem', 'namen', 'an', 'bei'];
+        if (!skipWords.includes(nextWord)) {
+          personName = nextWord;
+          console.log('Strategy 1 - Name after keyword:', personName);
+        }
+      }
+      
+      // Strategy 2: Name is BEFORE "person/personen" (e.g., "füge Mia hinzu bei Personen")
+      if (!personName) {
+        // Look for pattern: "füge X hinzu" where X is the name
+        const fügeIndex = words.findIndex(w => w === 'füge' || w === 'add' || w === 'neue' || w === 'neuen');
+        if (fügeIndex !== -1 && fügeIndex < words.length - 1) {
+          const potentialName = words[fügeIndex + 1];
+          const skipWords = ['hinzu', 'hinzufügen', 'bitte', 'eine', 'einen', 'person', 'personen', 'kontakt', 'meeting', 'meetings', 'termin', 'aktion'];
+          if (!skipWords.includes(potentialName)) {
+            personName = potentialName;
+            console.log('Strategy 2 - Name after füge:', personName);
+          }
+        }
+      }
+      
+      // Clean up the name
+      if (personName) {
         personName = personName.replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
         console.log('Cleaned person name:', personName);
         
-        // Skip if it's a common word
-        const skipWords = ['hinzu', 'hinzufügen', 'bitte', 'eine', 'einen', 'zur', 'liste', 'erstellen', 'anlegen', 'neue', 'neuen', 'die', 'der', 'das', 'namens', 'mit', 'dem', 'namen'];
-        
-        const shouldSkip = skipWords.includes(personName.toLowerCase());
-        console.log('Should skip:', shouldSkip);
-        
-        if (personName && personName.length > 1 && !shouldSkip) {
+        if (personName && personName.length > 1) {
           const capitalizedName = personName.charAt(0).toUpperCase() + personName.slice(1).toLowerCase();
           const allPersonsList = [...defaultPersons, ...customPersons];
           
@@ -2363,6 +2392,7 @@ END:VCALENDAR`;
           if (!allPersonsList.some(p => p.toLowerCase() === personName.toLowerCase())) {
             setCustomPersons(prev => [...prev, capitalizedName]);
             setVoiceFeedback(`✓ @${capitalizedName} zur Personenliste hinzugefügt`);
+            console.log('SUCCESS: Person added:', capitalizedName);
             console.log('SUCCESS: Person added:', capitalizedName);
           } else {
             setVoiceFeedback(`ℹ️ @${capitalizedName} existiert bereits`);
@@ -2374,7 +2404,7 @@ END:VCALENDAR`;
       }
     }
     
-    // Check for MEETING command - "füge Meeting Standup hinzu", etc.
+    // Check for MEETING command - "füge Meeting Standup hinzu", "füge Standup hinzu bei Meetings", etc.
     const hasMeetingKeyword = lower.includes('meeting') || lower.includes('termin');
     console.log('Has meeting keyword:', hasMeetingKeyword);
     
@@ -2382,45 +2412,59 @@ END:VCALENDAR`;
       console.log('>>> Processing MEETING command');
       
       const words = lower.split(/\s+/);
-      const meetingIndex = words.findIndex(w => w === 'meeting' || w === 'termin');
-      console.log('Meeting index:', meetingIndex);
+      const meetingIndex = words.findIndex(w => w === 'meeting' || w === 'meetings' || w === 'termin' || w === 'termine');
+      console.log('Meeting keyword index:', meetingIndex);
       
+      let meetingWords: string[] = [];
+      const stopWords = ['hinzu', 'hinzufügen', 'bitte', 'erstellen', 'anlegen', 'bei', 'an', 'zu'];
+      const skipWords = ['ein', 'eine', 'einen', 'neues', 'neuen', 'zur', 'liste', 'meeting', 'meetings', 'termin', 'termine'];
+      
+      // Strategy 1: Name is AFTER "meeting" (e.g., "füge Meeting Standup hinzu")
       if (meetingIndex !== -1 && meetingIndex < words.length - 1) {
-        // Get all words after "meeting" until we hit a stop word
-        const stopWords = ['hinzu', 'hinzufügen', 'bitte', 'erstellen', 'anlegen'];
-        let meetingWords: string[] = [];
-        
         for (let i = meetingIndex + 1; i < words.length; i++) {
           const word = words[i].replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
           if (stopWords.includes(word.toLowerCase()) || !word) break;
-          if (!['ein', 'eine', 'einen', 'neues', 'neuen', 'zur', 'liste'].includes(word.toLowerCase())) {
+          if (!skipWords.includes(word.toLowerCase())) {
             meetingWords.push(word);
           }
         }
-        
-        console.log('Meeting words:', meetingWords);
-        
-        if (meetingWords.length > 0) {
-          const meetingName = meetingWords.join(' ');
-          const capitalizedName = meetingWords.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-          const allMeetingsList = [...defaultMeetings, ...customMeetings];
-          
-          console.log('Adding meeting:', capitalizedName);
-          
-          if (!allMeetingsList.some(m => m.toLowerCase() === meetingName.toLowerCase())) {
-            setCustomMeetings(prev => [...prev, capitalizedName]);
-            setVoiceFeedback(`✓ #${capitalizedName} zur Meetingliste hinzugefügt`);
-            console.log('SUCCESS: Meeting added:', capitalizedName);
-          } else {
-            setVoiceFeedback(`ℹ️ #${capitalizedName} existiert bereits`);
+        console.log('Strategy 1 - Words after meeting:', meetingWords);
+      }
+      
+      // Strategy 2: Name is BEFORE "meeting/meetings" (e.g., "füge Standup hinzu bei Meetings")
+      if (meetingWords.length === 0) {
+        const fügeIndex = words.findIndex(w => w === 'füge' || w === 'add' || w === 'neues' || w === 'neuen');
+        if (fügeIndex !== -1) {
+          for (let i = fügeIndex + 1; i < words.length; i++) {
+            const word = words[i].replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
+            if (stopWords.includes(word.toLowerCase()) || skipWords.includes(word.toLowerCase()) || !word) break;
+            meetingWords.push(word);
           }
-          setTimeout(() => setShowVoiceModal(false), 2000);
-          return; // STOP HERE
+          console.log('Strategy 2 - Words after füge:', meetingWords);
         }
+      }
+      
+      if (meetingWords.length > 0) {
+        const meetingName = meetingWords.join(' ');
+        const capitalizedName = meetingWords.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        const allMeetingsList = [...defaultMeetings, ...customMeetings];
+        
+        console.log('Adding meeting:', capitalizedName);
+        
+        if (!allMeetingsList.some(m => m.toLowerCase() === meetingName.toLowerCase())) {
+          setCustomMeetings(prev => [...prev, capitalizedName]);
+          setVoiceFeedback(`✓ #${capitalizedName} zur Meetingliste hinzugefügt`);
+          console.log('SUCCESS: Meeting added:', capitalizedName);
+        } else {
+          setVoiceFeedback(`ℹ️ #${capitalizedName} existiert bereits`);
+        }
+        setTimeout(() => setShowVoiceModal(false), 2000);
+        return; // STOP HERE
       }
     }
     
     // Check for AKTION command - "füge Aktion Review hinzu", etc.
+    // Check for AKTION command - "füge Aktion Review hinzu", "füge Review hinzu bei Aktionen", etc.
     const hasAktionKeyword = lower.includes('aktion');
     console.log('Has aktion keyword:', hasAktionKeyword);
     
@@ -2428,30 +2472,46 @@ END:VCALENDAR`;
       console.log('>>> Processing AKTION command');
       
       const words = lower.split(/\s+/);
-      const actionIndex = words.findIndex(w => w === 'aktion');
-      console.log('Action index:', actionIndex);
+      const actionIndex = words.findIndex(w => w === 'aktion' || w === 'aktionen');
+      console.log('Action keyword index:', actionIndex);
       
+      let actionName = '';
+      const skipWords = ['hinzu', 'hinzufügen', 'bitte', 'eine', 'einen', 'zur', 'liste', 'erstellen', 'anlegen', 'neue', 'neuen', 'bei', 'an', 'zu', 'aktion', 'aktionen'];
+      
+      // Strategy 1: Name is AFTER "aktion" (e.g., "füge Aktion Review hinzu")
       if (actionIndex !== -1 && actionIndex < words.length - 1) {
-        let actionName = words[actionIndex + 1];
-        actionName = actionName.replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
-        console.log('Action name:', actionName);
-        
-        const skipWords = ['hinzu', 'hinzufügen', 'bitte', 'eine', 'einen', 'zur', 'liste', 'erstellen', 'anlegen', 'neue', 'neuen'];
-        
-        if (actionName && actionName.length > 1 && !skipWords.includes(actionName.toLowerCase())) {
-          const capitalizedName = actionName.charAt(0).toUpperCase() + actionName.slice(1).toLowerCase();
-          const allActionsList = [...defaultActions, ...customActions];
-          
-          if (!allActionsList.some(a => a.toLowerCase() === actionName.toLowerCase())) {
-            setCustomActions(prev => [...prev, capitalizedName]);
-            setVoiceFeedback(`✓ "${capitalizedName}" zur Aktionsliste hinzugefügt`);
-            console.log('SUCCESS: Action added:', capitalizedName);
-          } else {
-            setVoiceFeedback(`ℹ️ "${capitalizedName}" existiert bereits`);
-          }
-          setTimeout(() => setShowVoiceModal(false), 2000);
-          return; // STOP HERE
+        const nextWord = words[actionIndex + 1].replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
+        if (nextWord && !skipWords.includes(nextWord.toLowerCase())) {
+          actionName = nextWord;
+          console.log('Strategy 1 - Name after aktion:', actionName);
         }
+      }
+      
+      // Strategy 2: Name is BEFORE "aktion/aktionen" (e.g., "füge Review hinzu bei Aktionen")
+      if (!actionName) {
+        const fügeIndex = words.findIndex(w => w === 'füge' || w === 'add' || w === 'neue' || w === 'neuen');
+        if (fügeIndex !== -1 && fügeIndex < words.length - 1) {
+          const potentialName = words[fügeIndex + 1].replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
+          if (potentialName && !skipWords.includes(potentialName.toLowerCase())) {
+            actionName = potentialName;
+            console.log('Strategy 2 - Name after füge:', actionName);
+          }
+        }
+      }
+      
+      if (actionName && actionName.length > 1) {
+        const capitalizedName = actionName.charAt(0).toUpperCase() + actionName.slice(1).toLowerCase();
+        const allActionsList = [...defaultActions, ...customActions];
+        
+        if (!allActionsList.some(a => a.toLowerCase() === actionName.toLowerCase())) {
+          setCustomActions(prev => [...prev, capitalizedName]);
+          setVoiceFeedback(`✓ "${capitalizedName}" zur Aktionsliste hinzugefügt`);
+          console.log('SUCCESS: Action added:', capitalizedName);
+        } else {
+          setVoiceFeedback(`ℹ️ "${capitalizedName}" existiert bereits`);
+        }
+        setTimeout(() => setShowVoiceModal(false), 2000);
+        return; // STOP HERE
       }
     }
     
