@@ -2106,11 +2106,29 @@ END:VCALENDAR`;
       /priorität\s*(kritisch|hoch|mittel|niedrig)/i,
       /status\s*(offen|bearbeitung|rückmeldung|erledigt)/i,
       /auf\s*(heute|morgen|diese woche|nächste woche)$/i,
+      // Voice reading commands - should NOT use AI
+      /(lies|lese|vorlesen|sag|nenn|zeig)\s*(mir)?\s*(bitte)?\s*(mal)?\s*(die|alle|meine)?\s*(aufgaben|todos|to-dos|tasks)/i,
+      /(was|welche)\s*(sind|habe ich|gibt es)\s*(für)?\s*(aufgaben|todos)/i,
+      /(aufgaben|todos).*(vorlesen|lesen|ansagen)/i,
+      /(lies|lese|vorlesen).*(heute|hoch|kritisch|priorität|person)/i,
+      // Add person/meeting to list commands
+      /(füge|add|neue)\s*(eine)?\s*(person|kontakt|meeting|termin)/i,
+      /(person|kontakt|meeting|termin)\s+\w+\s*(hinzufügen|erstellen)/i,
     ];
     
     const isSimple = simplePatterns.some(pattern => pattern.test(lower));
     
     return !isSimple && (hasDescription || hasMultipleClauses || isLongText);
+  };
+
+  // Get the currently selected category for new tasks
+  const getCurrentCategory = (): string => {
+    // Always use the first selected category (works with custom categories too)
+    if (selectedCategories.length > 0) {
+      return selectedCategories[0];
+    }
+    // Fallback if nothing selected
+    return 'arbeit';
   };
 
   // Parse complex command with AI (Haiku)
@@ -2135,7 +2153,7 @@ END:VCALENDAR`;
         id: `voice-ai-${Date.now()}`,
         title: data.title,
         description: data.description || undefined,
-        category: data.category || 'arbeit',
+        category: data.category || getCurrentCategory(),
         actionType: data.actionType || 'check',
         priority: data.priority || 3,
         status: 'Offen',
@@ -2167,7 +2185,7 @@ END:VCALENDAR`;
       const newTodo: Todo = {
         id: `voice-${Date.now()}`,
         title: text.substring(0, 60),
-        category: 'arbeit',
+        category: getCurrentCategory(),
         actionType: 'check',
         priority: 3,
         status: 'Offen',
@@ -2208,7 +2226,7 @@ END:VCALENDAR`;
         const newTodo: Todo = {
           id: `voice-${Date.now()}`,
           title: title.charAt(0).toUpperCase() + title.slice(1),
-          category: parseVoiceCategory(lower) || 'arbeit',
+          category: parseVoiceCategory(lower) || getCurrentCategory(),
           actionType: parseActionType(lower),
           priority: parsePriority(lower) || 3,
           status: 'Offen',
@@ -2567,28 +2585,58 @@ END:VCALENDAR`;
     }
     
     // ============ AUFGABEN VORLESEN ============
-    if (lower.match(/(lies|lese|vorlesen|sag|nenn)\s*(mir)?\s*(bitte)?\s*(die|alle)?\s*(aufgaben|todos|to-dos|tasks)/i) ||
-        lower.match(/(was|welche)\s*(sind|habe ich|gibt es)\s*(für)?\s*(aufgaben|todos|to-dos)/i)) {
+    if (lower.match(/(lies|lese|vorlesen|sag|nenn|zeig)\s*(mir)?\s*(bitte)?\s*(mal)?\s*(die|alle|meine)?\s*(aufgaben|todos|to-dos|tasks)/i) ||
+        lower.match(/(was|welche)\s*(sind|habe ich|gibt es)\s*(für)?\s*(aufgaben|todos|to-dos)/i) ||
+        lower.match(/(lies|lese|vorlesen).*?(heute|hoch|kritisch|priorität|person|michael|sarah|lisa|thomas|anna)/i) ||
+        lower.match(/(aufgaben|todos).*(vorlesen|lesen|ansagen)/i)) {
       
       let tasksToRead = todos.filter(t => !t.completed);
       let filterDescription = 'alle offenen Aufgaben';
       
+      // Check for person filter in command
+      const personMatch = lower.match(/(von|für|zu|bei|mit)\s+@?(\w+)/i) || lower.match(/@(\w+)/i);
+      if (personMatch) {
+        const personName = personMatch[2] || personMatch[1];
+        tasksToRead = tasksToRead.filter(t => 
+          t.persons && t.persons.some(p => p.toLowerCase().includes(personName.toLowerCase()))
+        );
+        filterDescription = `Aufgaben für ${personName}`;
+      }
       // Check for priority filter in command
-      if (lower.includes('kritisch')) {
+      else if (lower.includes('kritisch')) {
         tasksToRead = tasksToRead.filter(t => t.priority === 1);
         filterDescription = 'kritische Aufgaben';
-      } else if (lower.includes('hoch') || lower.includes('wichtig') || lower.includes('dringend')) {
+      } else if (lower.includes('hoch') || lower.includes('wichtig') || lower.includes('dringend') || lower.match(/priorität\s*hoch/i)) {
         tasksToRead = tasksToRead.filter(t => t.priority === 2);
         filterDescription = 'Aufgaben mit hoher Priorität';
       } else if (lower.includes('heute')) {
         tasksToRead = tasksToRead.filter(t => t.date === 'Heute');
         filterDescription = 'heutige Aufgaben';
+      } else if (lower.includes('morgen')) {
+        tasksToRead = tasksToRead.filter(t => t.date === 'Morgen');
+        filterDescription = 'morgige Aufgaben';
+      } else if (lower.includes('diese woche') || lower.includes('woche')) {
+        tasksToRead = tasksToRead.filter(t => ['Heute', 'Morgen', 'Diese Woche'].includes(t.date));
+        filterDescription = 'Aufgaben dieser Woche';
       } else if (lower.includes('offen')) {
         tasksToRead = tasksToRead.filter(t => t.status === 'Offen');
         filterDescription = 'offene Aufgaben';
       } else if (lower.includes('rückmeldung') || lower.includes('wartend')) {
         tasksToRead = tasksToRead.filter(t => t.status === 'Auf Rückmeldung');
         filterDescription = 'Aufgaben auf Rückmeldung';
+      } else if (lower.includes('bearbeitung')) {
+        tasksToRead = tasksToRead.filter(t => t.status === 'In Bearbeitung');
+        filterDescription = 'Aufgaben in Bearbeitung';
+      }
+      
+      // Check for meeting filter
+      const meetingMatch = lower.match(/(meeting|termin)\s+#?(\w+)/i) || lower.match(/#(\w+)/i);
+      if (meetingMatch && !personMatch) {
+        const meetingName = meetingMatch[2] || meetingMatch[1];
+        tasksToRead = tasksToRead.filter(t => 
+          t.meetings && t.meetings.some(m => m.toLowerCase().includes(meetingName.toLowerCase()))
+        );
+        filterDescription = `Aufgaben für Meeting ${meetingName}`;
       }
       
       if (tasksToRead.length === 0) {
