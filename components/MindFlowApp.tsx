@@ -1438,6 +1438,9 @@ export default function MindFlowApp() {
   const [isScrolled, setIsScrolled] = useState<boolean>(false);
   const [customCategories, setCustomCategories] = useState<Category[]>([]);
   const [hiddenCategories, setHiddenCategories] = useState<string[]>([]); // Track deleted default categories
+  const [hiddenPersons, setHiddenPersons] = useState<string[]>([]); // Track deleted default persons
+  const [hiddenMeetings, setHiddenMeetings] = useState<string[]>([]); // Track deleted default meetings
+  const [hiddenActions, setHiddenActions] = useState<string[]>([]); // Track deleted default actions
   const [addingCategory, setAddingCategory] = useState<boolean>(false);
   const [newCategoryName, setNewCategoryName] = useState<string>('');
   const [newCategoryColor, setNewCategoryColor] = useState<string>(colors.mint);
@@ -1491,10 +1494,10 @@ export default function MindFlowApp() {
   const defaultPersons: string[] = ['Sarah', 'Michael', 'Lisa', 'Thomas', 'Anna'];
   const defaultMeetings: string[] = ['Daily Standup', 'Team Weekly', 'Projekt App', 'Quartalsreview'];
 
-  // Combined items (default + custom)
-  const allActions = [...defaultActions, ...customActions];
-  const allPersons = [...defaultPersons, ...customPersons];
-  const allMeetings = [...defaultMeetings, ...customMeetings];
+  // Combined items (default filtered by hidden + custom)
+  const allActions = [...defaultActions.filter(a => !hiddenActions.includes(a)), ...customActions];
+  const allPersons = [...defaultPersons.filter(p => !hiddenPersons.includes(p)), ...customPersons];
+  const allMeetings = [...defaultMeetings.filter(m => !hiddenMeetings.includes(m)), ...customMeetings];
 
   // Calculate task counts based on date filter
   const getTaskCountForDateFilter = (filter: string): number => {
@@ -1570,6 +1573,9 @@ export default function MindFlowApp() {
         selectedCategories: ['arbeit', 'privat', 'finanzen', 'gesundheit'],
         customCategories: [],
         hiddenCategories: [],
+        hiddenPersons: [],
+        hiddenMeetings: [],
+        hiddenActions: [],
         customPersons: [],
         customMeetings: [],
         customActions: [],
@@ -1581,6 +1587,9 @@ export default function MindFlowApp() {
       setSelectedCategories(['arbeit', 'privat', 'finanzen', 'gesundheit']);
       setCustomCategories([]);
       setHiddenCategories([]);
+      setHiddenPersons([]);
+      setHiddenMeetings([]);
+      setHiddenActions([]);
       setCustomPersons([]);
       setCustomMeetings([]);
       setCustomActions([]);
@@ -1601,6 +1610,9 @@ export default function MindFlowApp() {
         selectedCategories,
         customCategories,
         hiddenCategories,
+        hiddenPersons,
+        hiddenMeetings,
+        hiddenActions,
         customPersons,
         customMeetings,
         customActions,
@@ -1617,6 +1629,9 @@ export default function MindFlowApp() {
     setSelectedCategories(['arbeit', 'privat', 'finanzen', 'gesundheit']);
     setCustomCategories([]);
     setHiddenCategories([]);
+    setHiddenPersons([]);
+    setHiddenMeetings([]);
+    setHiddenActions([]);
     setCustomPersons([]);
     setCustomMeetings([]);
     setCustomActions([]);
@@ -1644,6 +1659,9 @@ export default function MindFlowApp() {
         setSelectedCategories(userData.selectedCategories || ['arbeit', 'privat', 'finanzen', 'gesundheit']);
         setCustomCategories(userData.customCategories || []);
         setHiddenCategories(userData.hiddenCategories || []);
+        setHiddenPersons(userData.hiddenPersons || []);
+        setHiddenMeetings(userData.hiddenMeetings || []);
+        setHiddenActions(userData.hiddenActions || []);
         setCustomPersons(userData.customPersons || []);
         setCustomMeetings(userData.customMeetings || []);
         setCustomActions(userData.customActions || []);
@@ -1667,6 +1685,9 @@ export default function MindFlowApp() {
         selectedCategories,
         customCategories,
         hiddenCategories,
+        hiddenPersons,
+        hiddenMeetings,
+        hiddenActions,
         customPersons,
         customMeetings,
         customActions,
@@ -1676,7 +1697,7 @@ export default function MindFlowApp() {
       console.log('Saving todos count:', todos.length);
       localStorage.setItem(userKey, JSON.stringify(userData));
     }
-  }, [user, todos, selectedCategories, customCategories, hiddenCategories, customPersons, customMeetings, customActions]);
+  }, [user, todos, selectedCategories, customCategories, hiddenCategories, hiddenPersons, hiddenMeetings, hiddenActions, customPersons, customMeetings, customActions]);
 
   // Reset to home view - all filters cleared, sorted by priority then date
   // Note: Categories (Arbeit, Privat, etc.) are kept as selected
@@ -3621,29 +3642,29 @@ END:VCALENDAR`;
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
               {allActions.map(action => {
                 const isCustom = customActions.includes(action);
+                const isDefault = defaultActions.includes(action);
                 let pressTimer: NodeJS.Timeout | null = null;
+                
+                const handleDelete = () => {
+                  if (confirm(`"${action}" löschen?`)) {
+                    if (isCustom) {
+                      setCustomActions(customActions.filter(a => a !== action));
+                    } else if (isDefault) {
+                      setHiddenActions([...hiddenActions, action]);
+                    }
+                  }
+                };
+                
                 return (
                 <button 
                   key={action} 
                   onMouseDown={() => {
-                    if (isCustom) {
-                      pressTimer = setTimeout(() => {
-                        if (confirm(`"${action}" löschen?`)) {
-                          setCustomActions(customActions.filter(a => a !== action));
-                        }
-                      }, 600);
-                    }
+                    pressTimer = setTimeout(handleDelete, 600);
                   }}
                   onMouseUp={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   onMouseLeave={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   onTouchStart={() => {
-                    if (isCustom) {
-                      pressTimer = setTimeout(() => {
-                        if (confirm(`"${action}" löschen?`)) {
-                          setCustomActions(customActions.filter(a => a !== action));
-                        }
-                      }, 600);
-                    }
+                    pressTimer = setTimeout(handleDelete, 600);
                   }}
                   onTouchEnd={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   style={{
@@ -3653,7 +3674,7 @@ END:VCALENDAR`;
                   fontWeight: '500',
                   background: darkMode ? 'rgba(255, 171, 94, 0.2)' : 'white',
                   color: darkMode ? colors.orange : '#92400e',
-                  border: isCustom ? `1px dashed ${colors.orange}` : 'none',
+                  border: 'none',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -3762,7 +3783,19 @@ END:VCALENDAR`;
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
               {allPersons.map(person => {
                 const isCustom = customPersons.includes(person);
+                const isDefault = defaultPersons.includes(person);
                 let pressTimer: NodeJS.Timeout | null = null;
+                
+                const handleDelete = () => {
+                  if (confirm(`"@${person}" löschen?`)) {
+                    if (isCustom) {
+                      setCustomPersons(customPersons.filter(p => p !== person));
+                    } else if (isDefault) {
+                      setHiddenPersons([...hiddenPersons, person]);
+                    }
+                  }
+                };
+                
                 return (
                 <button 
                   key={person} 
@@ -3771,24 +3804,12 @@ END:VCALENDAR`;
                     setSearchQuery(personFilter === `@${person}` ? '' : `@${person}`);
                   }}
                   onMouseDown={() => {
-                    if (isCustom) {
-                      pressTimer = setTimeout(() => {
-                        if (confirm(`"@${person}" löschen?`)) {
-                          setCustomPersons(customPersons.filter(p => p !== person));
-                        }
-                      }, 600);
-                    }
+                    pressTimer = setTimeout(handleDelete, 600);
                   }}
                   onMouseUp={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   onMouseLeave={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   onTouchStart={() => {
-                    if (isCustom) {
-                      pressTimer = setTimeout(() => {
-                        if (confirm(`"@${person}" löschen?`)) {
-                          setCustomPersons(customPersons.filter(p => p !== person));
-                        }
-                      }, 600);
-                    }
+                    pressTimer = setTimeout(handleDelete, 600);
                   }}
                   onTouchEnd={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   style={{
@@ -3802,7 +3823,7 @@ END:VCALENDAR`;
                     color: personFilter === `@${person}` 
                       ? 'white' 
                       : darkMode ? colors.purple : '#6d28d9',
-                    border: isCustom ? `1px dashed ${colors.purple}` : 'none',
+                    border: 'none',
                     cursor: 'pointer',
                     boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                   }}>
@@ -3905,7 +3926,19 @@ END:VCALENDAR`;
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
               {allMeetings.map(meeting => {
                 const isCustom = customMeetings.includes(meeting);
+                const isDefault = defaultMeetings.includes(meeting);
                 let pressTimer: NodeJS.Timeout | null = null;
+                
+                const handleDelete = () => {
+                  if (confirm(`"#${meeting}" löschen?`)) {
+                    if (isCustom) {
+                      setCustomMeetings(customMeetings.filter(m => m !== meeting));
+                    } else if (isDefault) {
+                      setHiddenMeetings([...hiddenMeetings, meeting]);
+                    }
+                  }
+                };
+                
                 return (
                 <button 
                   key={meeting} 
@@ -3914,24 +3947,12 @@ END:VCALENDAR`;
                     setSearchQuery(meetingFilter === `#${meeting}` ? '' : `#${meeting}`);
                   }}
                   onMouseDown={() => {
-                    if (isCustom) {
-                      pressTimer = setTimeout(() => {
-                        if (confirm(`"#${meeting}" löschen?`)) {
-                          setCustomMeetings(customMeetings.filter(m => m !== meeting));
-                        }
-                      }, 600);
-                    }
+                    pressTimer = setTimeout(handleDelete, 600);
                   }}
                   onMouseUp={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   onMouseLeave={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   onTouchStart={() => {
-                    if (isCustom) {
-                      pressTimer = setTimeout(() => {
-                        if (confirm(`"#${meeting}" löschen?`)) {
-                          setCustomMeetings(customMeetings.filter(m => m !== meeting));
-                        }
-                      }, 600);
-                    }
+                    pressTimer = setTimeout(handleDelete, 600);
                   }}
                   onTouchEnd={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   style={{
@@ -3945,7 +3966,7 @@ END:VCALENDAR`;
                     color: meetingFilter === `#${meeting}` 
                       ? 'white' 
                       : darkMode ? colors.skyBlue : '#1d4ed8',
-                    border: isCustom ? `1px dashed ${colors.skyBlue}` : 'none',
+                    border: 'none',
                     cursor: 'pointer',
                     boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                   }}>
