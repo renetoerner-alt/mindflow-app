@@ -2313,6 +2313,21 @@ END:VCALENDAR`;
     return () => document.removeEventListener('click', handleClickOutside);
   }, [showProfileDropdown]);
 
+  // Close categories panel when clicking outside
+  React.useEffect(() => {
+    const handleClickOutsideCategories = (e: MouseEvent) => {
+      if (showAllCategories) {
+        const target = e.target as HTMLElement;
+        // Check if click is outside the categories area
+        if (!target.closest('[data-categories-panel]')) {
+          setShowAllCategories(false);
+        }
+      }
+    };
+    document.addEventListener('click', handleClickOutsideCategories);
+    return () => document.removeEventListener('click', handleClickOutsideCategories);
+  }, [showAllCategories]);
+
   const allCategories = [...categories.filter(c => !hiddenCategories.includes(c.id)), ...customCategories];
   
   // Check if items are in use by any todo
@@ -2668,13 +2683,18 @@ END:VCALENDAR`;
   const getCurrentCategory = (): string => {
     // Always use the first selected category (works with custom categories too)
     if (selectedCategories.length > 0) {
-      return selectedCategories[0];
+      // Verify the selected category still exists
+      const firstSelected = selectedCategories[0];
+      if (allCategories.some(cat => cat.id === firstSelected)) {
+        return firstSelected;
+      }
     }
-    // Fallback to first available category
+    // Fallback to first available category (never hardcoded!)
     if (allCategories.length > 0) {
       return allCategories[0].id;
     }
-    return 'arbeit';
+    // Last resort - should never happen if categories exist
+    return selectedCategories[0] || 'privat';
   };
 
   // Parse complex command with AI (Haiku)
@@ -2694,11 +2714,9 @@ END:VCALENDAR`;
       
       const data = await response.json();
       
-      // IMPORTANT: Only use AI category if it exists in available categories
-      // Otherwise always use the currently selected category
-      const categoryToUse = (data.category && isValidCategory(data.category)) 
-        ? data.category 
-        : getCurrentCategory();
+      // IMPORTANT: Always use the currently selected category
+      // Ignore the AI's category suggestion - user's selection takes priority
+      const categoryToUse = getCurrentCategory();
       
       // Create todo from AI response
       const newTodo: Todo = {
@@ -3801,7 +3819,7 @@ END:VCALENDAR`;
         )}
 
         {/* Category Pills - Collapsible on scroll */}
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div data-categories-panel style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
           {/* Show only selected categories when scrolled, all when expanded */}
           {(isScrolled && !showAllCategories 
             ? allCategories.filter(c => selectedCategories.includes(c.id))
