@@ -2553,11 +2553,27 @@ END:VCALENDAR`;
     return undefined;
   };
 
+  // Check if a category ID exists in available categories
+  const isValidCategory = (categoryId: string): boolean => {
+    return allCategories.some(cat => cat.id === categoryId);
+  };
+
   const parseVoiceCategory = (text: string): string | undefined => {
     const lower = text.toLowerCase();
-    if (lower.includes('arbeit') || lower.includes('work')) return 'arbeit';
-    if (lower.includes('privat') || lower.includes('personal')) return 'privat';
-    if (lower.includes('finanz') || lower.includes('geld')) return 'finanzen';
+    
+    // First check if any available category name is mentioned
+    for (const cat of allCategories) {
+      if (lower.includes(cat.label.toLowerCase()) || lower.includes(cat.id.toLowerCase())) {
+        return cat.id;
+      }
+    }
+    
+    // Legacy mappings - only return if the category exists
+    if ((lower.includes('arbeit') || lower.includes('work')) && isValidCategory('arbeit')) return 'arbeit';
+    if ((lower.includes('privat') || lower.includes('personal')) && isValidCategory('privat')) return 'privat';
+    if ((lower.includes('finanz') || lower.includes('geld')) && isValidCategory('finanzen')) return 'finanzen';
+    if ((lower.includes('gesundheit') || lower.includes('health')) && isValidCategory('gesundheit')) return 'gesundheit';
+    
     return undefined;
   };
 
@@ -2654,7 +2670,10 @@ END:VCALENDAR`;
     if (selectedCategories.length > 0) {
       return selectedCategories[0];
     }
-    // Fallback if nothing selected
+    // Fallback to first available category
+    if (allCategories.length > 0) {
+      return allCategories[0].id;
+    }
     return 'arbeit';
   };
 
@@ -2675,12 +2694,18 @@ END:VCALENDAR`;
       
       const data = await response.json();
       
+      // IMPORTANT: Only use AI category if it exists in available categories
+      // Otherwise always use the currently selected category
+      const categoryToUse = (data.category && isValidCategory(data.category)) 
+        ? data.category 
+        : getCurrentCategory();
+      
       // Create todo from AI response
       const newTodo: Todo = {
         id: crypto.randomUUID(),
         title: data.title,
         description: data.description || undefined,
-        category: data.category || getCurrentCategory(),
+        category: categoryToUse,
         actionType: data.actionType || 'check',
         priority: data.priority || 3,
         status: 'Offen',
