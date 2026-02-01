@@ -552,52 +552,60 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
 
   return (
     <div style={{ position: 'relative', zIndex: hasOpenDropdown || showDeleteConfirm ? 9999 : 1 }}>
-    {/* Delete Confirmation Dialog */}
+    {/* Delete Confirmation Dialog - Compact & Subtle */}
     {showDeleteConfirm && (
       <div style={{
         position: 'absolute',
-        inset: 0,
-        background: 'rgba(0,0,0,0.8)',
-        borderRadius: '16px',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        background: darkMode ? 'rgba(30, 33, 45, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+        borderRadius: '12px',
         display: 'flex',
-        flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'center',
+        gap: '12px',
         zIndex: 100,
-        padding: '20px',
+        padding: '10px 14px',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+        border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+        backdropFilter: 'blur(10px)',
       }}>
-        <p style={{ color: '#fff', fontSize: '14px', marginBottom: '16px', textAlign: 'center' }}>
-          Aufgabe "{todo.title}" löschen?
-        </p>
-        <div style={{ display: 'flex', gap: '12px' }}>
+        <span style={{ 
+          color: darkMode ? '#fff' : '#1f2937', 
+          fontSize: '13px',
+          whiteSpace: 'nowrap',
+        }}>
+          Löschen?
+        </span>
+        <div style={{ display: 'flex', gap: '8px' }}>
           <button
             onClick={() => setShowDeleteConfirm(false)}
             style={{
-              padding: '8px 20px',
-              borderRadius: '8px',
-              border: '1px solid rgba(255,255,255,0.3)',
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: `1px solid ${darkMode ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'}`,
               background: 'transparent',
-              color: '#fff',
+              color: darkMode ? '#9ca3af' : '#6b7280',
               cursor: 'pointer',
-              fontSize: '14px',
+              fontSize: '12px',
             }}
-          >Abbrechen</button>
+          >Nein</button>
           <button
             onClick={() => {
               if (onDelete) onDelete(todo.id);
               setShowDeleteConfirm(false);
             }}
             style={{
-              padding: '8px 20px',
-              borderRadius: '8px',
+              padding: '6px 12px',
+              borderRadius: '6px',
               border: 'none',
-              background: colors.coral,
-              color: '#fff',
+              background: 'rgba(239, 68, 68, 0.15)',
+              color: '#ef4444',
               cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: '600',
+              fontSize: '12px',
+              fontWeight: '500',
             }}
-          >Löschen</button>
+          >Ja</button>
         </div>
       </div>
     )}
@@ -1503,6 +1511,8 @@ export default function MindFlowApp() {
   const getTaskCountForDateFilter = (filter: string): number => {
     return todos.filter(t => {
       if (t.completed) return false;
+      // Only count tasks in selected categories
+      if (!selectedCategories.includes(t.category)) return false;
       if (filter === 'Alle') return true;
       if (filter === 'Heute') return t.date === 'Heute';
       if (filter === 'Diese Woche') return ['Heute', 'Morgen', 'Diese Woche'].includes(t.date);
@@ -1516,11 +1526,23 @@ export default function MindFlowApp() {
   const getTaskCountForStatusFilter = (filter: string): number => {
     return todos.filter(t => {
       if (t.completed) return false;
+      // Only count tasks in selected categories
+      if (!selectedCategories.includes(t.category)) return false;
       if (filter === 'Alle Status') return true;
       if (filter === 'Rückmeldung') return t.status === 'Auf Rückmeldung';
       if (filter === 'Offen') return t.status === 'Offen';
       if (filter === 'In Bearbeitung') return t.status === 'In Bearbeitung';
       return false;
+    }).length;
+  };
+  
+  // Calculate task counts for priority (filtered by selected categories)
+  const getTaskCountForPriority = (priority: number): number => {
+    return todos.filter(t => {
+      if (t.completed) return false;
+      // Only count tasks in selected categories
+      if (!selectedCategories.includes(t.category)) return false;
+      return t.priority === priority;
     }).length;
   };
 
@@ -1654,6 +1676,9 @@ export default function MindFlowApp() {
         const userData = JSON.parse(savedData);
         console.log('Loaded todos count:', userData.todos?.length || 0);
         console.log('Loaded todos:', userData.todos);
+        console.log('Loaded hiddenPersons:', userData.hiddenPersons);
+        console.log('Loaded hiddenMeetings:', userData.hiddenMeetings);
+        console.log('Loaded hiddenActions:', userData.hiddenActions);
         
         setTodos(userData.todos || []);
         setSelectedCategories(userData.selectedCategories || ['arbeit', 'privat', 'finanzen', 'gesundheit']);
@@ -1695,6 +1720,9 @@ export default function MindFlowApp() {
       console.log('=== Auto-saving user data ===');
       console.log('User key:', userKey);
       console.log('Saving todos count:', todos.length);
+      console.log('Saving hiddenPersons:', hiddenPersons);
+      console.log('Saving hiddenMeetings:', hiddenMeetings);
+      console.log('Saving hiddenActions:', hiddenActions);
       localStorage.setItem(userKey, JSON.stringify(userData));
     }
   }, [user, todos, selectedCategories, customCategories, hiddenCategories, hiddenPersons, hiddenMeetings, hiddenActions, customPersons, customMeetings, customActions]);
@@ -1788,12 +1816,12 @@ export default function MindFlowApp() {
     return filtered;
   };
 
-  // Count unread tasks per priority for stat cards
+  // Count unread tasks per priority for stat cards (filtered by selected categories)
   const unreadCounts = {
-    today: todos.filter(t => t.date === 'Heute' && t.unread).length,
-    critical: todos.filter(t => t.priority === 1 && t.unread).length,
-    high: todos.filter(t => t.priority === 2 && t.unread).length,
-    waiting: todos.filter(t => t.status === 'Auf Rückmeldung' && t.unread).length,
+    today: todos.filter(t => t.date === 'Heute' && t.unread && selectedCategories.includes(t.category)).length,
+    critical: todos.filter(t => t.priority === 1 && t.unread && selectedCategories.includes(t.category)).length,
+    high: todos.filter(t => t.priority === 2 && t.unread && selectedCategories.includes(t.category)).length,
+    waiting: todos.filter(t => t.status === 'Auf Rückmeldung' && t.unread && selectedCategories.includes(t.category)).length,
   };
 
   // Mark task as read when expanded
@@ -1979,6 +2007,23 @@ END:VCALENDAR`;
 
   const allCategories = [...categories.filter(c => !hiddenCategories.includes(c.id)), ...customCategories];
   
+  // Check if items are in use by any todo
+  const isCategoryInUse = (catId: string): number => {
+    return todos.filter(t => t.category === catId).length;
+  };
+  
+  const isPersonInUse = (person: string): number => {
+    return todos.filter(t => t.persons && t.persons.includes(person)).length;
+  };
+  
+  const isMeetingInUse = (meeting: string): number => {
+    return todos.filter(t => t.meetings && t.meetings.includes(meeting)).length;
+  };
+  
+  const isActionInUse = (action: string): number => {
+    return todos.filter(t => t.actionType === action).length;
+  };
+  
   const toggleCategory = (catId: string) => {
     if (selectedCategories.includes(catId)) {
       if (selectedCategories.length > 1) {
@@ -1989,7 +2034,16 @@ END:VCALENDAR`;
     }
   };
 
-  const deleteCategory = (catId: string) => {
+  const deleteCategory = (catId: string, catLabel: string) => {
+    const usageCount = isCategoryInUse(catId);
+    
+    let confirmMessage = `"${catLabel}" löschen?`;
+    if (usageCount > 0) {
+      confirmMessage = `⚠️ "${catLabel}" wird in ${usageCount} Aufgabe${usageCount > 1 ? 'n' : ''} verwendet!\n\nTrotzdem löschen?`;
+    }
+    
+    if (!confirm(confirmMessage)) return;
+    
     // Check if it's a custom category
     if (customCategories.find(c => c.id === catId)) {
       setCustomCategories(customCategories.filter(c => c.id !== catId));
@@ -3363,18 +3417,14 @@ END:VCALENDAR`;
                 onClick={() => toggleCategory(cat.id)}
                 onMouseDown={() => {
                   pressTimer = setTimeout(() => {
-                    if (confirm(`"${cat.label}" löschen?`)) {
-                      deleteCategory(cat.id);
-                    }
+                    deleteCategory(cat.id, cat.label);
                   }, 600);
                 }}
                 onMouseUp={() => clearTimeout(pressTimer)}
                 onMouseLeave={() => clearTimeout(pressTimer)}
                 onTouchStart={() => {
                   pressTimer = setTimeout(() => {
-                    if (confirm(`"${cat.label}" löschen?`)) {
-                      deleteCategory(cat.id);
-                    }
+                    deleteCategory(cat.id, cat.label);
                   }, 600);
                 }}
                 onTouchEnd={() => clearTimeout(pressTimer)}
@@ -3566,7 +3616,7 @@ END:VCALENDAR`;
             }}
           />
           <StatCard 
-            value={todos.filter(t => !t.completed && t.priority === 1).length} 
+            value={getTaskCountForPriority(1)} 
             label="Kritisch" 
             color={colors.coral} 
             darkMode={darkMode} 
@@ -3575,7 +3625,7 @@ END:VCALENDAR`;
             onClick={() => setActiveStatFilter(activeStatFilter === 'critical' ? null : 'critical')}
           />
           <StatCard 
-            value={todos.filter(t => !t.completed && t.priority === 2).length} 
+            value={getTaskCountForPriority(2)} 
             label="Hoch" 
             color={colors.orange} 
             darkMode={darkMode} 
@@ -3646,7 +3696,13 @@ END:VCALENDAR`;
                 let pressTimer: NodeJS.Timeout | null = null;
                 
                 const handleDelete = () => {
-                  if (confirm(`"${action}" löschen?`)) {
+                  const usageCount = isActionInUse(action);
+                  let confirmMessage = `"${action}" löschen?`;
+                  if (usageCount > 0) {
+                    confirmMessage = `⚠️ "${action}" wird in ${usageCount} Aufgabe${usageCount > 1 ? 'n' : ''} verwendet!\n\nTrotzdem löschen?`;
+                  }
+                  
+                  if (confirm(confirmMessage)) {
                     if (isCustom) {
                       setCustomActions(customActions.filter(a => a !== action));
                     } else if (isDefault) {
@@ -3787,7 +3843,13 @@ END:VCALENDAR`;
                 let pressTimer: NodeJS.Timeout | null = null;
                 
                 const handleDelete = () => {
-                  if (confirm(`"@${person}" löschen?`)) {
+                  const usageCount = isPersonInUse(person);
+                  let confirmMessage = `"@${person}" löschen?`;
+                  if (usageCount > 0) {
+                    confirmMessage = `⚠️ "@${person}" wird in ${usageCount} Aufgabe${usageCount > 1 ? 'n' : ''} verwendet!\n\nTrotzdem löschen?`;
+                  }
+                  
+                  if (confirm(confirmMessage)) {
                     if (isCustom) {
                       setCustomPersons(customPersons.filter(p => p !== person));
                     } else if (isDefault) {
@@ -3930,7 +3992,13 @@ END:VCALENDAR`;
                 let pressTimer: NodeJS.Timeout | null = null;
                 
                 const handleDelete = () => {
-                  if (confirm(`"#${meeting}" löschen?`)) {
+                  const usageCount = isMeetingInUse(meeting);
+                  let confirmMessage = `"#${meeting}" löschen?`;
+                  if (usageCount > 0) {
+                    confirmMessage = `⚠️ "#${meeting}" wird in ${usageCount} Aufgabe${usageCount > 1 ? 'n' : ''} verwendet!\n\nTrotzdem löschen?`;
+                  }
+                  
+                  if (confirm(confirmMessage)) {
                     if (isCustom) {
                       setCustomMeetings(customMeetings.filter(m => m !== meeting));
                     } else if (isDefault) {
@@ -4076,7 +4144,7 @@ END:VCALENDAR`;
               onDescriptionChange={handleDescriptionChange}
               onTitleChange={handleTitleChange}
               onDelete={handleDeleteTask}
-              allCategories={[...categories, ...customCategories]}
+              allCategories={allCategories}
             />
           ))}
         </div>
@@ -4116,7 +4184,7 @@ END:VCALENDAR`;
                   onDescriptionChange={handleDescriptionChange}
                   onTitleChange={handleTitleChange}
                   onDelete={handleDeleteTask}
-                  allCategories={[...categories, ...customCategories]}
+                  allCategories={allCategories}
                 />
               ))}
             </div>
@@ -4699,7 +4767,7 @@ END:VCALENDAR`;
             <div style={{ marginBottom: '24px' }}>
               <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Kategorien</h3>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {[...categories, ...customCategories].map(cat => (
+                {allCategories.map(cat => (
                   <button
                     key={cat.id}
                     onClick={() => {
