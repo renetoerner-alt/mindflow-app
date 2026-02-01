@@ -417,9 +417,10 @@ interface TaskCardProps {
   allCategories: Category[];
   onDescriptionChange?: (todoId: string, description: string) => void;
   onTitleChange?: (todoId: string, title: string) => void;
+  onDelete?: (todoId: string) => void;
 }
 
-const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleExpand, onCalendarClick, onStatusChange, onPriorityChange, onActionTypeChange, onDateChange, onToggleComplete, onCategoryChange, allCategories, onDescriptionChange = () => {}, onTitleChange = () => {} }) => {
+const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleExpand, onCalendarClick, onStatusChange, onPriorityChange, onActionTypeChange, onDateChange, onToggleComplete, onCategoryChange, allCategories, onDescriptionChange = () => {}, onTitleChange = () => {}, onDelete }) => {
   const priority = priorities.find(p => p.level === todo.priority);
   const category = categories.find(c => c.id === todo.category);
   const actionIcons: Record<string, React.ReactNode> = { email: Icons.email, chat: Icons.chat, check: Icons.check, call: Icons.email, document: Icons.email, research: Icons.search };
@@ -436,10 +437,22 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
   const [editedDescription, setEditedDescription] = useState(todo.description || '');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState(todo.title || '');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
   // Long press handlers
   let categoryPressTimer: NodeJS.Timeout | null = null;
   let actionPressTimer: NodeJS.Timeout | null = null;
+  let cardPressTimer: NodeJS.Timeout | null = null;
+
+  const handleCardMouseDown = () => {
+    cardPressTimer = setTimeout(() => {
+      setShowDeleteConfirm(true);
+    }, 600);
+  };
+
+  const handleCardMouseUp = () => {
+    if (cardPressTimer) clearTimeout(cardPressTimer);
+  };
 
   const handleCategoryMouseDown = () => {
     categoryPressTimer = setTimeout(() => {
@@ -538,9 +551,65 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
   const hasOpenDropdown = showCategoryDropdown || showActionTypeDropdown || showStatusDropdown || showPriorityDropdown || showActionDropdown || showDateDropdown;
 
   return (
-    <div style={{ position: 'relative', zIndex: hasOpenDropdown ? 9999 : 1 }}>
+    <div style={{ position: 'relative', zIndex: hasOpenDropdown || showDeleteConfirm ? 9999 : 1 }}>
+    {/* Delete Confirmation Dialog */}
+    {showDeleteConfirm && (
+      <div style={{
+        position: 'absolute',
+        inset: 0,
+        background: 'rgba(0,0,0,0.8)',
+        borderRadius: '16px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 100,
+        padding: '20px',
+      }}>
+        <p style={{ color: '#fff', fontSize: '14px', marginBottom: '16px', textAlign: 'center' }}>
+          Aufgabe "{todo.title}" löschen?
+        </p>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button
+            onClick={() => setShowDeleteConfirm(false)}
+            style={{
+              padding: '8px 20px',
+              borderRadius: '8px',
+              border: '1px solid rgba(255,255,255,0.3)',
+              background: 'transparent',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: '14px',
+            }}
+          >Abbrechen</button>
+          <button
+            onClick={() => {
+              if (onDelete) onDelete(todo.id);
+              setShowDeleteConfirm(false);
+            }}
+            style={{
+              padding: '8px 20px',
+              borderRadius: '8px',
+              border: 'none',
+              background: colors.coral,
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: '600',
+            }}
+          >Löschen</button>
+        </div>
+      </div>
+    )}
     <GlassCard color={priority.color} darkMode={darkMode}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+      <div 
+        style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}
+        onMouseDown={handleCardMouseDown}
+        onMouseUp={handleCardMouseUp}
+        onMouseLeave={handleCardMouseUp}
+        onTouchStart={handleCardMouseDown}
+        onTouchEnd={handleCardMouseUp}
+      >
         {/* Checkbox */}
         <button 
           onClick={() => onToggleComplete(todo.id)}
@@ -1365,7 +1434,7 @@ export default function MindFlowApp() {
   const [activeTab, setActiveTab] = useState<string>('tasks');
   const [showAllCategories, setShowAllCategories] = useState<boolean>(false);
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(['arbeit']);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(['arbeit', 'privat', 'finanzen', 'gesundheit']);
   const [isScrolled, setIsScrolled] = useState<boolean>(false);
   const [customCategories, setCustomCategories] = useState<Category[]>([]);
   const [addingCategory, setAddingCategory] = useState<boolean>(false);
@@ -1381,6 +1450,16 @@ export default function MindFlowApp() {
   const [activeStatFilter, setActiveStatFilter] = useState<string | null>(null);
   const [showSearch, setShowSearch] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  
+  // User/Auth States
+  const [user, setUser] = useState<{ email: string } | null>(null);
+  const [showProfileDropdown, setShowProfileDropdown] = useState<boolean>(false);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authEmail, setAuthEmail] = useState<string>('');
+  const [authPassword, setAuthPassword] = useState<string>('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(false);
   
   // Voice Control States
   const [isListening, setIsListening] = useState<boolean>(false);
@@ -1441,6 +1520,68 @@ export default function MindFlowApp() {
     }).length;
   };
 
+  // Auth handlers
+  const handleLogin = async () => {
+    if (!authEmail || !authPassword) {
+      setAuthError('Bitte E-Mail und Passwort eingeben');
+      return;
+    }
+    setAuthLoading(true);
+    setAuthError(null);
+    
+    // Simulate login - in production this would call Supabase
+    setTimeout(() => {
+      // For demo: accept any email/password
+      setUser({ email: authEmail });
+      setShowAuthModal(false);
+      setAuthEmail('');
+      setAuthPassword('');
+      setAuthLoading(false);
+    }, 1000);
+  };
+
+  const handleRegister = async () => {
+    if (!authEmail || !authPassword) {
+      setAuthError('Bitte E-Mail und Passwort eingeben');
+      return;
+    }
+    if (authPassword.length < 6) {
+      setAuthError('Passwort muss mindestens 6 Zeichen haben');
+      return;
+    }
+    setAuthLoading(true);
+    setAuthError(null);
+    
+    // Simulate registration - in production this would call Supabase
+    setTimeout(() => {
+      setUser({ email: authEmail });
+      setShowAuthModal(false);
+      setAuthEmail('');
+      setAuthPassword('');
+      setAuthLoading(false);
+    }, 1000);
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    setShowProfileDropdown(false);
+  };
+
+  // Reset to home view - all filters cleared, sorted by priority then date
+  // Note: Categories (Arbeit, Privat, etc.) are kept as selected
+  const resetToHome = () => {
+    setActiveStatFilter(null);
+    // Keep selectedCategories as they are - don't reset
+    setPersonFilter(null);
+    setMeetingFilter(null);
+    setSearchQuery('');
+    setShowSearch(false);
+    setExpandedFilter(null);
+    setActiveTab('tasks');
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // Filter tasks based on active stat filter and search
   const getFilteredTasks = (): Todo[] => {
     let filtered = todos.filter(t => !t.completed);
@@ -1456,8 +1597,8 @@ export default function MindFlowApp() {
       );
     }
     
-    // Apply category filter
-    if (selectedCategories.length > 0) {
+    // Apply category filter (only if not all categories)
+    if (selectedCategories.length > 0 && selectedCategories.length < 4) {
       filtered = filtered.filter(t => selectedCategories.includes(t.category.toLowerCase()));
     }
     
@@ -1475,25 +1616,9 @@ export default function MindFlowApp() {
       );
     }
     
-    // Apply date filter based on selectedDateFilter
-    if (selectedDateFilter && selectedDateFilter !== 'Alle') {
-      if (selectedDateFilter === 'Heute') {
-        filtered = filtered.filter(t => t.date === 'Heute');
-      } else if (selectedDateFilter === 'Diese Woche') {
-        filtered = filtered.filter(t => ['Heute', 'Morgen', 'Diese Woche'].includes(t.date));
-      } else if (selectedDateFilter === 'Nächste Woche') {
-        filtered = filtered.filter(t => t.date === 'Nächste Woche');
-      } else if (selectedDateFilter === 'Diesen Monat') {
-        filtered = filtered.filter(t => ['Heute', 'Morgen', 'Diese Woche', 'Nächste Woche', 'Diesen Monat'].includes(t.date));
-      }
-    }
-    
-    // Apply stat filter (from stat cards)
-    if (activeStatFilter === 'date') {
-      if (selectedDateFilter === 'Heute') filtered = filtered.filter(t => t.date === 'Heute');
-      else if (selectedDateFilter === 'Diese Woche') filtered = filtered.filter(t => ['Heute', 'Morgen', 'Diese Woche'].includes(t.date));
-      else if (selectedDateFilter === 'Nächste Woche') filtered = filtered.filter(t => t.date === 'Nächste Woche');
-      else if (selectedDateFilter === 'Diesen Monat') filtered = filtered.filter(t => ['Heute', 'Morgen', 'Diese Woche', 'Nächste Woche', 'Diesen Monat'].includes(t.date));
+    // Apply stat filter ONLY when a stat card is clicked
+    if (activeStatFilter === 'today') {
+      filtered = filtered.filter(t => t.date === 'Heute');
     } else if (activeStatFilter === 'critical') {
       filtered = filtered.filter(t => t.priority === 1);
     } else if (activeStatFilter === 'high') {
@@ -1507,6 +1632,26 @@ export default function MindFlowApp() {
       const prioLevel = parseInt(activeStatFilter.replace('prio-', ''));
       filtered = filtered.filter(t => t.priority === prioLevel);
     }
+    
+    // Sort by priority (1 = highest priority first), then by date within same priority
+    const dateOrder: Record<string, number> = {
+      'Heute': 1,
+      'Morgen': 2,
+      'Diese Woche': 3,
+      'Nächste Woche': 4,
+      'Diesen Monat': 5,
+    };
+    
+    filtered.sort((a, b) => {
+      // First sort by priority
+      if (a.priority !== b.priority) {
+        return a.priority - b.priority;
+      }
+      // Then sort by date within same priority (Heute first)
+      const dateA = dateOrder[a.date] || 99;
+      const dateB = dateOrder[b.date] || 99;
+      return dateA - dateB;
+    });
     
     return filtered;
   };
@@ -1665,6 +1810,11 @@ END:VCALENDAR`;
     setTodos(todos.map(t => t.id === todoId ? { ...t, title: newTitle } : t));
   };
 
+  // Handle delete task
+  const handleDeleteTask = (todoId: string) => {
+    setTodos(todos.filter(t => t.id !== todoId));
+  };
+
   // Scroll detection
   React.useEffect(() => {
     const handleScroll = () => {
@@ -1672,10 +1822,28 @@ END:VCALENDAR`;
       if (window.scrollY > 100 && showAllCategories) {
         setShowAllCategories(false);
       }
+      // Close profile dropdown on scroll
+      if (showProfileDropdown) {
+        setShowProfileDropdown(false);
+      }
     };
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [showAllCategories]);
+  }, [showAllCategories, showProfileDropdown]);
+
+  // Close profile dropdown when clicking outside
+  React.useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (showProfileDropdown) {
+        const target = e.target as HTMLElement;
+        if (!target.closest('[data-profile-dropdown]')) {
+          setShowProfileDropdown(false);
+        }
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [showProfileDropdown]);
 
   const allCategories = [...categories, ...customCategories];
   
@@ -1722,6 +1890,7 @@ END:VCALENDAR`;
   
   // Speech Recognition Reference
   const recognitionRef = React.useRef<any>(null);
+  const transcriptRef = React.useRef<string>('');
   
   // Initialize Speech Recognition
   useEffect(() => {
@@ -1730,7 +1899,7 @@ END:VCALENDAR`;
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
       recognition.lang = 'de-DE';
-      recognition.continuous = false;
+      recognition.continuous = true;  // Keep listening
       recognition.interimResults = true;
       recognition.maxAlternatives = 1;
       
@@ -1738,20 +1907,43 @@ END:VCALENDAR`;
         setIsListening(true);
         setVoiceError(null);
         setVoiceFeedback(null);
+        transcriptRef.current = '';
+      };
+      
+      // Silence timeout - stop after 4 seconds of no speech
+      let silenceTimer: NodeJS.Timeout | null = null;
+      const SILENCE_TIMEOUT = 4000; // 4 seconds
+      
+      const resetSilenceTimer = () => {
+        if (silenceTimer) clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => {
+          if (recognitionRef.current) {
+            recognitionRef.current.stop();
+          }
+        }, SILENCE_TIMEOUT);
       };
       
       recognition.onend = () => {
+        if (silenceTimer) clearTimeout(silenceTimer);
         setIsListening(false);
+        // Process the accumulated transcript when recognition ends
+        const finalText = transcriptRef.current.trim();
+        if (finalText) {
+          handleVoiceCommand(finalText);
+        }
       };
       
       recognition.onresult = (event: any) => {
         let finalTranscript = '';
         let interimTranscript = '';
         
-        for (let i = event.resultIndex; i < event.results.length; i++) {
+        // Reset silence timer on any speech
+        resetSilenceTimer();
+        
+        for (let i = 0; i < event.results.length; i++) {
           const result = event.results[i];
           if (result.isFinal) {
-            finalTranscript += result[0].transcript;
+            finalTranscript += result[0].transcript + ' ';
           } else {
             interimTranscript += result[0].transcript;
           }
@@ -1759,13 +1951,15 @@ END:VCALENDAR`;
         
         setVoiceInterim(interimTranscript);
         
-        if (finalTranscript) {
-          setVoiceTranscript(finalTranscript);
-          handleVoiceCommand(finalTranscript);
+        // Store complete transcript
+        if (finalTranscript.trim()) {
+          transcriptRef.current = finalTranscript.trim();
+          setVoiceTranscript(finalTranscript.trim());
         }
       };
       
       recognition.onerror = (event: any) => {
+        if (silenceTimer) clearTimeout(silenceTimer);
         setIsListening(false);
         let errorMsg = 'Spracherkennung fehlgeschlagen';
         
@@ -2272,6 +2466,165 @@ END:VCALENDAR`;
       return;
     }
     
+    // ============ PERSON ZUR LISTE HINZUFÜGEN ============
+    if (lower.match(/(füge|add|neue)\s*(eine)?\s*(person|kontakt)\s*(hinzu)?\s*@?(\w+)/i) ||
+        lower.match(/@(\w+)\s*(hinzufügen|zur liste|als person)/i) ||
+        lower.match(/(neue person|neuer kontakt)\s*@?(\w+)/i) ||
+        lower.match(/(person|kontakt)\s+(\w+)\s*(hinzufügen|zur liste|erstellen)/i)) {
+      // Extract person name - try multiple patterns
+      let personName = '';
+      
+      // Pattern: "@Name"
+      const pattern1 = lower.match(/@(\w+)/i);
+      // Pattern: "füge person XYZ hinzu" or "neue person XYZ"
+      const pattern2 = lower.match(/(person|kontakt)\s+@?(\w+?)(\s+hinzu|\s+zur liste|\s+erstellen|$)/i);
+      
+      if (pattern1) {
+        personName = pattern1[1].trim();
+      } else if (pattern2) {
+        personName = pattern2[2].trim();
+      }
+      
+      // Remove trailing words like "hinzu", "bitte" etc.
+      personName = personName.replace(/\s*(hinzu|bitte|zur|liste|erstellen)$/i, '').trim();
+      
+      if (personName && personName.length > 1) {
+        const capitalizedName = personName.charAt(0).toUpperCase() + personName.slice(1);
+        
+        // Check if already exists
+        const allPersons = [...defaultPersons, ...customPersons];
+        if (!allPersons.some(p => p.toLowerCase() === personName.toLowerCase())) {
+          setCustomPersons(prev => [...prev, capitalizedName]);
+          setVoiceFeedback(`✓ @${capitalizedName} zur Personenliste hinzugefügt`);
+        } else {
+          setVoiceFeedback(`ℹ️ @${capitalizedName} existiert bereits`);
+        }
+      }
+      
+      setTimeout(() => setShowVoiceModal(false), 2000);
+      return;
+    }
+    
+    // ============ MEETING ZUR LISTE HINZUFÜGEN ============
+    if (lower.match(/(füge|add|neues)\s*(ein)?\s*(meeting|termin)\s*(hinzu)?\s*#?([\w\s]+)/i) ||
+        lower.match(/#([\w\s]+)\s*(hinzufügen|zur liste|als meeting)/i) ||
+        lower.match(/(neues meeting|neuer termin)\s*#?([\w\s]+)/i) ||
+        lower.match(/(meeting|termin)\s+([\w\s]+)\s*(hinzufügen|zur liste|erstellen)/i)) {
+      // Extract meeting name - try multiple patterns
+      let meetingName = '';
+      
+      // Pattern: "füge meeting XYZ hinzu" or "neues meeting XYZ"
+      const pattern1 = lower.match(/(meeting|termin)\s+#?([\w\s]+?)(\s+hinzu|\s+zur liste|\s+erstellen|$)/i);
+      // Pattern: "#MeetingName"
+      const pattern2 = lower.match(/#([\w\s]+)/i);
+      
+      if (pattern1) {
+        meetingName = pattern1[2].trim();
+      } else if (pattern2) {
+        meetingName = pattern2[1].trim();
+      }
+      
+      // Remove trailing words like "hinzu", "bitte" etc.
+      meetingName = meetingName.replace(/\s*(hinzu|bitte|zur|liste|erstellen)$/i, '').trim();
+      
+      if (meetingName && meetingName.length > 1) {
+        const capitalizedName = meetingName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        
+        // Check if already exists
+        const allMeetings = [...defaultMeetings, ...customMeetings];
+        if (!allMeetings.some(m => m.toLowerCase() === meetingName.toLowerCase())) {
+          setCustomMeetings(prev => [...prev, capitalizedName]);
+          setVoiceFeedback(`✓ #${capitalizedName} zur Meetingliste hinzugefügt`);
+        } else {
+          setVoiceFeedback(`ℹ️ #${capitalizedName} existiert bereits`);
+        }
+      }
+      
+      setTimeout(() => setShowVoiceModal(false), 2000);
+      return;
+    }
+    
+    // ============ AKTION ZUR LISTE HINZUFÜGEN ============
+    if (lower.match(/(füge|add|neue)\s*(eine)?\s*(aktion)?\s*(hinzu)?\s*(\w+)/i) && 
+        lower.includes('aktion')) {
+      const actionMatch = lower.match(/aktion\s*(hinzu)?\s*(\w+)/i) || lower.match(/(\w+)\s*als aktion/i);
+      if (actionMatch) {
+        const actionName = actionMatch[2] || actionMatch[1];
+        const capitalizedName = actionName.charAt(0).toUpperCase() + actionName.slice(1);
+        
+        // Check if already exists
+        const allActions = [...defaultActions, ...customActions];
+        if (!allActions.some(a => a.toLowerCase() === actionName.toLowerCase())) {
+          setCustomActions(prev => [...prev, capitalizedName]);
+          setVoiceFeedback(`✓ "${capitalizedName}" zur Aktionsliste hinzugefügt`);
+        } else {
+          setVoiceFeedback(`ℹ️ "${capitalizedName}" existiert bereits`);
+        }
+      }
+      
+      setTimeout(() => setShowVoiceModal(false), 2000);
+      return;
+    }
+    
+    // ============ AUFGABEN VORLESEN ============
+    if (lower.match(/(lies|lese|vorlesen|sag|nenn)\s*(mir)?\s*(bitte)?\s*(die|alle)?\s*(aufgaben|todos|to-dos|tasks)/i) ||
+        lower.match(/(was|welche)\s*(sind|habe ich|gibt es)\s*(für)?\s*(aufgaben|todos|to-dos)/i)) {
+      
+      let tasksToRead = todos.filter(t => !t.completed);
+      let filterDescription = 'alle offenen Aufgaben';
+      
+      // Check for priority filter in command
+      if (lower.includes('kritisch')) {
+        tasksToRead = tasksToRead.filter(t => t.priority === 1);
+        filterDescription = 'kritische Aufgaben';
+      } else if (lower.includes('hoch') || lower.includes('wichtig') || lower.includes('dringend')) {
+        tasksToRead = tasksToRead.filter(t => t.priority === 2);
+        filterDescription = 'Aufgaben mit hoher Priorität';
+      } else if (lower.includes('heute')) {
+        tasksToRead = tasksToRead.filter(t => t.date === 'Heute');
+        filterDescription = 'heutige Aufgaben';
+      } else if (lower.includes('offen')) {
+        tasksToRead = tasksToRead.filter(t => t.status === 'Offen');
+        filterDescription = 'offene Aufgaben';
+      } else if (lower.includes('rückmeldung') || lower.includes('wartend')) {
+        tasksToRead = tasksToRead.filter(t => t.status === 'Auf Rückmeldung');
+        filterDescription = 'Aufgaben auf Rückmeldung';
+      }
+      
+      if (tasksToRead.length === 0) {
+        setVoiceFeedback(`ℹ️ Keine ${filterDescription} vorhanden`);
+        const utterance = new SpeechSynthesisUtterance(`Du hast keine ${filterDescription}.`);
+        utterance.lang = 'de-DE';
+        window.speechSynthesis.speak(utterance);
+      } else {
+        // Sort by priority
+        tasksToRead.sort((a, b) => a.priority - b.priority);
+        
+        // Build speech text
+        const count = tasksToRead.length;
+        let speechText = `Du hast ${count} ${filterDescription}: `;
+        speechText += tasksToRead.slice(0, 5).map((t, i) => `${i + 1}. ${t.title}`).join('. ');
+        if (count > 5) {
+          speechText += `. Und ${count - 5} weitere.`;
+        }
+        
+        setVoiceFeedback(`🔊 Lese ${count} ${filterDescription} vor...`);
+        
+        const utterance = new SpeechSynthesisUtterance(speechText);
+        utterance.lang = 'de-DE';
+        utterance.rate = 0.9;
+        utterance.onend = () => {
+          setVoiceFeedback(`✓ ${count} ${filterDescription} vorgelesen`);
+          setTimeout(() => setShowVoiceModal(false), 1500);
+        };
+        window.speechSynthesis.speak(utterance);
+        return;
+      }
+      
+      setTimeout(() => setShowVoiceModal(false), 2000);
+      return;
+    }
+    
     // ============ FALLBACK: Use AI for anything else ============
     if (lower.length > 5) {
       await parseWithAI(text);
@@ -2475,33 +2828,29 @@ END:VCALENDAR`;
                 return 'Gute Nacht!';
               })()}
             </p>
-            <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: theme.text, margin: '4px 0 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              MindFlow
-              <svg width="24" height="24" viewBox="0 0 48 48" fill="none" style={{ marginTop: '-2px' }}>
-                <path d="M24 6L24 6C24 6 36 18 36 28C36 34.627 30.627 40 24 40C17.373 40 12 34.627 12 28C12 18 24 6 24 6Z" stroke={colors.mint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M20 28C20 30.209 21.791 32 24 32" stroke={colors.mint} strokeWidth="2" strokeLinecap="round"/>
-              </svg>
-            </h1>
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
             <button 
-              onClick={() => setDarkMode(!darkMode)}
-              style={{
-                width: '48px',
-                height: '48px',
-                borderRadius: '16px',
-                border: `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)'}`,
-                background: darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255,255,255,0.5)',
-                backdropFilter: 'blur(24px)',
+              onClick={resetToHome}
+              style={{ 
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                color: darkMode ? '#facc15' : theme.textMuted,
+                gap: '8px',
               }}
             >
-              {darkMode ? Icons.moon : Icons.sun}
+              <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: theme.text, margin: '4px 0 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                MindFlow
+                <svg width="24" height="24" viewBox="0 0 48 48" fill="none" style={{ marginTop: '-2px' }}>
+                  <path d="M24 6L24 6C24 6 36 18 36 28C36 34.627 30.627 40 24 40C17.373 40 12 34.627 12 28C12 18 24 6 24 6Z" stroke={colors.mint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M20 28C20 30.209 21.791 32 24 32" stroke={colors.mint} strokeWidth="2" strokeLinecap="round"/>
+                </svg>
+              </h1>
             </button>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {/* Lupe / Search */}
             <button 
               onClick={() => setShowSearch(!showSearch)}
               style={{
@@ -2521,6 +2870,119 @@ END:VCALENDAR`;
               }}>
               {Icons.search}
             </button>
+            {/* Dark Mode Toggle */}
+            <button 
+              onClick={() => setDarkMode(!darkMode)}
+              style={{
+                width: '48px',
+                height: '48px',
+                borderRadius: '16px',
+                border: `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)'}`,
+                background: darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255,255,255,0.5)',
+                backdropFilter: 'blur(24px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: darkMode ? '#facc15' : theme.textMuted,
+              }}
+            >
+              {darkMode ? Icons.moon : Icons.sun}
+            </button>
+            {/* Profile / Login Button */}
+            <div style={{ position: 'relative' }} data-profile-dropdown>
+              <button 
+                onClick={() => {
+                  if (user) {
+                    setShowProfileDropdown(!showProfileDropdown);
+                  } else {
+                    setShowAuthModal(true);
+                    setAuthMode('login');
+                  }
+                }}
+                style={{
+                  width: '48px',
+                  height: '48px',
+                  borderRadius: '16px',
+                  border: `1px solid ${user ? colors.mint : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)')}`,
+                  background: user 
+                    ? (darkMode ? `${colors.mint}20` : `${colors.mint}30`)
+                    : (darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255,255,255,0.5)'),
+                  backdropFilter: 'blur(24px)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: user ? colors.mint : theme.textMuted,
+                }}
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+              </button>
+              
+              {/* Profile Dropdown */}
+              {showProfileDropdown && user && (
+                <div style={{
+                  position: 'absolute',
+                  top: '56px',
+                  right: 0,
+                  minWidth: '220px',
+                  padding: '12px',
+                  borderRadius: '16px',
+                  background: darkMode ? 'rgba(25, 28, 40, 0.95)' : 'rgba(255,255,255,0.95)',
+                  border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
+                  backdropFilter: 'blur(24px)',
+                  boxShadow: '0 10px 40px rgba(0,0,0,0.3)',
+                  zIndex: 100,
+                }}>
+                  <div style={{ 
+                    padding: '8px 12px', 
+                    marginBottom: '8px',
+                    borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
+                  }}>
+                    <p style={{ 
+                      fontSize: '12px', 
+                      color: theme.textMuted, 
+                      margin: '0 0 4px 0' 
+                    }}>Angemeldet als</p>
+                    <p style={{ 
+                      fontSize: '14px', 
+                      color: theme.text, 
+                      margin: 0,
+                      fontWeight: '500',
+                      wordBreak: 'break-all',
+                    }}>{user.email}</p>
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '10px',
+                      border: 'none',
+                      background: darkMode ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.1)',
+                      color: '#ef4444',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                      <polyline points="16 17 21 12 16 7" />
+                      <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                    Abmelden
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -2788,9 +3250,9 @@ END:VCALENDAR`;
             label={selectedDateFilter} 
             color={colors.mint} 
             darkMode={darkMode} 
-            active={activeStatFilter === 'date'}
+            active={activeStatFilter === 'today'}
             hasUnread={unreadCounts.today > 0}
-            onClick={() => setActiveStatFilter(activeStatFilter === 'date' ? null : 'date')}
+            onClick={() => setActiveStatFilter(activeStatFilter === 'today' ? null : 'today')}
             onLongPress={() => { setStatusFilterDropdown(false); setDateFilterDropdown(!dateFilterDropdown); }}
             showDropdown={dateFilterDropdown}
             dropdownOptions={dateFilterOptions}
@@ -2874,15 +3336,41 @@ END:VCALENDAR`;
             backdropFilter: 'blur(24px)',
           }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-              {allActions.map(action => (
-                <button key={action} style={{
+              {allActions.map(action => {
+                const isCustom = customActions.includes(action);
+                let pressTimer: NodeJS.Timeout | null = null;
+                return (
+                <button 
+                  key={action} 
+                  onMouseDown={() => {
+                    if (isCustom) {
+                      pressTimer = setTimeout(() => {
+                        if (confirm(`"${action}" löschen?`)) {
+                          setCustomActions(customActions.filter(a => a !== action));
+                        }
+                      }, 600);
+                    }
+                  }}
+                  onMouseUp={() => { if (pressTimer) clearTimeout(pressTimer); }}
+                  onMouseLeave={() => { if (pressTimer) clearTimeout(pressTimer); }}
+                  onTouchStart={() => {
+                    if (isCustom) {
+                      pressTimer = setTimeout(() => {
+                        if (confirm(`"${action}" löschen?`)) {
+                          setCustomActions(customActions.filter(a => a !== action));
+                        }
+                      }, 600);
+                    }
+                  }}
+                  onTouchEnd={() => { if (pressTimer) clearTimeout(pressTimer); }}
+                  style={{
                   padding: '6px 12px',
                   borderRadius: '9999px',
                   fontSize: '13px',
                   fontWeight: '500',
                   background: darkMode ? 'rgba(255, 171, 94, 0.2)' : 'white',
                   color: darkMode ? colors.orange : '#92400e',
-                  border: 'none',
+                  border: isCustom ? `1px dashed ${colors.orange}` : 'none',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -2894,7 +3382,8 @@ END:VCALENDAR`;
                   {action === 'Prüfen' && Icons.check}
                   {action}
                 </button>
-              ))}
+              );
+              })}
               {addingAction ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <input
@@ -2988,13 +3477,37 @@ END:VCALENDAR`;
             backdropFilter: 'blur(24px)',
           }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-              {allPersons.map(person => (
+              {allPersons.map(person => {
+                const isCustom = customPersons.includes(person);
+                let pressTimer: NodeJS.Timeout | null = null;
+                return (
                 <button 
                   key={person} 
                   onClick={() => {
                     setPersonFilter(personFilter === `@${person}` ? null : `@${person}`);
                     setSearchQuery(personFilter === `@${person}` ? '' : `@${person}`);
                   }}
+                  onMouseDown={() => {
+                    if (isCustom) {
+                      pressTimer = setTimeout(() => {
+                        if (confirm(`"@${person}" löschen?`)) {
+                          setCustomPersons(customPersons.filter(p => p !== person));
+                        }
+                      }, 600);
+                    }
+                  }}
+                  onMouseUp={() => { if (pressTimer) clearTimeout(pressTimer); }}
+                  onMouseLeave={() => { if (pressTimer) clearTimeout(pressTimer); }}
+                  onTouchStart={() => {
+                    if (isCustom) {
+                      pressTimer = setTimeout(() => {
+                        if (confirm(`"@${person}" löschen?`)) {
+                          setCustomPersons(customPersons.filter(p => p !== person));
+                        }
+                      }, 600);
+                    }
+                  }}
+                  onTouchEnd={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   style={{
                     padding: '6px 12px',
                     borderRadius: '9999px',
@@ -3006,13 +3519,14 @@ END:VCALENDAR`;
                     color: personFilter === `@${person}` 
                       ? 'white' 
                       : darkMode ? colors.purple : '#6d28d9',
-                    border: 'none',
+                    border: isCustom ? `1px dashed ${colors.purple}` : 'none',
                     cursor: 'pointer',
                     boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                   }}>
                   @{person}
                 </button>
-              ))}
+              );
+              })}
               {addingPerson ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <input
@@ -3106,13 +3620,37 @@ END:VCALENDAR`;
             backdropFilter: 'blur(24px)',
           }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-              {allMeetings.map(meeting => (
+              {allMeetings.map(meeting => {
+                const isCustom = customMeetings.includes(meeting);
+                let pressTimer: NodeJS.Timeout | null = null;
+                return (
                 <button 
                   key={meeting} 
                   onClick={() => {
                     setMeetingFilter(meetingFilter === `#${meeting}` ? null : `#${meeting}`);
                     setSearchQuery(meetingFilter === `#${meeting}` ? '' : `#${meeting}`);
                   }}
+                  onMouseDown={() => {
+                    if (isCustom) {
+                      pressTimer = setTimeout(() => {
+                        if (confirm(`"#${meeting}" löschen?`)) {
+                          setCustomMeetings(customMeetings.filter(m => m !== meeting));
+                        }
+                      }, 600);
+                    }
+                  }}
+                  onMouseUp={() => { if (pressTimer) clearTimeout(pressTimer); }}
+                  onMouseLeave={() => { if (pressTimer) clearTimeout(pressTimer); }}
+                  onTouchStart={() => {
+                    if (isCustom) {
+                      pressTimer = setTimeout(() => {
+                        if (confirm(`"#${meeting}" löschen?`)) {
+                          setCustomMeetings(customMeetings.filter(m => m !== meeting));
+                        }
+                      }, 600);
+                    }
+                  }}
+                  onTouchEnd={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   style={{
                     padding: '6px 12px',
                     borderRadius: '9999px',
@@ -3124,13 +3662,14 @@ END:VCALENDAR`;
                     color: meetingFilter === `#${meeting}` 
                       ? 'white' 
                       : darkMode ? colors.skyBlue : '#1d4ed8',
-                    border: 'none',
+                    border: isCustom ? `1px dashed ${colors.skyBlue}` : 'none',
                     cursor: 'pointer',
                     boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                   }}>
                   #{meeting}
                 </button>
-              ))}
+              );
+              })}
               {addingMeeting ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <input
@@ -3232,6 +3771,7 @@ END:VCALENDAR`;
               onCategoryChange={handleCategoryChange}
               onDescriptionChange={handleDescriptionChange}
               onTitleChange={handleTitleChange}
+              onDelete={handleDeleteTask}
               allCategories={[...categories, ...customCategories]}
             />
           ))}
@@ -3271,6 +3811,7 @@ END:VCALENDAR`;
                   onCategoryChange={handleCategoryChange}
                   onDescriptionChange={handleDescriptionChange}
                   onTitleChange={handleTitleChange}
+                  onDelete={handleDeleteTask}
                   allCategories={[...categories, ...customCategories]}
                 />
               ))}
@@ -3278,6 +3819,191 @@ END:VCALENDAR`;
           </div>
         )}
       </main>
+
+      {/* Auth Modal */}
+      {showAuthModal && (
+        <div 
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 200,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            background: 'rgba(0,0,0,0.7)',
+          }}
+          onClick={() => setShowAuthModal(false)}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: '380px',
+              padding: '32px 24px',
+              borderRadius: '24px',
+              background: darkMode ? 'rgba(25, 28, 40, 0.98)' : 'rgba(255,255,255,0.98)',
+              border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
+              backdropFilter: 'blur(24px)',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+            }}
+          >
+            {/* Header */}
+            <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+              <div style={{ 
+                width: '64px', 
+                height: '64px', 
+                margin: '0 auto 16px',
+                borderRadius: '20px',
+                background: `linear-gradient(135deg, ${colors.mint}40, ${colors.purple}40)`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+                  <path d="M24 6L24 6C24 6 36 18 36 28C36 34.627 30.627 40 24 40C17.373 40 12 34.627 12 28C12 18 24 6 24 6Z" stroke={colors.mint} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M20 28C20 30.209 21.791 32 24 32" stroke={colors.mint} strokeWidth="2.5" strokeLinecap="round"/>
+                </svg>
+              </div>
+              <h2 style={{ 
+                fontSize: '22px', 
+                fontWeight: '700', 
+                color: theme.text, 
+                margin: '0 0 4px 0' 
+              }}>
+                {authMode === 'login' ? 'Willkommen zurück!' : 'Konto erstellen'}
+              </h2>
+              <p style={{ fontSize: '14px', color: theme.textMuted, margin: 0 }}>
+                {authMode === 'login' ? 'Melde dich bei MindFlow an' : 'Registriere dich bei MindFlow'}
+              </p>
+            </div>
+
+            {/* Error Message */}
+            {authError && (
+              <div style={{
+                padding: '12px',
+                marginBottom: '16px',
+                borderRadius: '12px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#ef4444',
+                fontSize: '13px',
+                textAlign: 'center',
+              }}>
+                {authError}
+              </div>
+            )}
+
+            {/* Email Input */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ 
+                display: 'block', 
+                fontSize: '13px', 
+                fontWeight: '500', 
+                color: theme.textMuted,
+                marginBottom: '6px',
+              }}>E-Mail</label>
+              <input
+                type="email"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                placeholder="deine@email.de"
+                style={{
+                  width: '100%',
+                  padding: '14px 16px',
+                  borderRadius: '12px',
+                  border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : '#d1d5db'}`,
+                  background: darkMode ? 'rgba(255,255,255,0.05)' : '#f9fafb',
+                  color: theme.text,
+                  fontSize: '15px',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            {/* Password Input */}
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ 
+                display: 'block', 
+                fontSize: '13px', 
+                fontWeight: '500', 
+                color: theme.textMuted,
+                marginBottom: '6px',
+              }}>Passwort</label>
+              <input
+                type="password"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                placeholder="••••••••"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    authMode === 'login' ? handleLogin() : handleRegister();
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '14px 16px',
+                  borderRadius: '12px',
+                  border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : '#d1d5db'}`,
+                  background: darkMode ? 'rgba(255,255,255,0.05)' : '#f9fafb',
+                  color: theme.text,
+                  fontSize: '15px',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            {/* Submit Button */}
+            <button
+              onClick={authMode === 'login' ? handleLogin : handleRegister}
+              disabled={authLoading}
+              style={{
+                width: '100%',
+                padding: '14px',
+                borderRadius: '12px',
+                border: 'none',
+                background: `linear-gradient(135deg, ${colors.mint}, ${colors.purple})`,
+                color: '#1f2937',
+                fontSize: '15px',
+                fontWeight: '600',
+                cursor: authLoading ? 'not-allowed' : 'pointer',
+                opacity: authLoading ? 0.7 : 1,
+                marginBottom: '16px',
+              }}
+            >
+              {authLoading ? 'Laden...' : (authMode === 'login' ? 'Anmelden' : 'Registrieren')}
+            </button>
+
+            {/* Switch Mode */}
+            <p style={{ 
+              textAlign: 'center', 
+              fontSize: '14px', 
+              color: theme.textMuted,
+              margin: 0,
+            }}>
+              {authMode === 'login' ? 'Noch kein Konto? ' : 'Bereits registriert? '}
+              <button
+                onClick={() => {
+                  setAuthMode(authMode === 'login' ? 'register' : 'login');
+                  setAuthError(null);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: colors.mint,
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                }}
+              >
+                {authMode === 'login' ? 'Registrieren' : 'Anmelden'}
+              </button>
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Calendar Modal */}
       {calendarModal.show && calendarModal.todo && (
