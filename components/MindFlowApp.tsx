@@ -1968,29 +1968,26 @@ END:VCALENDAR`;
       
     } catch (error) {
       console.error('AI parsing error:', error);
-      setVoiceFeedback('✗ KI-Analyse fehlgeschlagen, erstelle einfache Aufgabe...');
       
-      // Fallback: create simple todo
+      // Fallback: create simple todo without showing error
+      const newTodo: Todo = {
+        id: `voice-${Date.now()}`,
+        title: text.substring(0, 60),
+        category: 'arbeit',
+        actionType: 'check',
+        priority: 3,
+        status: 'Offen',
+        date: 'Heute',
+        unread: true,
+        completed: false,
+      };
+      setTodos(prev => [newTodo, ...prev]);
+      setVoiceFeedback(`✓ Aufgabe erstellt: "${newTodo.title}"`);
+      
       setTimeout(() => {
-        const newTodo: Todo = {
-          id: `voice-${Date.now()}`,
-          title: text.substring(0, 60),
-          category: 'arbeit',
-          actionType: 'check',
-          priority: 3,
-          status: 'Offen',
-          date: 'Heute',
-          unread: true,
-          completed: false,
-        };
-        setTodos(prev => [newTodo, ...prev]);
-        setVoiceFeedback(`✓ Aufgabe erstellt: "${newTodo.title}"`);
-        
-        setTimeout(() => {
-          setShowVoiceModal(false);
-          setVoiceFeedback(null);
-        }, 2000);
-      }, 1000);
+        setShowVoiceModal(false);
+        setVoiceFeedback(null);
+      }, 2000);
     }
   };
 
@@ -2398,6 +2395,16 @@ END:VCALENDAR`;
   return (
     <>
       <style>{responsiveStyles}</style>
+      {/* Safe area overlay for Dynamic Island - matches dark background */}
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 'env(safe-area-inset-top, 47px)',
+        background: darkMode ? colors.darkBg : '#F8F8FC',
+        zIndex: 100,
+      }} />
       <div className="mindflow-main" style={{
         minHeight: '100vh',
         background: theme.bg,
