@@ -2639,11 +2639,40 @@ END:VCALENDAR`;
         filterDescription = `Aufgaben für Meeting ${meetingName}`;
       }
       
+      // Helper function to speak text (with iOS fix)
+      const speakText = (text: string, onEnd?: () => void) => {
+        // Cancel any ongoing speech
+        window.speechSynthesis.cancel();
+        
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'de-DE';
+        utterance.rate = 0.9;
+        utterance.volume = 1;
+        
+        if (onEnd) {
+          utterance.onend = onEnd;
+          utterance.onerror = (e) => {
+            console.error('Speech error:', e);
+            onEnd(); // Call onEnd even on error
+          };
+        }
+        
+        // iOS Safari fix: need to trigger speech in a specific way
+        setTimeout(() => {
+          window.speechSynthesis.speak(utterance);
+          
+          // iOS fix: speechSynthesis can pause, so resume it
+          if (window.speechSynthesis.paused) {
+            window.speechSynthesis.resume();
+          }
+        }, 100);
+      };
+      
       if (tasksToRead.length === 0) {
         setVoiceFeedback(`ℹ️ Keine ${filterDescription} vorhanden`);
-        const utterance = new SpeechSynthesisUtterance(`Du hast keine ${filterDescription}.`);
-        utterance.lang = 'de-DE';
-        window.speechSynthesis.speak(utterance);
+        speakText(`Du hast keine ${filterDescription}.`, () => {
+          setTimeout(() => setShowVoiceModal(false), 1500);
+        });
       } else {
         // Sort by priority
         tasksToRead.sort((a, b) => a.priority - b.priority);
@@ -2656,16 +2685,12 @@ END:VCALENDAR`;
           speechText += `. Und ${count - 5} weitere.`;
         }
         
-        setVoiceFeedback(`🔊 Lese ${count} ${filterDescription} vor...`);
+        setVoiceFeedback(`🔊 Lese ${count} Aufgaben vor...`);
         
-        const utterance = new SpeechSynthesisUtterance(speechText);
-        utterance.lang = 'de-DE';
-        utterance.rate = 0.9;
-        utterance.onend = () => {
-          setVoiceFeedback(`✓ ${count} ${filterDescription} vorgelesen`);
+        speakText(speechText, () => {
+          setVoiceFeedback(`✓ ${count} Aufgaben vorgelesen`);
           setTimeout(() => setShowVoiceModal(false), 1500);
-        };
-        window.speechSynthesis.speak(utterance);
+        });
         return;
       }
       
