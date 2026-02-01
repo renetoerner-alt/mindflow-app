@@ -1,6 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { createClient } from '@supabase/supabase-js';
+
+// Supabase Configuration
+const supabaseUrl = 'https://gcotfldbnuatkewauvhv.supabase.co';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdjb3RmbGRibnVhdGtld2F1dmh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzNzM5ODgsImV4cCI6MjA4NDk0OTk4OH0.OvK6e9owY_zRKsxkcAEHcuVRlcMUvmrMOVez_hmuTcM';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // Type Definitions
 interface Category {
@@ -1464,14 +1470,15 @@ export default function MindFlowApp() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   
   // User/Auth States
-  const [user, setUser] = useState<{ email: string } | null>(null);
+  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
   const [showProfileDropdown, setShowProfileDropdown] = useState<boolean>(false);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot'>('login');
   const [authEmail, setAuthEmail] = useState<string>('');
   const [authPassword, setAuthPassword] = useState<string>('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(false);
+  const [dataLoading, setDataLoading] = useState<boolean>(false);
   
   // Voice Control States
   const [isListening, setIsListening] = useState<boolean>(false);
@@ -1493,6 +1500,9 @@ export default function MindFlowApp() {
   const [newActionName, setNewActionName] = useState<string>('');
   const [newPersonName, setNewPersonName] = useState<string>('');
   const [newMeetingName, setNewMeetingName] = useState<string>('');
+  
+  // Delete confirmation states
+  const [deleteConfirm, setDeleteConfirm] = useState<{type: string; id: string; label: string; usageCount: number} | null>(null);
 
   const dateFilterOptions: string[] = ['Heute', 'Diese Woche', 'Nächste Woche', 'Diesen Monat', 'Alle'];
   const statusFilterOptions: string[] = ['Rückmeldung', 'Offen', 'In Bearbeitung', 'Alle Status'];
@@ -1546,7 +1556,209 @@ export default function MindFlowApp() {
     }).length;
   };
 
-  // Auth handlers
+  // ============ SUPABASE DATA FUNCTIONS ============
+  
+  // Load all user data from Supabase
+  const loadUserDataFromSupabase = async (userId: string) => {
+    console.log('=== Loading user data from Supabase ===');
+    setDataLoading(true);
+    
+    try {
+      // Load todos
+      const { data: todosData, error: todosError } = await supabase
+        .from('mindflow_todos')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+      
+      if (todosError) throw todosError;
+      
+      // Load user settings
+      const { data: settingsData, error: settingsError } = await supabase
+        .from('mindflow_user_settings')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+      
+      // Load custom categories
+      const { data: categoriesData, error: categoriesError } = await supabase
+        .from('mindflow_custom_categories')
+        .select('*')
+        .eq('user_id', userId);
+      
+      if (categoriesError) throw categoriesError;
+      
+      // Transform todos from database format
+      const transformedTodos: Todo[] = (todosData || []).map(t => ({
+        id: t.id,
+        title: t.title,
+        description: t.description || '',
+        category: t.category,
+        actionType: t.action_type,
+        priority: t.priority,
+        status: t.status,
+        date: t.date,
+        persons: t.persons || [],
+        meetings: t.meetings || [],
+        unread: t.unread,
+        completed: t.completed,
+      }));
+      
+      console.log('Loaded todos:', transformedTodos.length);
+      setTodos(transformedTodos);
+      
+      // Apply settings if they exist
+      if (settingsData) {
+        console.log('Loaded settings:', settingsData);
+        setSelectedCategories(settingsData.selected_categories || ['arbeit', 'privat', 'finanzen', 'gesundheit']);
+        setHiddenCategories(settingsData.hidden_categories || []);
+        setHiddenPersons(settingsData.hidden_persons || []);
+        setHiddenMeetings(settingsData.hidden_meetings || []);
+        setHiddenActions(settingsData.hidden_actions || []);
+        setCustomPersons(settingsData.custom_persons || []);
+        setCustomMeetings(settingsData.custom_meetings || []);
+        setCustomActions(settingsData.custom_actions || []);
+        setDarkMode(settingsData.dark_mode ?? true);
+        // Load filter settings
+        setSelectedDateFilter(settingsData.selected_date_filter || 'Heute');
+        setSelectedStatusFilter(settingsData.selected_status_filter || 'Rückmeldung');
+        setActiveStatFilter(settingsData.active_stat_filter || null);
+      } else {
+        // Create default settings for new user
+        await createDefaultSettings(userId);
+      }
+      
+      // Apply custom categories
+      if (categoriesData && categoriesData.length > 0) {
+        const customCats: Category[] = categoriesData.map(c => ({
+          id: c.category_id,
+          label: c.label,
+          color: c.color,
+        }));
+        setCustomCategories(customCats);
+      }
+      
+    } catch (error) {
+      console.error('Error loading data from Supabase:', error);
+    } finally {
+      setDataLoading(false);
+    }
+  };
+  
+  // Create default settings for new user
+  const createDefaultSettings = async (userId: string) => {
+    const { error } = await supabase
+      .from('mindflow_user_settings')
+      .insert({
+        user_id: userId,
+        selected_categories: ['arbeit', 'privat', 'finanzen', 'gesundheit'],
+        hidden_categories: [],
+        hidden_persons: [],
+        hidden_meetings: [],
+        hidden_actions: [],
+        custom_persons: [],
+        custom_meetings: [],
+        custom_actions: [],
+        dark_mode: true,
+        selected_date_filter: 'Heute',
+        selected_status_filter: 'Rückmeldung',
+        active_stat_filter: null,
+      });
+    
+    if (error) console.error('Error creating default settings:', error);
+  };
+  
+  // Save user settings to Supabase
+  const saveSettingsToSupabase = async () => {
+    if (!user) return;
+    
+    const { error } = await supabase
+      .from('mindflow_user_settings')
+      .upsert({
+        user_id: user.id,
+        selected_categories: selectedCategories,
+        hidden_categories: hiddenCategories,
+        hidden_persons: hiddenPersons,
+        hidden_meetings: hiddenMeetings,
+        hidden_actions: hiddenActions,
+        custom_persons: customPersons,
+        custom_meetings: customMeetings,
+        custom_actions: customActions,
+        dark_mode: darkMode,
+        selected_date_filter: selectedDateFilter,
+        selected_status_filter: selectedStatusFilter,
+        active_stat_filter: activeStatFilter,
+      }, { onConflict: 'user_id' });
+    
+    if (error) console.error('Error saving settings:', error);
+  };
+  
+  // Save a todo to Supabase
+  const saveTodoToSupabase = async (todo: Todo) => {
+    if (!user) return;
+    
+    const { error } = await supabase
+      .from('mindflow_todos')
+      .upsert({
+        id: todo.id,
+        user_id: user.id,
+        title: todo.title,
+        description: todo.description || '',
+        category: todo.category,
+        priority: todo.priority,
+        status: todo.status,
+        date: todo.date,
+        action_type: todo.actionType,
+        completed: todo.completed,
+        unread: todo.unread,
+        persons: todo.persons || [],
+        meetings: todo.meetings || [],
+      });
+    
+    if (error) console.error('Error saving todo:', error);
+  };
+  
+  // Delete a todo from Supabase
+  const deleteTodoFromSupabase = async (todoId: string) => {
+    const { error } = await supabase
+      .from('mindflow_todos')
+      .delete()
+      .eq('id', todoId);
+    
+    if (error) console.error('Error deleting todo:', error);
+  };
+  
+  // Save custom category to Supabase
+  const saveCustomCategoryToSupabase = async (category: Category) => {
+    if (!user) return;
+    
+    const { error } = await supabase
+      .from('mindflow_custom_categories')
+      .insert({
+        user_id: user.id,
+        category_id: category.id,
+        label: category.label,
+        color: category.color,
+      });
+    
+    if (error) console.error('Error saving category:', error);
+  };
+  
+  // Delete custom category from Supabase
+  const deleteCustomCategoryFromSupabase = async (categoryId: string) => {
+    if (!user) return;
+    
+    const { error } = await supabase
+      .from('mindflow_custom_categories')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('category_id', categoryId);
+    
+    if (error) console.error('Error deleting category:', error);
+  };
+
+  // ============ AUTH HANDLERS ============
+  
   const handleLogin = async () => {
     if (!authEmail || !authPassword) {
       setAuthError('Bitte E-Mail und Passwort eingeben');
@@ -1555,20 +1767,36 @@ export default function MindFlowApp() {
     setAuthLoading(true);
     setAuthError(null);
     
-    // Simulate login - in production this would call Supabase
-    setTimeout(() => {
-      // IMPORTANT: Load user data FIRST, before setting user
-      // This prevents the auto-save useEffect from overwriting saved data
-      loadUserData(authEmail);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: authEmail,
+        password: authPassword,
+      });
       
-      // Then set user (this triggers useEffect, but data is already loaded)
-      setUser({ email: authEmail });
+      if (error) {
+        if (error.message.includes('Invalid login credentials')) {
+          setAuthError('E-Mail oder Passwort falsch');
+        } else if (error.message.includes('Email not confirmed')) {
+          setAuthError('Bitte bestätige zuerst deine E-Mail');
+        } else {
+          setAuthError(error.message);
+        }
+        return;
+      }
       
-      setShowAuthModal(false);
-      setAuthEmail('');
-      setAuthPassword('');
+      if (data.user) {
+        setUser({ id: data.user.id, email: data.user.email || '' });
+        await loadUserDataFromSupabase(data.user.id);
+        setShowAuthModal(false);
+        setAuthEmail('');
+        setAuthPassword('');
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      setAuthError('Ein Fehler ist aufgetreten');
+    } finally {
       setAuthLoading(false);
-    }, 1000);
+    }
   };
 
   const handleRegister = async () => {
@@ -1583,64 +1811,108 @@ export default function MindFlowApp() {
     setAuthLoading(true);
     setAuthError(null);
     
-    // Simulate registration - in production this would call Supabase
-    setTimeout(() => {
-      const newUser = { email: authEmail };
-      setUser(newUser);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: authEmail,
+        password: authPassword,
+      });
       
-      // Initialize empty data for new user
-      const userKey = `mindflow_${authEmail}`;
-      const userData = {
-        todos: onboardingTodos,
-        selectedCategories: ['arbeit', 'privat', 'finanzen', 'gesundheit'],
-        customCategories: [],
-        hiddenCategories: [],
-        hiddenPersons: [],
-        hiddenMeetings: [],
-        hiddenActions: [],
-        customPersons: [],
-        customMeetings: [],
-        customActions: [],
-      };
-      localStorage.setItem(userKey, JSON.stringify(userData));
+      if (error) {
+        if (error.message.includes('already registered')) {
+          setAuthError('Diese E-Mail ist bereits registriert');
+        } else {
+          setAuthError(error.message);
+        }
+        return;
+      }
       
-      // Load the initial data
-      setTodos(onboardingTodos);
-      setSelectedCategories(['arbeit', 'privat', 'finanzen', 'gesundheit']);
-      setCustomCategories([]);
-      setHiddenCategories([]);
-      setHiddenPersons([]);
-      setHiddenMeetings([]);
-      setHiddenActions([]);
-      setCustomPersons([]);
-      setCustomMeetings([]);
-      setCustomActions([]);
-      
-      setShowAuthModal(false);
-      setAuthEmail('');
-      setAuthPassword('');
+      if (data.user) {
+        // Check if email confirmation is required
+        if (data.user.identities && data.user.identities.length === 0) {
+          setAuthError('Diese E-Mail ist bereits registriert');
+          return;
+        }
+        
+        // Auto-login after registration (if no email confirmation required)
+        if (data.session) {
+          setUser({ id: data.user.id, email: data.user.email || '' });
+          
+          // Create default settings
+          await createDefaultSettings(data.user.id);
+          
+          // Create welcome todo
+          const welcomeTodo: Todo = {
+            id: crypto.randomUUID(),
+            title: 'Willkommen bei MindFlow! 👋',
+            description: 'Dies ist deine erste Aufgabe. Du kannst sie bearbeiten oder löschen.',
+            category: 'arbeit',
+            priority: 2,
+            status: 'Offen',
+            date: 'Heute',
+            actionType: 'Prüfen',
+            completed: false,
+            unread: true,
+            persons: [],
+            meetings: [],
+          };
+          
+          await saveTodoToSupabase(welcomeTodo);
+          setTodos([welcomeTodo]);
+          
+          setShowAuthModal(false);
+          setAuthEmail('');
+          setAuthPassword('');
+        } else {
+          // Email confirmation required
+          setAuthError('Bitte bestätige deine E-Mail-Adresse. Wir haben dir einen Link geschickt.');
+        }
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
+      setAuthError('Ein Fehler ist aufgetreten');
+    } finally {
       setAuthLoading(false);
-    }, 1000);
+    }
   };
 
-  const handleLogout = () => {
-    // Save current user data before logout
-    if (user) {
-      const userKey = `mindflow_${user.email}`;
-      const userData = {
-        todos,
-        selectedCategories,
-        customCategories,
-        hiddenCategories,
-        hiddenPersons,
-        hiddenMeetings,
-        hiddenActions,
-        customPersons,
-        customMeetings,
-        customActions,
-      };
-      localStorage.setItem(userKey, JSON.stringify(userData));
+  const handleForgotPassword = async () => {
+    if (!authEmail) {
+      setAuthError('Bitte gib deine E-Mail-Adresse ein');
+      return;
     }
+    setAuthLoading(true);
+    setAuthError(null);
+    
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(authEmail, {
+        redirectTo: window.location.origin,
+      });
+      
+      if (error) {
+        setAuthError(error.message);
+        return;
+      }
+      
+      // Success - show confirmation
+      setAuthError(null);
+      setAuthMode('login');
+      setAuthEmail('');
+      alert('✅ E-Mail gesendet!\n\nWir haben dir einen Link zum Zurücksetzen deines Passworts geschickt. Bitte prüfe dein Postfach.');
+      
+    } catch (error) {
+      console.error('Password reset error:', error);
+      setAuthError('Ein Fehler ist aufgetreten');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    // Save current settings before logout
+    await saveSettingsToSupabase();
+    
+    // Sign out from Supabase
+    await supabase.auth.signOut();
     
     // Clear user and reset to guest state
     setUser(null);
@@ -1662,70 +1934,43 @@ export default function MindFlowApp() {
     setShowSearch(false);
   };
 
-  // Load user data when logging in
-  const loadUserData = (email: string) => {
-    const userKey = `mindflow_${email}`;
-    console.log('=== Loading user data ===');
-    console.log('User key:', userKey);
-    
-    const savedData = localStorage.getItem(userKey);
-    console.log('Saved data exists:', !!savedData);
-    
-    if (savedData) {
-      try {
-        const userData = JSON.parse(savedData);
-        console.log('Loaded todos count:', userData.todos?.length || 0);
-        console.log('Loaded todos:', userData.todos);
-        console.log('Loaded hiddenPersons:', userData.hiddenPersons);
-        console.log('Loaded hiddenMeetings:', userData.hiddenMeetings);
-        console.log('Loaded hiddenActions:', userData.hiddenActions);
-        
-        setTodos(userData.todos || []);
-        setSelectedCategories(userData.selectedCategories || ['arbeit', 'privat', 'finanzen', 'gesundheit']);
-        setCustomCategories(userData.customCategories || []);
-        setHiddenCategories(userData.hiddenCategories || []);
-        setHiddenPersons(userData.hiddenPersons || []);
-        setHiddenMeetings(userData.hiddenMeetings || []);
-        setHiddenActions(userData.hiddenActions || []);
-        setCustomPersons(userData.customPersons || []);
-        setCustomMeetings(userData.customMeetings || []);
-        setCustomActions(userData.customActions || []);
-      } catch (e) {
-        console.error('Error loading user data:', e);
-      }
-    } else {
-      console.log('No saved data - initializing with onboarding');
-      // New user - initialize with onboarding
-      setTodos(onboardingTodos);
-      setSelectedCategories(['arbeit', 'privat', 'finanzen', 'gesundheit']);
-    }
-  };
-
-  // Auto-save user data on changes
+  // Check for existing session on mount
   useEffect(() => {
-    if (user) {
-      const userKey = `mindflow_${user.email}`;
-      const userData = {
-        todos,
-        selectedCategories,
-        customCategories,
-        hiddenCategories,
-        hiddenPersons,
-        hiddenMeetings,
-        hiddenActions,
-        customPersons,
-        customMeetings,
-        customActions,
-      };
-      console.log('=== Auto-saving user data ===');
-      console.log('User key:', userKey);
-      console.log('Saving todos count:', todos.length);
-      console.log('Saving hiddenPersons:', hiddenPersons);
-      console.log('Saving hiddenMeetings:', hiddenMeetings);
-      console.log('Saving hiddenActions:', hiddenActions);
-      localStorage.setItem(userKey, JSON.stringify(userData));
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUser({ id: session.user.id, email: session.user.email || '' });
+        await loadUserDataFromSupabase(session.user.id);
+      }
+    };
+    
+    checkSession();
+    
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state changed:', event);
+      if (event === 'SIGNED_IN' && session?.user) {
+        setUser({ id: session.user.id, email: session.user.email || '' });
+        await loadUserDataFromSupabase(session.user.id);
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setTodos([]);
+      }
+    });
+    
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Auto-save settings to Supabase when they change
+  useEffect(() => {
+    if (user && !dataLoading) {
+      const saveTimeout = setTimeout(() => {
+        saveSettingsToSupabase();
+      }, 1000); // Debounce saves
+      
+      return () => clearTimeout(saveTimeout);
     }
-  }, [user, todos, selectedCategories, customCategories, hiddenCategories, hiddenPersons, hiddenMeetings, hiddenActions, customPersons, customMeetings, customActions]);
+  }, [user, selectedCategories, hiddenCategories, hiddenPersons, hiddenMeetings, hiddenActions, customPersons, customMeetings, customActions, darkMode, selectedDateFilter, selectedStatusFilter, activeStatFilter]);
 
   // Reset to home view - all filters cleared, sorted by priority then date
   // Note: Categories (Arbeit, Privat, etc.) are kept as selected
@@ -1831,7 +2076,15 @@ export default function MindFlowApp() {
     } else {
       setExpandedTask(todoId);
       // Mark as read
-      setTodos(todos.map(t => t.id === todoId ? { ...t, unread: false } : t));
+      const updatedTodos = todos.map(t => {
+        if (t.id === todoId && t.unread) {
+          const updated = { ...t, unread: false };
+          saveTodoToSupabase(updated);
+          return updated;
+        }
+        return t;
+      });
+      setTodos(updatedTodos);
     }
   };
 
@@ -1913,65 +2166,120 @@ END:VCALENDAR`;
 
   // Handle status change
   const handleStatusChange = (todoId: string, newStatus: string) => {
-    setTodos(todos.map(t => {
+    const updatedTodos = todos.map(t => {
       if (t.id === todoId) {
-        return { 
+        const updated = { 
           ...t, 
           status: newStatus,
           completed: newStatus === 'Erledigt'
         };
+        saveTodoToSupabase(updated);
+        return updated;
       }
       return t;
-    }));
+    });
+    setTodos(updatedTodos);
   };
 
   // Handle checkbox toggle
   const handleToggleComplete = (todoId: string) => {
-    setTodos(todos.map(t => {
+    const updatedTodos = todos.map(t => {
       if (t.id === todoId) {
         const newCompleted = !t.completed;
-        return {
+        const updated = {
           ...t,
           completed: newCompleted,
           status: newCompleted ? 'Erledigt' : 'Offen'
         };
+        saveTodoToSupabase(updated);
+        return updated;
       }
       return t;
-    }));
+    });
+    setTodos(updatedTodos);
   };
 
   // Handle priority change
   const handlePriorityChange = (todoId: string, newPriority: number) => {
-    setTodos(todos.map(t => t.id === todoId ? { ...t, priority: newPriority } : t));
+    const updatedTodos = todos.map(t => {
+      if (t.id === todoId) {
+        const updated = { ...t, priority: newPriority };
+        saveTodoToSupabase(updated);
+        return updated;
+      }
+      return t;
+    });
+    setTodos(updatedTodos);
   };
 
   // Handle action type change
   const handleActionTypeChange = (todoId: string, newActionType: string) => {
-    setTodos(todos.map(t => t.id === todoId ? { ...t, actionType: newActionType } : t));
+    const updatedTodos = todos.map(t => {
+      if (t.id === todoId) {
+        const updated = { ...t, actionType: newActionType };
+        saveTodoToSupabase(updated);
+        return updated;
+      }
+      return t;
+    });
+    setTodos(updatedTodos);
   };
 
   // Handle date change
   const handleDateChange = (todoId: string, newDate: string) => {
-    setTodos(todos.map(t => t.id === todoId ? { ...t, date: newDate } : t));
+    const updatedTodos = todos.map(t => {
+      if (t.id === todoId) {
+        const updated = { ...t, date: newDate };
+        saveTodoToSupabase(updated);
+        return updated;
+      }
+      return t;
+    });
+    setTodos(updatedTodos);
   };
 
   // Handle category change
   const handleCategoryChange = (todoId: string, newCategory: string) => {
-    setTodos(todos.map(t => t.id === todoId ? { ...t, category: newCategory } : t));
+    const updatedTodos = todos.map(t => {
+      if (t.id === todoId) {
+        const updated = { ...t, category: newCategory };
+        saveTodoToSupabase(updated);
+        return updated;
+      }
+      return t;
+    });
+    setTodos(updatedTodos);
   };
 
   // Handle description change
   const handleDescriptionChange = (todoId: string, newDescription: string) => {
-    setTodos(todos.map(t => t.id === todoId ? { ...t, description: newDescription } : t));
+    const updatedTodos = todos.map(t => {
+      if (t.id === todoId) {
+        const updated = { ...t, description: newDescription };
+        saveTodoToSupabase(updated);
+        return updated;
+      }
+      return t;
+    });
+    setTodos(updatedTodos);
   };
 
   // Handle title change
   const handleTitleChange = (todoId: string, newTitle: string) => {
-    setTodos(todos.map(t => t.id === todoId ? { ...t, title: newTitle } : t));
+    const updatedTodos = todos.map(t => {
+      if (t.id === todoId) {
+        const updated = { ...t, title: newTitle };
+        saveTodoToSupabase(updated);
+        return updated;
+      }
+      return t;
+    });
+    setTodos(updatedTodos);
   };
 
   // Handle delete task
   const handleDeleteTask = (todoId: string) => {
+    deleteTodoFromSupabase(todoId);
     setTodos(todos.filter(t => t.id !== todoId));
   };
 
@@ -2036,23 +2344,43 @@ END:VCALENDAR`;
 
   const deleteCategory = (catId: string, catLabel: string) => {
     const usageCount = isCategoryInUse(catId);
+    setDeleteConfirm({ type: 'category', id: catId, label: catLabel, usageCount });
+  };
+  
+  const confirmDelete = () => {
+    if (!deleteConfirm) return;
     
-    let confirmMessage = `"${catLabel}" löschen?`;
-    if (usageCount > 0) {
-      confirmMessage = `⚠️ "${catLabel}" wird in ${usageCount} Aufgabe${usageCount > 1 ? 'n' : ''} verwendet!\n\nTrotzdem löschen?`;
+    const { type, id } = deleteConfirm;
+    
+    if (type === 'category') {
+      if (customCategories.find(c => c.id === id)) {
+        deleteCustomCategoryFromSupabase(id);
+        setCustomCategories(customCategories.filter(c => c.id !== id));
+      } else {
+        setHiddenCategories([...hiddenCategories, id]);
+      }
+      setSelectedCategories(selectedCategories.filter(c => c !== id));
+    } else if (type === 'action') {
+      if (customActions.includes(id)) {
+        setCustomActions(customActions.filter(a => a !== id));
+      } else {
+        setHiddenActions([...hiddenActions, id]);
+      }
+    } else if (type === 'person') {
+      if (customPersons.includes(id)) {
+        setCustomPersons(customPersons.filter(p => p !== id));
+      } else {
+        setHiddenPersons([...hiddenPersons, id]);
+      }
+    } else if (type === 'meeting') {
+      if (customMeetings.includes(id)) {
+        setCustomMeetings(customMeetings.filter(m => m !== id));
+      } else {
+        setHiddenMeetings([...hiddenMeetings, id]);
+      }
     }
     
-    if (!confirm(confirmMessage)) return;
-    
-    // Check if it's a custom category
-    if (customCategories.find(c => c.id === catId)) {
-      setCustomCategories(customCategories.filter(c => c.id !== catId));
-    } else {
-      // It's a default category - add to hidden list
-      setHiddenCategories([...hiddenCategories, catId]);
-    }
-    // Remove from selected categories
-    setSelectedCategories(selectedCategories.filter(c => c !== catId));
+    setDeleteConfirm(null);
   };
 
   const addCategory = () => {
@@ -2062,6 +2390,7 @@ END:VCALENDAR`;
         label: newCategoryName,
         color: newCategoryColor,
       };
+      saveCustomCategoryToSupabase(newCat);
       setCustomCategories([...customCategories, newCat]);
       setSelectedCategories([...selectedCategories, newCat.id]);
       setNewCategoryName('');
@@ -2348,7 +2677,7 @@ END:VCALENDAR`;
       
       // Create todo from AI response
       const newTodo: Todo = {
-        id: `voice-ai-${Date.now()}`,
+        id: crypto.randomUUID(),
         title: data.title,
         description: data.description || undefined,
         category: data.category || getCurrentCategory(),
@@ -2362,6 +2691,7 @@ END:VCALENDAR`;
         completed: false,
       };
       
+      saveTodoToSupabase(newTodo);
       setTodos(prev => [newTodo, ...prev]);
       
       // Build feedback message
@@ -2381,7 +2711,7 @@ END:VCALENDAR`;
       
       // Fallback: create simple todo without showing error
       const newTodo: Todo = {
-        id: `voice-${Date.now()}`,
+        id: crypto.randomUUID(),
         title: text.substring(0, 60),
         category: getCurrentCategory(),
         actionType: 'check',
@@ -2391,6 +2721,7 @@ END:VCALENDAR`;
         unread: true,
         completed: false,
       };
+      saveTodoToSupabase(newTodo);
       setTodos(prev => [newTodo, ...prev]);
       setVoiceFeedback(`✓ Aufgabe erstellt: "${newTodo.title}"`);
       
@@ -2609,7 +2940,7 @@ END:VCALENDAR`;
       
       if (title.length > 2 && title.split(' ').length <= 10) {
         const newTodo: Todo = {
-          id: `voice-${Date.now()}`,
+          id: crypto.randomUUID(),
           title: title.charAt(0).toUpperCase() + title.slice(1),
           category: parseVoiceCategory(lower) || getCurrentCategory(),
           actionType: parseActionType(lower),
@@ -2620,6 +2951,7 @@ END:VCALENDAR`;
           completed: false,
         };
         
+        saveTodoToSupabase(newTodo);
         setTodos(prev => [newTodo, ...prev]);
         setVoiceFeedback(`✓ Neue Aufgabe erstellt: "${newTodo.title}"`);
         
@@ -3125,6 +3457,48 @@ END:VCALENDAR`;
         paddingBottom: '100px',
       }}>
         <div className="mindflow-container" style={{ maxWidth: '430px', margin: '0 auto' }}>
+      
+      {/* Loading Overlay */}
+      {dataLoading && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          backdropFilter: 'blur(4px)',
+        }}>
+          <div style={{
+            background: darkMode ? 'rgba(25, 28, 40, 0.95)' : 'rgba(255,255,255,0.95)',
+            padding: '24px 32px',
+            borderRadius: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '12px',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.3)',
+          }}>
+            <div style={{
+              width: '32px',
+              height: '32px',
+              border: `3px solid ${colors.mint}`,
+              borderTopColor: 'transparent',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+            }} />
+            <p style={{ color: theme.text, fontSize: '14px', margin: 0 }}>Daten werden geladen...</p>
+          </div>
+        </div>
+      )}
+      
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+
       {/* Background Glows */}
       <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
         <div style={{
@@ -3691,24 +4065,11 @@ END:VCALENDAR`;
           }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
               {allActions.map(action => {
-                const isCustom = customActions.includes(action);
-                const isDefault = defaultActions.includes(action);
                 let pressTimer: NodeJS.Timeout | null = null;
                 
                 const handleDelete = () => {
                   const usageCount = isActionInUse(action);
-                  let confirmMessage = `"${action}" löschen?`;
-                  if (usageCount > 0) {
-                    confirmMessage = `⚠️ "${action}" wird in ${usageCount} Aufgabe${usageCount > 1 ? 'n' : ''} verwendet!\n\nTrotzdem löschen?`;
-                  }
-                  
-                  if (confirm(confirmMessage)) {
-                    if (isCustom) {
-                      setCustomActions(customActions.filter(a => a !== action));
-                    } else if (isDefault) {
-                      setHiddenActions([...hiddenActions, action]);
-                    }
-                  }
+                  setDeleteConfirm({ type: 'action', id: action, label: action, usageCount });
                 };
                 
                 return (
@@ -3838,24 +4199,11 @@ END:VCALENDAR`;
           }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
               {allPersons.map(person => {
-                const isCustom = customPersons.includes(person);
-                const isDefault = defaultPersons.includes(person);
                 let pressTimer: NodeJS.Timeout | null = null;
                 
                 const handleDelete = () => {
                   const usageCount = isPersonInUse(person);
-                  let confirmMessage = `"@${person}" löschen?`;
-                  if (usageCount > 0) {
-                    confirmMessage = `⚠️ "@${person}" wird in ${usageCount} Aufgabe${usageCount > 1 ? 'n' : ''} verwendet!\n\nTrotzdem löschen?`;
-                  }
-                  
-                  if (confirm(confirmMessage)) {
-                    if (isCustom) {
-                      setCustomPersons(customPersons.filter(p => p !== person));
-                    } else if (isDefault) {
-                      setHiddenPersons([...hiddenPersons, person]);
-                    }
-                  }
+                  setDeleteConfirm({ type: 'person', id: person, label: `@${person}`, usageCount });
                 };
                 
                 return (
@@ -3987,24 +4335,11 @@ END:VCALENDAR`;
           }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
               {allMeetings.map(meeting => {
-                const isCustom = customMeetings.includes(meeting);
-                const isDefault = defaultMeetings.includes(meeting);
                 let pressTimer: NodeJS.Timeout | null = null;
                 
                 const handleDelete = () => {
                   const usageCount = isMeetingInUse(meeting);
-                  let confirmMessage = `"#${meeting}" löschen?`;
-                  if (usageCount > 0) {
-                    confirmMessage = `⚠️ "#${meeting}" wird in ${usageCount} Aufgabe${usageCount > 1 ? 'n' : ''} verwendet!\n\nTrotzdem löschen?`;
-                  }
-                  
-                  if (confirm(confirmMessage)) {
-                    if (isCustom) {
-                      setCustomMeetings(customMeetings.filter(m => m !== meeting));
-                    } else if (isDefault) {
-                      setHiddenMeetings([...hiddenMeetings, meeting]);
-                    }
-                  }
+                  setDeleteConfirm({ type: 'meeting', id: meeting, label: `#${meeting}`, usageCount });
                 };
                 
                 return (
@@ -4192,6 +4527,108 @@ END:VCALENDAR`;
         )}
       </main>
 
+      {/* Delete Confirmation Modal - Unified Design */}
+      {deleteConfirm && (
+        <div 
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 300,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            background: 'rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(4px)',
+          }}
+          onClick={() => setDeleteConfirm(null)}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: darkMode ? 'rgba(30, 33, 45, 0.98)' : 'rgba(255, 255, 255, 0.98)',
+              borderRadius: '16px',
+              padding: '20px 24px',
+              boxShadow: '0 10px 40px rgba(0,0,0,0.4)',
+              border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+              backdropFilter: 'blur(10px)',
+              maxWidth: '320px',
+              width: '100%',
+            }}
+          >
+            {deleteConfirm.usageCount > 0 ? (
+              <>
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '10px', 
+                  marginBottom: '12px',
+                  color: '#f59e0b',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                }}>
+                  <span style={{ fontSize: '18px' }}>⚠️</span>
+                  In Verwendung
+                </div>
+                <p style={{ 
+                  color: theme.text, 
+                  fontSize: '14px', 
+                  marginBottom: '8px',
+                  fontWeight: '500',
+                }}>
+                  "{deleteConfirm.label}" löschen?
+                </p>
+                <p style={{ 
+                  color: theme.textMuted, 
+                  fontSize: '13px', 
+                  marginBottom: '20px',
+                }}>
+                  Wird in {deleteConfirm.usageCount} Aufgabe{deleteConfirm.usageCount > 1 ? 'n' : ''} verwendet
+                </p>
+              </>
+            ) : (
+              <p style={{ 
+                color: theme.text, 
+                fontSize: '14px', 
+                marginBottom: '20px',
+                fontWeight: '500',
+              }}>
+                "{deleteConfirm.label}" löschen?
+              </p>
+            )}
+            
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '10px',
+                  border: `1px solid ${darkMode ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)'}`,
+                  background: 'transparent',
+                  color: theme.textMuted,
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                }}
+              >Abbrechen</button>
+              <button
+                onClick={confirmDelete}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  color: '#ef4444',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                }}
+              >Löschen</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Auth Modal */}
       {showAuthModal && (
         <div 
@@ -4243,10 +4680,10 @@ END:VCALENDAR`;
                 color: theme.text, 
                 margin: '0 0 4px 0' 
               }}>
-                {authMode === 'login' ? 'Willkommen zurück!' : 'Konto erstellen'}
+                {authMode === 'login' ? 'Willkommen zurück!' : authMode === 'register' ? 'Konto erstellen' : 'Passwort vergessen?'}
               </h2>
               <p style={{ fontSize: '14px', color: theme.textMuted, margin: 0 }}>
-                {authMode === 'login' ? 'Melde dich bei MindFlow an' : 'Registriere dich bei MindFlow'}
+                {authMode === 'login' ? 'Melde dich bei MindFlow an' : authMode === 'register' ? 'Registriere dich bei MindFlow' : 'Wir senden dir einen Reset-Link'}
               </p>
             </div>
 
@@ -4294,7 +4731,8 @@ END:VCALENDAR`;
               />
             </div>
 
-            {/* Password Input */}
+            {/* Password Input - hide in forgot mode */}
+            {authMode !== 'forgot' && (
             <div style={{ marginBottom: '24px' }}>
               <label style={{ 
                 display: 'block', 
@@ -4326,10 +4764,33 @@ END:VCALENDAR`;
                 }}
               />
             </div>
+            )}
+            
+            {/* Forgot Password Link - only show in login mode */}
+            {authMode === 'login' && (
+              <div style={{ marginTop: '-16px', marginBottom: '24px', textAlign: 'right' }}>
+                <button
+                  onClick={() => {
+                    setAuthMode('forgot');
+                    setAuthError(null);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: theme.textMuted,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                >
+                  Passwort vergessen?
+                </button>
+              </div>
+            )}
 
             {/* Submit Button */}
             <button
-              onClick={authMode === 'login' ? handleLogin : handleRegister}
+              onClick={authMode === 'login' ? handleLogin : authMode === 'register' ? handleRegister : handleForgotPassword}
               disabled={authLoading}
               style={{
                 width: '100%',
@@ -4345,7 +4806,7 @@ END:VCALENDAR`;
                 marginBottom: '16px',
               }}
             >
-              {authLoading ? 'Laden...' : (authMode === 'login' ? 'Anmelden' : 'Registrieren')}
+              {authLoading ? 'Laden...' : (authMode === 'login' ? 'Anmelden' : authMode === 'register' ? 'Registrieren' : 'Link senden')}
             </button>
 
             {/* Switch Mode */}
@@ -4355,23 +4816,44 @@ END:VCALENDAR`;
               color: theme.textMuted,
               margin: 0,
             }}>
-              {authMode === 'login' ? 'Noch kein Konto? ' : 'Bereits registriert? '}
-              <button
-                onClick={() => {
-                  setAuthMode(authMode === 'login' ? 'register' : 'login');
-                  setAuthError(null);
-                }}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: colors.mint,
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                }}
-              >
-                {authMode === 'login' ? 'Registrieren' : 'Anmelden'}
-              </button>
+              {authMode === 'forgot' ? (
+                <button
+                  onClick={() => {
+                    setAuthMode('login');
+                    setAuthError(null);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: colors.mint,
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                  }}
+                >
+                  ← Zurück zum Login
+                </button>
+              ) : (
+                <>
+                  {authMode === 'login' ? 'Noch kein Konto? ' : 'Bereits registriert? '}
+                  <button
+                    onClick={() => {
+                      setAuthMode(authMode === 'login' ? 'register' : 'login');
+                      setAuthError(null);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: colors.mint,
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                    }}
+                  >
+                    {authMode === 'login' ? 'Registrieren' : 'Anmelden'}
+                  </button>
+                </>
+              )}
             </p>
           </div>
         </div>
