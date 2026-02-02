@@ -2668,9 +2668,16 @@ END:VCALENDAR`;
       
       const data = await response.json();
       
+      // DEBUG: Log what we received and what we're using
+      console.log('=== parseWithAI DEBUG ===');
+      console.log('API returned:', data);
+      console.log('selectedCategories:', selectedCategories);
+      console.log('allCategories:', allCategories.map(c => c.id));
+      
       // IMPORTANT: Always use the currently selected category
       // Ignore the AI's category suggestion - user's selection takes priority
       const categoryToUse = getCurrentCategory();
+      console.log('categoryToUse:', categoryToUse);
       
       // IMPORTANT: Only use persons/meetings that actually exist in the system
       // Filter out any that the AI invented
@@ -2707,6 +2714,8 @@ END:VCALENDAR`;
         unread: true,
         completed: false,
       };
+      
+      console.log('newTodo created with category:', newTodo.category);
       
       saveTodoToSupabase(newTodo);
       setTodos(prev => [newTodo, ...prev]);
@@ -3709,7 +3718,11 @@ END:VCALENDAR`;
                     }}>{user.email}</p>
                   </div>
                   <button
-                    onClick={handleLogout}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      handleLogout();
+                    }}
                     style={{
                       width: '100%',
                       padding: '10px 12px',
