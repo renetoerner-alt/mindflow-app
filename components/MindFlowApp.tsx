@@ -2694,7 +2694,8 @@ END:VCALENDAR`;
   };
 
   // Parse complex command with AI (Haiku)
-  const parseWithAI = async (text: string): Promise<void> => {
+  // categoryOverride is passed from the caller to avoid stale closure
+  const parseWithAI = async (text: string, categoryOverride: string): Promise<void> => {
     setVoiceFeedback('🤖 Analysiere...');
     
     try {
@@ -2713,12 +2714,10 @@ END:VCALENDAR`;
       // DEBUG: Log what we received and what we're using
       console.log('=== parseWithAI DEBUG ===');
       console.log('API returned:', data);
-      console.log('selectedCategories:', selectedCategories);
-      console.log('allCategories:', allCategories.map(c => c.id));
+      console.log('categoryOverride (passed from caller):', categoryOverride);
       
-      // IMPORTANT: Always use the currently selected category
-      // Ignore the AI's category suggestion - user's selection takes priority
-      const categoryToUse = getCurrentCategory();
+      // Use the category that was passed in (captured before async call)
+      const categoryToUse = categoryOverride;
       console.log('categoryToUse:', categoryToUse);
       
       // IMPORTANT: Only use persons/meetings that actually exist in the system
@@ -2993,7 +2992,12 @@ END:VCALENDAR`;
     
     // ============ CHECK IF COMPLEX → USE AI ============
     if (isComplexCommand(text)) {
-      await parseWithAI(text);
+      // Get the category NOW before async call (to avoid stale closure)
+      const categoryForNewTask = selectedCategoriesRef.current.length > 0 
+        ? selectedCategoriesRef.current[0] 
+        : (customCategoriesRef.current.length > 0 ? customCategoriesRef.current[0].id : 'default');
+      console.log('Category captured before AI call:', categoryForNewTask);
+      await parseWithAI(text, categoryForNewTask);
       return;
     }
     
@@ -3032,7 +3036,10 @@ END:VCALENDAR`;
         return;
       } else {
         // Too long for simple parsing, use AI
-        await parseWithAI(text);
+        const categoryForNewTask = selectedCategoriesRef.current.length > 0 
+          ? selectedCategoriesRef.current[0] 
+          : (customCategoriesRef.current.length > 0 ? customCategoriesRef.current[0].id : 'default');
+        await parseWithAI(text, categoryForNewTask);
         return;
       }
     }
@@ -3389,7 +3396,10 @@ END:VCALENDAR`;
     
     // ============ FALLBACK: Use AI for anything else ============
     if (lower.length > 5) {
-      await parseWithAI(text);
+      const categoryForNewTask = selectedCategoriesRef.current.length > 0 
+        ? selectedCategoriesRef.current[0] 
+        : (customCategoriesRef.current.length > 0 ? customCategoriesRef.current[0].id : 'default');
+      await parseWithAI(text, categoryForNewTask);
       return;
     }
     
