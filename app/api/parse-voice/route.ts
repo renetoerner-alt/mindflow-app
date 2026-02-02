@@ -75,33 +75,4 @@ export async function POST(request: NextRequest) {
         .replace(/```\n?/g, '')
         .trim();
       
-      parsedData = JSON.parse(cleanedResponse);
-    } catch (parseError) {
-      console.error('Failed to parse AI response:', responseText);
-      return NextResponse.json(
-        { error: 'Konnte Antwort nicht verarbeiten', raw: responseText },
-        { status: 500 }
-      );
-    }
-
-    // Return result WITHOUT category - frontend will set it
-    const result = {
-      title: parsedData.title || text.substring(0, 50),
-      description: parsedData.description || '',
-      priority: Number(parsedData.priority) || 3,
-      // NO category - will be set by frontend based on user selection
-      actionType: parsedData.actionType || 'check',
-      date: parsedData.date || 'Heute',
-      // NO persons/meetings - will be validated by frontend
-    };
-
-    return NextResponse.json(result);
-
-  } catch (error) {
-    console.error('API Error:', error);
-    return NextResponse.json(
-      { error: 'Interner Serverfehler' },
-      { status: 500 }
-    );
-  }
-}
+      parsedData
