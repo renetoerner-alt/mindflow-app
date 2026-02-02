@@ -1425,6 +1425,25 @@ export default function MindFlowApp() {
   const [hiddenPersons, setHiddenPersons] = useState<string[]>([]);
   const [hiddenMeetings, setHiddenMeetings] = useState<string[]>([]);
   const [hiddenActions, setHiddenActions] = useState<string[]>([]);
+  
+  // Refs to track current values for async functions (avoid stale closure)
+  const selectedCategoriesRef = React.useRef<string[]>([]);
+  const customCategoriesRef = React.useRef<Category[]>([]);
+  const hiddenCategoriesRef = React.useRef<string[]>([]);
+  
+  // Keep refs in sync with state
+  React.useEffect(() => {
+    selectedCategoriesRef.current = selectedCategories;
+  }, [selectedCategories]);
+  
+  React.useEffect(() => {
+    customCategoriesRef.current = customCategories;
+  }, [customCategories]);
+  
+  React.useEffect(() => {
+    hiddenCategoriesRef.current = hiddenCategories;
+  }, [hiddenCategories]);
+  
   const [addingCategory, setAddingCategory] = useState<boolean>(false);
   const [newCategoryName, setNewCategoryName] = useState<string>('');
   const [newCategoryColor, setNewCategoryColor] = useState<string>(colors.mint);
@@ -2647,14 +2666,23 @@ END:VCALENDAR`;
   };
 
   // Get the currently selected category for new tasks
+  // Uses refs to avoid stale closure problem in async functions
   const getCurrentCategory = (): string => {
-    console.log('=== getCurrentCategory CALLED ===');
-    console.log('selectedCategories:', JSON.stringify(selectedCategories));
-    console.log('allCategories:', JSON.stringify(allCategories.map(c => c.id)));
+    // Get current values from refs (always up-to-date)
+    const currentSelectedCategories = selectedCategoriesRef.current;
+    const currentCustomCategories = customCategoriesRef.current;
+    const currentHiddenCategories = hiddenCategoriesRef.current;
+    
+    // Build allCategories from current ref values
+    const currentAllCategories = [...categories.filter(c => !currentHiddenCategories.includes(c.id)), ...currentCustomCategories];
+    
+    console.log('=== getCurrentCategory CALLED (using refs) ===');
+    console.log('currentSelectedCategories:', JSON.stringify(currentSelectedCategories));
+    console.log('currentAllCategories:', JSON.stringify(currentAllCategories.map(c => c.id)));
     
     // Try each selected category until we find one that exists
-    for (const catId of selectedCategories) {
-      const exists = allCategories.some(cat => cat.id === catId);
+    for (const catId of currentSelectedCategories) {
+      const exists = currentAllCategories.some(cat => cat.id === catId);
       console.log(`Checking catId "${catId}": exists = ${exists}`);
       if (exists) {
         console.log(`RETURNING: ${catId}`);
@@ -2663,9 +2691,9 @@ END:VCALENDAR`;
     }
     
     // If no selected category is valid, use first available category
-    if (allCategories.length > 0) {
-      console.log(`No valid selection, using first available: ${allCategories[0].id}`);
-      return allCategories[0].id;
+    if (currentAllCategories.length > 0) {
+      console.log(`No valid selection, using first available: ${currentAllCategories[0].id}`);
+      return currentAllCategories[0].id;
     }
     
     // This should not happen if UI enforces category creation first
