@@ -3,9 +3,9 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// GLOBAL VARIABLE - Always holds the current category for new tasks
-// This bypasses all React closure issues
-let GLOBAL_CURRENT_CATEGORY = 'default';
+// GLOBAL VARIABLE - Always holds the ACTIVE category for new tasks
+// This is SEPARATE from the filter selection!
+let GLOBAL_ACTIVE_CATEGORY = 'default';
 let GLOBAL_ALL_CATEGORIES: { id: string; label: string; color: string }[] = [];
 
 // Supabase Configuration
@@ -1424,7 +1424,8 @@ export default function MindFlowApp() {
   const [activeTab, setActiveTab] = useState<string>('tasks');
   const [showAllCategories, setShowAllCategories] = useState<boolean>(false);
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]); // Empty until user creates categories
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]); // For FILTERING displayed tasks
+  const [activeCategoryForNewTasks, setActiveCategoryForNewTasks] = useState<string>(''); // For NEW task creation
   const [isScrolled, setIsScrolled] = useState<boolean>(false);
   const [customCategories, setCustomCategories] = useState<Category[]>([]);
   const [hiddenCategories, setHiddenCategories] = useState<string[]>([]);
@@ -1619,13 +1620,15 @@ export default function MindFlowApp() {
         }
         setSelectedCategories(categoriesToSelect);
         
-        // UPDATE GLOBAL VARIABLE - use first selected category
+        // SET ACTIVE CATEGORY FOR NEW TASKS - both React state AND global variable
         if (categoriesToSelect.length > 0) {
-          GLOBAL_CURRENT_CATEGORY = categoriesToSelect[0];
-          console.log('GLOBAL: Set current category to:', GLOBAL_CURRENT_CATEGORY);
+          setActiveCategoryForNewTasks(categoriesToSelect[0]);
+          GLOBAL_ACTIVE_CATEGORY = categoriesToSelect[0];
+          console.log('GLOBAL: Set active category to:', GLOBAL_ACTIVE_CATEGORY);
         } else if (loadedCategories.length > 0) {
-          GLOBAL_CURRENT_CATEGORY = loadedCategories[0].id;
-          console.log('GLOBAL: Set current category to first available:', GLOBAL_CURRENT_CATEGORY);
+          setActiveCategoryForNewTasks(loadedCategories[0].id);
+          GLOBAL_ACTIVE_CATEGORY = loadedCategories[0].id;
+          console.log('GLOBAL: Set active category to first available:', GLOBAL_ACTIVE_CATEGORY);
         }
         
         setHiddenCategories(settingsData.hidden_categories || []);
@@ -1646,9 +1649,10 @@ export default function MindFlowApp() {
         // Auto-select all loaded categories
         if (loadedCategories.length > 0) {
           setSelectedCategories(loadedCategories.map(c => c.id));
-          // UPDATE GLOBAL VARIABLE for new users
-          GLOBAL_CURRENT_CATEGORY = loadedCategories[0].id;
-          console.log('GLOBAL_CURRENT_CATEGORY (new user):', GLOBAL_CURRENT_CATEGORY);
+          // SET ACTIVE CATEGORY for new users - both React state AND global variable
+          setActiveCategoryForNewTasks(loadedCategories[0].id);
+          GLOBAL_ACTIVE_CATEGORY = loadedCategories[0].id;
+          console.log('GLOBAL_ACTIVE_CATEGORY (new user):', GLOBAL_ACTIVE_CATEGORY);
         }
       }
       
@@ -2346,6 +2350,14 @@ END:VCALENDAR`;
   };
   
   const toggleCategory = (catId: string) => {
+    // ALWAYS set this category as the ACTIVE one for new tasks
+    setActiveCategoryForNewTasks(catId);
+    GLOBAL_ACTIVE_CATEGORY = catId;
+    console.log('=== CATEGORY CLICKED ===');
+    console.log('Active category for new tasks set to:', catId);
+    console.log('GLOBAL_ACTIVE_CATEGORY:', GLOBAL_ACTIVE_CATEGORY);
+    
+    // Also update filter selection (multi-select behavior)
     let newSelected: string[];
     if (selectedCategories.includes(catId)) {
       if (selectedCategories.length > 1) {
@@ -2357,12 +2369,6 @@ END:VCALENDAR`;
     } else {
       newSelected = [...selectedCategories, catId];
       setSelectedCategories(newSelected);
-    }
-    
-    // UPDATE GLOBAL VARIABLE - first selected category is the default for new tasks
-    if (newSelected.length > 0) {
-      GLOBAL_CURRENT_CATEGORY = newSelected[0];
-      console.log('GLOBAL_CURRENT_CATEGORY updated via toggle to:', GLOBAL_CURRENT_CATEGORY);
     }
   };
 
@@ -2725,9 +2731,9 @@ END:VCALENDAR`;
     setVoiceFeedback('🤖 Analysiere...');
     
     // CAPTURE GLOBAL VARIABLE AT START - this is outside React's closure system
-    const categoryToUse = GLOBAL_CURRENT_CATEGORY;
+    const categoryToUse = GLOBAL_ACTIVE_CATEGORY;
     console.log('=== parseWithAI STARTED ===');
-    console.log('GLOBAL_CURRENT_CATEGORY at start:', categoryToUse);
+    console.log('GLOBAL_ACTIVE_CATEGORY at start:', categoryToUse);
     console.log('GLOBAL_ALL_CATEGORIES:', GLOBAL_ALL_CATEGORIES.map(c => c.id));
     
     try {
@@ -2806,7 +2812,7 @@ END:VCALENDAR`;
       const newTodo: Todo = {
         id: crypto.randomUUID(),
         title: text.substring(0, 60),
-        category: GLOBAL_CURRENT_CATEGORY, // Use global here too!
+        category: GLOBAL_ACTIVE_CATEGORY, // Use global here too!
         actionType: 'check',
         priority: 3,
         status: 'Offen',
@@ -3020,7 +3026,7 @@ END:VCALENDAR`;
     // ============ CHECK IF COMPLEX → USE AI ============
     if (isComplexCommand(text)) {
       console.log('=== COMPLEX COMMAND DETECTED ===');
-      console.log('GLOBAL_CURRENT_CATEGORY:', GLOBAL_CURRENT_CATEGORY);
+      console.log('GLOBAL_ACTIVE_CATEGORY:', GLOBAL_ACTIVE_CATEGORY);
       console.log('GLOBAL_ALL_CATEGORIES:', GLOBAL_ALL_CATEGORIES.map(c => c.id));
       
       await parseWithAI(text);
@@ -3037,11 +3043,11 @@ END:VCALENDAR`;
         .trim();
       
       if (title.length > 2 && title.split(' ').length <= 10) {
-        console.log('Simple task - using GLOBAL_CURRENT_CATEGORY:', GLOBAL_CURRENT_CATEGORY);
+        console.log('Simple task - using GLOBAL_ACTIVE_CATEGORY:', GLOBAL_ACTIVE_CATEGORY);
         const newTodo: Todo = {
           id: crypto.randomUUID(),
           title: title.charAt(0).toUpperCase() + title.slice(1),
-          category: GLOBAL_CURRENT_CATEGORY, // USE GLOBAL VARIABLE
+          category: GLOBAL_ACTIVE_CATEGORY, // USE GLOBAL VARIABLE
           actionType: parseActionType(lower),
           priority: parsePriority(lower) || 3,
           status: 'Offen',
@@ -3063,7 +3069,7 @@ END:VCALENDAR`;
         return;
       } else {
         // Too long for simple parsing, use AI
-        console.log('Long task - using AI. GLOBAL_CURRENT_CATEGORY:', GLOBAL_CURRENT_CATEGORY);
+        console.log('Long task - using AI. GLOBAL_ACTIVE_CATEGORY:', GLOBAL_ACTIVE_CATEGORY);
         await parseWithAI(text);
         return;
       }
@@ -3421,7 +3427,7 @@ END:VCALENDAR`;
     
     // ============ FALLBACK: Use AI for anything else ============
     if (lower.length > 5) {
-      console.log('Fallback to AI. GLOBAL_CURRENT_CATEGORY:', GLOBAL_CURRENT_CATEGORY);
+      console.log('Fallback to AI. GLOBAL_ACTIVE_CATEGORY:', GLOBAL_ACTIVE_CATEGORY);
       await parseWithAI(text);
       return;
     }
@@ -3892,6 +3898,7 @@ END:VCALENDAR`;
             : (showAllCategories ? allCategories : allCategories.filter(c => selectedCategories.includes(c.id)))
           ).map(cat => {
             const isSelected = selectedCategories.includes(cat.id);
+            const isActiveForNewTasks = activeCategoryForNewTasks === cat.id;
             let pressTimer: NodeJS.Timeout | null = null;
             
             return (
@@ -3916,15 +3923,21 @@ END:VCALENDAR`;
                   borderRadius: '9999px',
                   fontSize: '14px',
                   fontWeight: '600',
-                  background: isSelected 
-                    ? (darkMode ? `${cat.color}20` : `${cat.color}25`)
-                    : (darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255,255,255,0.5)'),
-                  color: isSelected ? cat.color : (darkMode ? '#6B7280' : '#9ca3af'),
-                  border: isSelected 
-                    ? (darkMode ? `1px solid ${cat.color}30` : 'none')
-                    : 'none',
+                  background: isActiveForNewTasks
+                    ? cat.color  // SOLID background for active category
+                    : isSelected 
+                      ? (darkMode ? `${cat.color}20` : `${cat.color}25`)
+                      : (darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255,255,255,0.5)'),
+                  color: isActiveForNewTasks 
+                    ? '#FFFFFF'  // White text for active category
+                    : isSelected ? cat.color : (darkMode ? '#6B7280' : '#9ca3af'),
+                  border: isActiveForNewTasks
+                    ? `2px solid ${cat.color}`  // Thick border for active
+                    : isSelected 
+                      ? (darkMode ? `1px solid ${cat.color}30` : 'none')
+                      : 'none',
                   cursor: 'pointer',
-                  boxShadow: 'none',
+                  boxShadow: isActiveForNewTasks ? `0 0 8px ${cat.color}50` : 'none',
                   transition: 'all 0.2s',
                   userSelect: 'none',
                 }}
