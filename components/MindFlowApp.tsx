@@ -1577,10 +1577,30 @@ export default function MindFlowApp() {
       console.log('Loaded todos:', transformedTodos.length);
       setTodos(transformedTodos);
       
+      // Apply custom categories FIRST (before settings that depend on them)
+      let loadedCategories: Category[] = [];
+      if (categoriesData && categoriesData.length > 0) {
+        loadedCategories = categoriesData.map(c => ({
+          id: c.category_id,
+          label: c.label,
+          color: c.color,
+        }));
+        setCustomCategories(loadedCategories);
+        console.log('Loaded custom categories:', loadedCategories.map(c => c.id));
+      }
+      
       // Apply settings if they exist
       if (settingsData) {
         console.log('Loaded settings:', settingsData);
-        setSelectedCategories(settingsData.selected_categories || []);
+        
+        // If selected_categories is empty or missing, auto-select all available categories
+        let categoriesToSelect = settingsData.selected_categories || [];
+        if (categoriesToSelect.length === 0 && loadedCategories.length > 0) {
+          categoriesToSelect = loadedCategories.map(c => c.id);
+          console.log('Auto-selecting all categories:', categoriesToSelect);
+        }
+        setSelectedCategories(categoriesToSelect);
+        
         setHiddenCategories(settingsData.hidden_categories || []);
         setHiddenPersons(settingsData.hidden_persons || []);
         setHiddenMeetings(settingsData.hidden_meetings || []);
@@ -1596,16 +1616,10 @@ export default function MindFlowApp() {
       } else {
         // Create default settings for new user
         await createDefaultSettings(userId);
-      }
-      
-      // Apply custom categories
-      if (categoriesData && categoriesData.length > 0) {
-        const customCats: Category[] = categoriesData.map(c => ({
-          id: c.category_id,
-          label: c.label,
-          color: c.color,
-        }));
-        setCustomCategories(customCats);
+        // Auto-select all loaded categories
+        if (loadedCategories.length > 0) {
+          setSelectedCategories(loadedCategories.map(c => c.id));
+        }
       }
       
     } catch (error) {
@@ -2634,21 +2648,29 @@ END:VCALENDAR`;
 
   // Get the currently selected category for new tasks
   const getCurrentCategory = (): string => {
+    console.log('=== getCurrentCategory CALLED ===');
+    console.log('selectedCategories:', JSON.stringify(selectedCategories));
+    console.log('allCategories:', JSON.stringify(allCategories.map(c => c.id)));
+    
     // Try each selected category until we find one that exists
     for (const catId of selectedCategories) {
-      if (allCategories.some(cat => cat.id === catId)) {
+      const exists = allCategories.some(cat => cat.id === catId);
+      console.log(`Checking catId "${catId}": exists = ${exists}`);
+      if (exists) {
+        console.log(`RETURNING: ${catId}`);
         return catId;
       }
     }
     
     // If no selected category is valid, use first available category
     if (allCategories.length > 0) {
+      console.log(`No valid selection, using first available: ${allCategories[0].id}`);
       return allCategories[0].id;
     }
     
     // This should not happen if UI enforces category creation first
-    console.error('No categories available!');
-    return 'default';
+    console.error('ERROR: No categories available!');
+    return 'keine-kategorie';
   };
 
   // Parse complex command with AI (Haiku)
