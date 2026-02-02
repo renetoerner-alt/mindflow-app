@@ -1431,18 +1431,10 @@ export default function MindFlowApp() {
   const customCategoriesRef = React.useRef<Category[]>([]);
   const hiddenCategoriesRef = React.useRef<string[]>([]);
   
-  // Keep refs in sync with state
-  React.useEffect(() => {
-    selectedCategoriesRef.current = selectedCategories;
-  }, [selectedCategories]);
-  
-  React.useEffect(() => {
-    customCategoriesRef.current = customCategories;
-  }, [customCategories]);
-  
-  React.useEffect(() => {
-    hiddenCategoriesRef.current = hiddenCategories;
-  }, [hiddenCategories]);
+  // Update refs whenever state changes (inline, no useEffect needed)
+  selectedCategoriesRef.current = selectedCategories;
+  customCategoriesRef.current = customCategories;
+  hiddenCategoriesRef.current = hiddenCategories;
   
   const [addingCategory, setAddingCategory] = useState<boolean>(false);
   const [newCategoryName, setNewCategoryName] = useState<string>('');
