@@ -2704,8 +2704,10 @@ END:VCALENDAR`;
     console.log('currentSelectedCategories:', JSON.stringify(currentSelectedCategories));
     console.log('currentCustomCategories:', JSON.stringify(currentCustomCategories.map(c => c.id)));
     
-    // Try each selected category until we find one that exists in customCategories
-    for (const catId of currentSelectedCategories) {
+    // Use the LAST selected category (most recently clicked/added)
+    // Iterate backwards to get the most recent selection
+    for (let i = currentSelectedCategories.length - 1; i >= 0; i--) {
+      const catId = currentSelectedCategories[i];
       const exists = currentCustomCategories.some(cat => cat.id === catId);
       console.log(`Checking catId "${catId}": exists in customCategories = ${exists}`);
       if (exists) {
