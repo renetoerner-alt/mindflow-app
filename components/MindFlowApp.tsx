@@ -3,6 +3,11 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
+// GLOBAL VARIABLE - Always holds the current category for new tasks
+// This bypasses all React closure issues
+let GLOBAL_CURRENT_CATEGORY = 'default';
+let GLOBAL_ALL_CATEGORIES: { id: string; label: string; color: string }[] = [];
+
 // Supabase Configuration
 const supabaseUrl = 'https://gcotfldbnuatkewauvhv.supabase.co';
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdjb3RmbGRibnVhdGtld2F1dmh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzNzM5ODgsImV4cCI6MjA4NDk0OTk4OH0.OvK6e9owY_zRKsxkcAEHcuVRlcMUvmrMOVez_hmuTcM';
@@ -398,7 +403,8 @@ interface TaskCardProps {
 
 const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleExpand, onCalendarClick, onStatusChange, onPriorityChange, onActionTypeChange, onDateChange, onToggleComplete, onCategoryChange, allCategories, onDescriptionChange = () => {}, onTitleChange = () => {}, onDelete }) => {
   const priority = priorities.find(p => p.level === todo.priority);
-  const category = categories.find(c => c.id === todo.category);
+  // FIX: Use allCategories prop instead of empty global categories array!
+  const category = allCategories.find(c => c.id === todo.category);
   const actionIcons: Record<string, React.ReactNode> = { email: Icons.email, chat: Icons.chat, check: Icons.check, call: Icons.email, document: Icons.email, research: Icons.search };
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showPriorityDropdown, setShowPriorityDropdown] = useState(false);
@@ -1429,12 +1435,10 @@ export default function MindFlowApp() {
   // Refs to track current values for async functions (avoid stale closure)
   const selectedCategoriesRef = React.useRef<string[]>([]);
   const customCategoriesRef = React.useRef<Category[]>([]);
-  const hiddenCategoriesRef = React.useRef<string[]>([]);
   
   // Update refs whenever state changes (inline, no useEffect needed)
   selectedCategoriesRef.current = selectedCategories;
   customCategoriesRef.current = customCategories;
-  hiddenCategoriesRef.current = hiddenCategories;
   
   const [addingCategory, setAddingCategory] = useState<boolean>(false);
   const [newCategoryName, setNewCategoryName] = useState<string>('');
@@ -1597,7 +1601,10 @@ export default function MindFlowApp() {
           color: c.color,
         }));
         setCustomCategories(loadedCategories);
-        console.log('Loaded custom categories:', loadedCategories.map(c => c.id));
+        
+        // UPDATE GLOBAL VARIABLE
+        GLOBAL_ALL_CATEGORIES = loadedCategories;
+        console.log('GLOBAL: Set all categories:', GLOBAL_ALL_CATEGORIES.map(c => c.id));
       }
       
       // Apply settings if they exist
@@ -1611,6 +1618,15 @@ export default function MindFlowApp() {
           console.log('Auto-selecting all categories:', categoriesToSelect);
         }
         setSelectedCategories(categoriesToSelect);
+        
+        // UPDATE GLOBAL VARIABLE - use first selected category
+        if (categoriesToSelect.length > 0) {
+          GLOBAL_CURRENT_CATEGORY = categoriesToSelect[0];
+          console.log('GLOBAL: Set current category to:', GLOBAL_CURRENT_CATEGORY);
+        } else if (loadedCategories.length > 0) {
+          GLOBAL_CURRENT_CATEGORY = loadedCategories[0].id;
+          console.log('GLOBAL: Set current category to first available:', GLOBAL_CURRENT_CATEGORY);
+        }
         
         setHiddenCategories(settingsData.hidden_categories || []);
         setHiddenPersons(settingsData.hidden_persons || []);
@@ -1630,6 +1646,9 @@ export default function MindFlowApp() {
         // Auto-select all loaded categories
         if (loadedCategories.length > 0) {
           setSelectedCategories(loadedCategories.map(c => c.id));
+          // UPDATE GLOBAL VARIABLE for new users
+          GLOBAL_CURRENT_CATEGORY = loadedCategories[0].id;
+          console.log('GLOBAL_CURRENT_CATEGORY (new user):', GLOBAL_CURRENT_CATEGORY);
         }
       }
       
@@ -2327,12 +2346,23 @@ END:VCALENDAR`;
   };
   
   const toggleCategory = (catId: string) => {
+    let newSelected: string[];
     if (selectedCategories.includes(catId)) {
       if (selectedCategories.length > 1) {
-        setSelectedCategories(selectedCategories.filter(c => c !== catId));
+        newSelected = selectedCategories.filter(c => c !== catId);
+        setSelectedCategories(newSelected);
+      } else {
+        newSelected = selectedCategories; // Can't deselect last one
       }
     } else {
-      setSelectedCategories([...selectedCategories, catId]);
+      newSelected = [...selectedCategories, catId];
+      setSelectedCategories(newSelected);
+    }
+    
+    // UPDATE GLOBAL VARIABLE - first selected category is the default for new tasks
+    if (newSelected.length > 0) {
+      GLOBAL_CURRENT_CATEGORY = newSelected[0];
+      console.log('GLOBAL_CURRENT_CATEGORY updated via toggle to:', GLOBAL_CURRENT_CATEGORY);
     }
   };
 
@@ -2663,29 +2693,25 @@ END:VCALENDAR`;
     // Get current values from refs (always up-to-date)
     const currentSelectedCategories = selectedCategoriesRef.current;
     const currentCustomCategories = customCategoriesRef.current;
-    const currentHiddenCategories = hiddenCategoriesRef.current;
-    
-    // Build allCategories from current ref values
-    const currentAllCategories = [...categories.filter(c => !currentHiddenCategories.includes(c.id)), ...currentCustomCategories];
     
     console.log('=== getCurrentCategory CALLED (using refs) ===');
     console.log('currentSelectedCategories:', JSON.stringify(currentSelectedCategories));
-    console.log('currentAllCategories:', JSON.stringify(currentAllCategories.map(c => c.id)));
+    console.log('currentCustomCategories:', JSON.stringify(currentCustomCategories.map(c => c.id)));
     
-    // Try each selected category until we find one that exists
+    // Try each selected category until we find one that exists in customCategories
     for (const catId of currentSelectedCategories) {
-      const exists = currentAllCategories.some(cat => cat.id === catId);
-      console.log(`Checking catId "${catId}": exists = ${exists}`);
+      const exists = currentCustomCategories.some(cat => cat.id === catId);
+      console.log(`Checking catId "${catId}": exists in customCategories = ${exists}`);
       if (exists) {
         console.log(`RETURNING: ${catId}`);
         return catId;
       }
     }
     
-    // If no selected category is valid, use first available category
-    if (currentAllCategories.length > 0) {
-      console.log(`No valid selection, using first available: ${currentAllCategories[0].id}`);
-      return currentAllCategories[0].id;
+    // If no selected category is valid, use first available custom category
+    if (currentCustomCategories.length > 0) {
+      console.log(`No valid selection, using first custom category: ${currentCustomCategories[0].id}`);
+      return currentCustomCategories[0].id;
     }
     
     // This should not happen if UI enforces category creation first
@@ -2695,8 +2721,14 @@ END:VCALENDAR`;
 
   // Parse complex command with AI (Haiku)
   // categoryOverride is passed from the caller to avoid stale closure
-  const parseWithAI = async (text: string, categoryOverride: string): Promise<void> => {
+  const parseWithAI = async (text: string): Promise<void> => {
     setVoiceFeedback('🤖 Analysiere...');
+    
+    // CAPTURE GLOBAL VARIABLE AT START - this is outside React's closure system
+    const categoryToUse = GLOBAL_CURRENT_CATEGORY;
+    console.log('=== parseWithAI STARTED ===');
+    console.log('GLOBAL_CURRENT_CATEGORY at start:', categoryToUse);
+    console.log('GLOBAL_ALL_CATEGORIES:', GLOBAL_ALL_CATEGORIES.map(c => c.id));
     
     try {
       const response = await fetch('/api/parse-voice', {
@@ -2711,14 +2743,8 @@ END:VCALENDAR`;
       
       const data = await response.json();
       
-      // DEBUG: Log what we received and what we're using
-      console.log('=== parseWithAI DEBUG ===');
       console.log('API returned:', data);
-      console.log('categoryOverride (passed from caller):', categoryOverride);
-      
-      // Use the category that was passed in (captured before async call)
-      const categoryToUse = categoryOverride;
-      console.log('categoryToUse:', categoryToUse);
+      console.log('Using category:', categoryToUse);
       
       // IMPORTANT: Only use persons/meetings that actually exist in the system
       // Filter out any that the AI invented
@@ -2740,7 +2766,7 @@ END:VCALENDAR`;
             .map((m: string) => `#${m}`)
         : undefined;
       
-      // Create todo from AI response
+      // Create todo from AI response - USE THE CAPTURED GLOBAL VARIABLE
       const newTodo: Todo = {
         id: crypto.randomUUID(),
         title: data.title,
@@ -2776,11 +2802,11 @@ END:VCALENDAR`;
     } catch (error) {
       console.error('AI parsing error:', error);
       
-      // Fallback: create simple todo without showing error
+      // Fallback: create simple todo - ALSO USE GLOBAL VARIABLE
       const newTodo: Todo = {
         id: crypto.randomUUID(),
         title: text.substring(0, 60),
-        category: getCurrentCategory(),
+        category: GLOBAL_CURRENT_CATEGORY, // Use global here too!
         actionType: 'check',
         priority: 3,
         status: 'Offen',
@@ -2788,6 +2814,7 @@ END:VCALENDAR`;
         unread: true,
         completed: false,
       };
+      console.log('Fallback todo created with category:', newTodo.category);
       saveTodoToSupabase(newTodo);
       setTodos(prev => [newTodo, ...prev]);
       setVoiceFeedback(`✓ Aufgabe erstellt: "${newTodo.title}"`);
@@ -2992,12 +3019,11 @@ END:VCALENDAR`;
     
     // ============ CHECK IF COMPLEX → USE AI ============
     if (isComplexCommand(text)) {
-      // Get the category NOW before async call (to avoid stale closure)
-      const categoryForNewTask = selectedCategoriesRef.current.length > 0 
-        ? selectedCategoriesRef.current[0] 
-        : (customCategoriesRef.current.length > 0 ? customCategoriesRef.current[0].id : 'default');
-      console.log('Category captured before AI call:', categoryForNewTask);
-      await parseWithAI(text, categoryForNewTask);
+      console.log('=== COMPLEX COMMAND DETECTED ===');
+      console.log('GLOBAL_CURRENT_CATEGORY:', GLOBAL_CURRENT_CATEGORY);
+      console.log('GLOBAL_ALL_CATEGORIES:', GLOBAL_ALL_CATEGORIES.map(c => c.id));
+      
+      await parseWithAI(text);
       return;
     }
     
@@ -3011,10 +3037,11 @@ END:VCALENDAR`;
         .trim();
       
       if (title.length > 2 && title.split(' ').length <= 10) {
+        console.log('Simple task - using GLOBAL_CURRENT_CATEGORY:', GLOBAL_CURRENT_CATEGORY);
         const newTodo: Todo = {
           id: crypto.randomUUID(),
           title: title.charAt(0).toUpperCase() + title.slice(1),
-          category: getCurrentCategory(), // ALWAYS use selected category, never parse from voice
+          category: GLOBAL_CURRENT_CATEGORY, // USE GLOBAL VARIABLE
           actionType: parseActionType(lower),
           priority: parsePriority(lower) || 3,
           status: 'Offen',
@@ -3036,10 +3063,8 @@ END:VCALENDAR`;
         return;
       } else {
         // Too long for simple parsing, use AI
-        const categoryForNewTask = selectedCategoriesRef.current.length > 0 
-          ? selectedCategoriesRef.current[0] 
-          : (customCategoriesRef.current.length > 0 ? customCategoriesRef.current[0].id : 'default');
-        await parseWithAI(text, categoryForNewTask);
+        console.log('Long task - using AI. GLOBAL_CURRENT_CATEGORY:', GLOBAL_CURRENT_CATEGORY);
+        await parseWithAI(text);
         return;
       }
     }
@@ -3396,10 +3421,8 @@ END:VCALENDAR`;
     
     // ============ FALLBACK: Use AI for anything else ============
     if (lower.length > 5) {
-      const categoryForNewTask = selectedCategoriesRef.current.length > 0 
-        ? selectedCategoriesRef.current[0] 
-        : (customCategoriesRef.current.length > 0 ? customCategoriesRef.current[0].id : 'default');
-      await parseWithAI(text, categoryForNewTask);
+      console.log('Fallback to AI. GLOBAL_CURRENT_CATEGORY:', GLOBAL_CURRENT_CATEGORY);
+      await parseWithAI(text);
       return;
     }
     
