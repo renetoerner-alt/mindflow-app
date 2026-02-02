@@ -61,12 +61,8 @@ const priorities = [
   { level: 5, label: 'Minimal', color: colors.skyBlue },
 ];
 
-const categories = [
-  { id: 'arbeit', label: 'Arbeit', color: colors.mint },
-  { id: 'finanzen', label: 'Finanzen', color: colors.skyBlue },
-  { id: 'privat', label: 'Privat', color: colors.purple },
-  { id: 'gesundheit', label: 'Gesundheit', color: colors.coral },
-];
+// No default categories - users create their own
+const categories: Category[] = [];
 
 // SVG Icons - Original MindFlow Icons
 const Icons = {
@@ -150,34 +146,8 @@ const Icons = {
   ),
 };
 
-// Onboarding Todos - Shown for new users before Supabase data loads
-// In production, these are created automatically via Supabase trigger
-const onboardingTodos: Todo[] = [
-  { 
-    id: 'onboarding-1', 
-    title: 'Willkommen bei MindFlow! 👋', 
-    description: 'Tippe auf diese Aufgabe um die Details zu sehen. Du kannst den Titel, die Beschreibung und alle anderen Felder bearbeiten. Halte lange auf die Kategorie oder den Aktionstyp gedrückt um sie zu ändern.', 
-    category: 'arbeit', 
-    actionType: 'check', 
-    priority: 2, 
-    status: 'Offen', 
-    date: 'Heute', 
-    unread: true, 
-    completed: false 
-  },
-  { 
-    id: 'onboarding-2', 
-    title: 'Erstelle deine erste eigene Aufgabe', 
-    description: 'Nutze das Mikrofon-Symbol unten in der Mitte um per Sprache eine neue Aufgabe zu erstellen. Oder lösche diese Beispiel-Aufgaben wenn du bereit bist!', 
-    category: 'arbeit', 
-    actionType: 'chat', 
-    priority: 3, 
-    status: 'Offen', 
-    date: 'Morgen', 
-    unread: true, 
-    completed: false 
-  },
-];
+// No onboarding todos - users create everything themselves
+const onboardingTodos: Todo[] = [];
 
 // Liquid Glass Card Component
 interface GlassCardProps {
@@ -1448,13 +1418,13 @@ export default function MindFlowApp() {
   const [activeTab, setActiveTab] = useState<string>('tasks');
   const [showAllCategories, setShowAllCategories] = useState<boolean>(false);
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(['arbeit', 'privat', 'finanzen', 'gesundheit']);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]); // Empty until user creates categories
   const [isScrolled, setIsScrolled] = useState<boolean>(false);
   const [customCategories, setCustomCategories] = useState<Category[]>([]);
-  const [hiddenCategories, setHiddenCategories] = useState<string[]>([]); // Track deleted default categories
-  const [hiddenPersons, setHiddenPersons] = useState<string[]>([]); // Track deleted default persons
-  const [hiddenMeetings, setHiddenMeetings] = useState<string[]>([]); // Track deleted default meetings
-  const [hiddenActions, setHiddenActions] = useState<string[]>([]); // Track deleted default actions
+  const [hiddenCategories, setHiddenCategories] = useState<string[]>([]);
+  const [hiddenPersons, setHiddenPersons] = useState<string[]>([]);
+  const [hiddenMeetings, setHiddenMeetings] = useState<string[]>([]);
+  const [hiddenActions, setHiddenActions] = useState<string[]>([]);
   const [addingCategory, setAddingCategory] = useState<boolean>(false);
   const [newCategoryName, setNewCategoryName] = useState<string>('');
   const [newCategoryColor, setNewCategoryColor] = useState<string>(colors.mint);
@@ -1507,12 +1477,12 @@ export default function MindFlowApp() {
   const dateFilterOptions: string[] = ['Heute', 'Diese Woche', 'Nächste Woche', 'Diesen Monat', 'Alle'];
   const statusFilterOptions: string[] = ['Rückmeldung', 'Offen', 'In Bearbeitung', 'Alle Status'];
 
-  // Default items
-  const defaultActions: string[] = ['E-Mail', 'Anruf', 'Gespräch', 'Dokument', 'Recherche', 'Prüfen'];
-  const defaultPersons: string[] = ['Sarah', 'Michael', 'Lisa', 'Thomas', 'Anna'];
-  const defaultMeetings: string[] = ['Daily Standup', 'Team Weekly', 'Projekt App', 'Quartalsreview'];
+  // No default items - users create everything themselves
+  const defaultActions: string[] = [];
+  const defaultPersons: string[] = [];
+  const defaultMeetings: string[] = [];
 
-  // Combined items (default filtered by hidden + custom)
+  // Combined items (only custom items now, since defaults are empty)
   const allActions = [...defaultActions.filter(a => !hiddenActions.includes(a)), ...customActions];
   const allPersons = [...defaultPersons.filter(p => !hiddenPersons.includes(p)), ...customPersons];
   const allMeetings = [...defaultMeetings.filter(m => !hiddenMeetings.includes(m)), ...customMeetings];
@@ -1610,7 +1580,7 @@ export default function MindFlowApp() {
       // Apply settings if they exist
       if (settingsData) {
         console.log('Loaded settings:', settingsData);
-        setSelectedCategories(settingsData.selected_categories || ['arbeit', 'privat', 'finanzen', 'gesundheit']);
+        setSelectedCategories(settingsData.selected_categories || []);
         setHiddenCategories(settingsData.hidden_categories || []);
         setHiddenPersons(settingsData.hidden_persons || []);
         setHiddenMeetings(settingsData.hidden_meetings || []);
@@ -1645,13 +1615,13 @@ export default function MindFlowApp() {
     }
   };
   
-  // Create default settings for new user
+  // Create default settings for new user - start with empty arrays
   const createDefaultSettings = async (userId: string) => {
     const { error } = await supabase
       .from('mindflow_user_settings')
       .insert({
         user_id: userId,
-        selected_categories: ['arbeit', 'privat', 'finanzen', 'gesundheit'],
+        selected_categories: [], // Empty - user creates their own
         hidden_categories: [],
         hidden_persons: [],
         hidden_meetings: [],
@@ -1837,27 +1807,11 @@ export default function MindFlowApp() {
         if (data.session) {
           setUser({ id: data.user.id, email: data.user.email || '' });
           
-          // Create default settings
+          // Create default settings (empty)
           await createDefaultSettings(data.user.id);
           
-          // Create welcome todo
-          const welcomeTodo: Todo = {
-            id: crypto.randomUUID(),
-            title: 'Willkommen bei MindFlow! 👋',
-            description: 'Dies ist deine erste Aufgabe. Du kannst sie bearbeiten oder löschen.',
-            category: 'arbeit',
-            priority: 2,
-            status: 'Offen',
-            date: 'Heute',
-            actionType: 'Prüfen',
-            completed: false,
-            unread: true,
-            persons: [],
-            meetings: [],
-          };
-          
-          await saveTodoToSupabase(welcomeTodo);
-          setTodos([welcomeTodo]);
+          // User starts with empty todos - they create their own
+          setTodos([]);
           
           setShowAuthModal(false);
           setAuthEmail('');
@@ -1920,7 +1874,7 @@ export default function MindFlowApp() {
     
     // Reset to empty/guest state
     setTodos([]);
-    setSelectedCategories(['arbeit', 'privat', 'finanzen', 'gesundheit']);
+    setSelectedCategories([]);
     setCustomCategories([]);
     setHiddenCategories([]);
     setHiddenPersons([]);
@@ -2536,6 +2490,19 @@ END:VCALENDAR`;
     if (isListening) {
       recognitionRef.current.stop();
     } else {
+      // Check if user has at least one category
+      if (allCategories.length === 0) {
+        setVoiceFeedback('❌ Bitte erstelle zuerst eine Kategorie');
+        setShowVoiceModal(true);
+        setTimeout(() => {
+          setShowVoiceModal(false);
+          setVoiceFeedback(null);
+          setShowAllCategories(true);
+          setAddingCategory(true);
+        }, 2000);
+        return;
+      }
+      
       setVoiceTranscript('');
       setVoiceInterim('');
       setShowVoiceModal(true);
@@ -2571,25 +2538,6 @@ END:VCALENDAR`;
   // Check if a category ID exists in available categories
   const isValidCategory = (categoryId: string): boolean => {
     return allCategories.some(cat => cat.id === categoryId);
-  };
-
-  const parseVoiceCategory = (text: string): string | undefined => {
-    const lower = text.toLowerCase();
-    
-    // First check if any available category name is mentioned
-    for (const cat of allCategories) {
-      if (lower.includes(cat.label.toLowerCase()) || lower.includes(cat.id.toLowerCase())) {
-        return cat.id;
-      }
-    }
-    
-    // Legacy mappings - only return if the category exists
-    if ((lower.includes('arbeit') || lower.includes('work')) && isValidCategory('arbeit')) return 'arbeit';
-    if ((lower.includes('privat') || lower.includes('personal')) && isValidCategory('privat')) return 'privat';
-    if ((lower.includes('finanz') || lower.includes('geld')) && isValidCategory('finanzen')) return 'finanzen';
-    if ((lower.includes('gesundheit') || lower.includes('health')) && isValidCategory('gesundheit')) return 'gesundheit';
-    
-    return undefined;
   };
 
   const parseDate = (text: string): string => {
@@ -2644,7 +2592,7 @@ END:VCALENDAR`;
     const simplePatterns = [
       /^(erledigt|fertig|done|abhaken)/i,
       /^(lösche|entferne|delete)/i,
-      /^(zeige|filter|nur)\s*(aufgaben)?\s*(@|#|arbeit|privat|finanz|offen|kritisch)/i,
+      /^(zeige|filter|nur)\s*(aufgaben)?\s*(@|#|offen|kritisch)/i,
       /^(alle aufgaben|alles anzeigen|filter zurück)/i,
       /^(suche|such|finde)/i,
       /^@\w+/i,
@@ -2664,7 +2612,12 @@ END:VCALENDAR`;
       /neue\s*(person|kontakt|meeting|termin|aktion)/i,
     ];
     
-    const isSimple = simplePatterns.some(pattern => pattern.test(lower));
+    // Check if any available category is mentioned - this is also simple
+    const mentionsCategoryName = allCategories.some(cat => 
+      lower.includes(cat.label.toLowerCase()) || lower.includes(cat.id.toLowerCase())
+    );
+    
+    const isSimple = simplePatterns.some(pattern => pattern.test(lower)) || mentionsCategoryName;
     
     // If it's a simple command, return false immediately
     if (isSimple) {
@@ -2681,20 +2634,21 @@ END:VCALENDAR`;
 
   // Get the currently selected category for new tasks
   const getCurrentCategory = (): string => {
-    // Always use the first selected category (works with custom categories too)
-    if (selectedCategories.length > 0) {
-      // Verify the selected category still exists
-      const firstSelected = selectedCategories[0];
-      if (allCategories.some(cat => cat.id === firstSelected)) {
-        return firstSelected;
+    // Try each selected category until we find one that exists
+    for (const catId of selectedCategories) {
+      if (allCategories.some(cat => cat.id === catId)) {
+        return catId;
       }
     }
-    // Fallback to first available category (never hardcoded!)
+    
+    // If no selected category is valid, use first available category
     if (allCategories.length > 0) {
       return allCategories[0].id;
     }
-    // Last resort - should never happen if categories exist
-    return selectedCategories[0] || 'privat';
+    
+    // This should not happen if UI enforces category creation first
+    console.error('No categories available!');
+    return 'default';
   };
 
   // Parse complex command with AI (Haiku)
@@ -2718,6 +2672,26 @@ END:VCALENDAR`;
       // Ignore the AI's category suggestion - user's selection takes priority
       const categoryToUse = getCurrentCategory();
       
+      // IMPORTANT: Only use persons/meetings that actually exist in the system
+      // Filter out any that the AI invented
+      const validPersons = data.persons?.length > 0 
+        ? data.persons
+            .map((p: string) => p.replace('@', '')) // Remove @ if present
+            .filter((p: string) => allPersons.some(existing => 
+              existing.toLowerCase() === p.toLowerCase()
+            ))
+            .map((p: string) => `@${p}`)
+        : undefined;
+      
+      const validMeetings = data.meetings?.length > 0 
+        ? data.meetings
+            .map((m: string) => m.replace('#', '')) // Remove # if present
+            .filter((m: string) => allMeetings.some(existing => 
+              existing.toLowerCase() === m.toLowerCase()
+            ))
+            .map((m: string) => `#${m}`)
+        : undefined;
+      
       // Create todo from AI response
       const newTodo: Todo = {
         id: crypto.randomUUID(),
@@ -2728,8 +2702,8 @@ END:VCALENDAR`;
         priority: data.priority || 3,
         status: 'Offen',
         date: data.date || 'Heute',
-        persons: data.persons?.length > 0 ? data.persons.map((p: string) => `@${p}`) : undefined,
-        meetings: data.meetings?.length > 0 ? data.meetings.map((m: string) => `#${m}`) : undefined,
+        persons: validPersons?.length > 0 ? validPersons : undefined,
+        meetings: validMeetings?.length > 0 ? validMeetings : undefined,
         unread: true,
         completed: false,
       };
@@ -2985,13 +2959,14 @@ END:VCALENDAR`;
         const newTodo: Todo = {
           id: crypto.randomUUID(),
           title: title.charAt(0).toUpperCase() + title.slice(1),
-          category: parseVoiceCategory(lower) || getCurrentCategory(),
+          category: getCurrentCategory(), // ALWAYS use selected category, never parse from voice
           actionType: parseActionType(lower),
           priority: parsePriority(lower) || 3,
           status: 'Offen',
           date: parseDate(lower),
           unread: true,
           completed: false,
+          // NO persons or meetings from voice - only what exists
         };
         
         saveTodoToSupabase(newTodo);
@@ -3148,12 +3123,14 @@ END:VCALENDAR`;
     }
     
     // ============ NACH KATEGORIE FILTERN ============
-    if (lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die)?\s*(aufgaben)?\s*(in|aus|von|kategorie)?\s*(arbeit|privat|finanz)/i)) {
-      const category = parseVoiceCategory(lower);
-      if (category) {
-        setSelectedCategories([category]);
-        setVoiceFeedback(`🔍 Filter: Kategorie "${category}"`);
-      }
+    // Check if any available category name is mentioned in the command
+    const mentionedCategory = allCategories.find(cat => 
+      lower.includes(cat.label.toLowerCase()) || lower.includes(cat.id.toLowerCase())
+    );
+    
+    if (mentionedCategory && lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die)?\s*(aufgaben)?/i)) {
+      setSelectedCategories([mentionedCategory.id]);
+      setVoiceFeedback(`🔍 Filter: Kategorie "${mentionedCategory.label}"`);
       
       setTimeout(() => setShowVoiceModal(false), 2000);
       return;
@@ -3217,7 +3194,8 @@ END:VCALENDAR`;
       setMeetingFilter(null);
       setSearchQuery('');
       setShowSearch(false);
-      setSelectedCategories(['arbeit', 'privat', 'finanzen']);
+      // Select all available categories
+      setSelectedCategories(allCategories.map(c => c.id));
       setVoiceFeedback(`✓ Alle Filter zurückgesetzt`);
       
       setTimeout(() => setShowVoiceModal(false), 2000);
@@ -4503,6 +4481,57 @@ END:VCALENDAR`;
           </div>
         )}
 
+        {/* Onboarding Message - Show when no categories exist */}
+        {user && allCategories.length === 0 && (
+          <div style={{
+            padding: '32px 20px',
+            textAlign: 'center',
+            borderRadius: '20px',
+            background: darkMode 
+              ? 'linear-gradient(135deg, rgba(70, 240, 210, 0.1), rgba(167, 139, 250, 0.1))'
+              : 'linear-gradient(135deg, rgba(70, 240, 210, 0.15), rgba(167, 139, 250, 0.15))',
+            border: `1px solid ${darkMode ? 'rgba(70, 240, 210, 0.3)' : 'rgba(70, 240, 210, 0.4)'}`,
+            marginBottom: '20px',
+          }}>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>🎉</div>
+            <h2 style={{ 
+              fontSize: '20px', 
+              fontWeight: '700', 
+              color: theme.text, 
+              marginBottom: '8px' 
+            }}>
+              Willkommen bei MindFlow!
+            </h2>
+            <p style={{ 
+              fontSize: '14px', 
+              color: theme.textMuted, 
+              marginBottom: '20px',
+              lineHeight: '1.5',
+            }}>
+              Erstelle deine erste Kategorie um loszulegen.<br/>
+              Klicke auf <span style={{ color: colors.mint, fontWeight: '600' }}>+ Weitere</span> oben.
+            </p>
+            <button
+              onClick={() => {
+                setShowAllCategories(true);
+                setAddingCategory(true);
+              }}
+              style={{
+                padding: '12px 24px',
+                borderRadius: '12px',
+                border: 'none',
+                background: `linear-gradient(135deg, ${colors.mint}, ${colors.purple})`,
+                color: '#1f2937',
+                fontSize: '15px',
+                fontWeight: '600',
+                cursor: 'pointer',
+              }}
+            >
+              + Erste Kategorie erstellen
+            </button>
+          </div>
+        )}
+
         {/* Task List - Active Tasks */}
         <div className="mindflow-task-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {getFilteredTasks().map(todo => (
@@ -5216,7 +5245,7 @@ END:VCALENDAR`;
                   {[
                     '"Neue Aufgabe: Bericht schreiben"',
                     '"Erledigt: Angebot senden"',
-                    '"Zeige Aufgaben von @Lisa"',
+                    '"Zeige Aufgaben von @Name"',
                     '"Kritische Aufgaben"',
                     '"Suche Budget"',
                   ].map((example, i) => (
@@ -5475,7 +5504,8 @@ END:VCALENDAR`;
             {/* Reset Button */}
             <button
               onClick={() => {
-                setSelectedCategories(['arbeit']);
+                // Select all available categories
+                setSelectedCategories(allCategories.map(c => c.id));
                 setSelectedStatusFilter('Rückmeldung');
                 setSelectedDateFilter('Heute');
                 setActiveStatFilter(null);
