@@ -3,10 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// GLOBAL VARIABLE - Always holds the ACTIVE category for new tasks
-// This is SEPARATE from the filter selection!
-let GLOBAL_ACTIVE_CATEGORY = 'default';
-let GLOBAL_CATEGORY_USER_SET = false; // Tracks if user manually selected a category
 let GLOBAL_ALL_CATEGORIES: { id: string; label: string; color: string }[] = [];
 
 // Supabase Configuration
@@ -1426,7 +1422,7 @@ export default function MindFlowApp() {
   const [showAllCategories, setShowAllCategories] = useState<boolean>(false);
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]); // For FILTERING displayed tasks
-  const [activeCategoryForNewTasks, setActiveCategoryForNewTasks] = useState<string>(''); // For NEW task creation
+  const [createCategoryId, setCreateCategoryId] = useState<string | null>(null); // For NEW task creation
   const [isScrolled, setIsScrolled] = useState<boolean>(false);
   const [customCategories, setCustomCategories] = useState<Category[]>([]);
   const [hiddenCategories, setHiddenCategories] = useState<string[]>([]);
@@ -1625,22 +1621,16 @@ export default function MindFlowApp() {
           console.log('Auto-selecting all categories:', categoriesToSelect);
         }
         setSelectedCategories(categoriesToSelect);
-        
-        // SET ACTIVE CATEGORY FOR NEW TASKS - only if user hasn't manually selected one
-        if (!GLOBAL_CATEGORY_USER_SET) {
-          if (categoriesToSelect.length > 0) {
-            setActiveCategoryForNewTasks(categoriesToSelect[0]);
-            GLOBAL_ACTIVE_CATEGORY = categoriesToSelect[0];
-            console.log('GLOBAL: Set active category to:', GLOBAL_ACTIVE_CATEGORY);
-          } else if (loadedCategories.length > 0) {
-            setActiveCategoryForNewTasks(loadedCategories[0].id);
-            GLOBAL_ACTIVE_CATEGORY = loadedCategories[0].id;
-            console.log('GLOBAL: Set active category to first available:', GLOBAL_ACTIVE_CATEGORY);
-          }
-        } else {
-          console.log('GLOBAL: User already selected category, keeping:', GLOBAL_ACTIVE_CATEGORY);
+
+        // SET CREATE CATEGORY FROM SAVED DEFAULT
+        if (
+          createCategoryId === null &&
+          settingsData?.default_create_category_id &&
+          loadedCategories.some(c => c.id === settingsData.default_create_category_id)
+        ) {
+          setCreateCategoryId(settingsData.default_create_category_id);
         }
-        
+
         setHiddenCategories(settingsData.hidden_categories || []);
         setHiddenPersons(settingsData.hidden_persons || []);
         setHiddenMeetings(settingsData.hidden_meetings || []);
@@ -1659,12 +1649,6 @@ export default function MindFlowApp() {
         // Auto-select all loaded categories
         if (loadedCategories.length > 0) {
           setSelectedCategories(loadedCategories.map(c => c.id));
-          // SET ACTIVE CATEGORY for new users - only if user hasn't manually selected one
-          if (!GLOBAL_CATEGORY_USER_SET) {
-            setActiveCategoryForNewTasks(loadedCategories[0].id);
-            GLOBAL_ACTIVE_CATEGORY = loadedCategories[0].id;
-            console.log('GLOBAL_ACTIVE_CATEGORY (new user):', GLOBAL_ACTIVE_CATEGORY);
-          }
         }
       }
       
@@ -1993,9 +1977,8 @@ export default function MindFlowApp() {
       setTodos([]);
       setCustomCategories([]);
       setSelectedCategories([]);
+      setCreateCategoryId(null);
       lastLoadedUserId.current = null;
-      GLOBAL_ACTIVE_CATEGORY = 'default';
-      GLOBAL_CATEGORY_USER_SET = false; // Reset user selection flag
       GLOBAL_ALL_CATEGORIES = [];
       return;
     }
@@ -2393,22 +2376,31 @@ END:VCALENDAR`;
     return todos.filter(t => t.actionType === action).length;
   };
   
-  const toggleCategory = (catId: string) => {
-    // ALWAYS set this category as the ACTIVE one for new tasks
-    setActiveCategoryForNewTasks(catId);
-    GLOBAL_ACTIVE_CATEGORY = catId;
-    GLOBAL_CATEGORY_USER_SET = true; // User manually selected a category
-    console.log('=== CATEGORY CLICKED ===');
-    console.log('Active category for new tasks set to:', catId);
-    console.log('GLOBAL_ACTIVE_CATEGORY:', GLOBAL_ACTIVE_CATEGORY);
-    
-    // Also update filter selection (multi-select behavior)
-    // User can now deselect ALL categories (shows no tasks, but '+ Weitere' is visible)
-    if (selectedCategories.includes(catId)) {
-      setSelectedCategories(selectedCategories.filter(c => c !== catId));
-    } else {
-      setSelectedCategories([...selectedCategories, catId]);
-    }
+  const selectCreateCategory = (catId: string) => {
+    setCreateCategoryId(catId);
+
+    if (!user?.id) return;
+
+    supabase
+      .from('mindflow_user_settings')
+      .upsert(
+        {
+          user_id: user.id,
+          default_create_category_id: catId
+        },
+        { onConflict: 'user_id' }
+      )
+      .catch(err =>
+        console.error('Failed to persist default create category', err)
+      );
+  };
+
+  const toggleFilterCategory = (catId: string) => {
+    setSelectedCategories(prev =>
+      prev.includes(catId)
+        ? prev.filter(id => id !== catId)
+        : [...prev, catId]
+    );
   };
 
   const deleteCategory = (catId: string, catLabel: string) => {
@@ -2767,58 +2759,52 @@ END:VCALENDAR`;
   };
 
   // Parse complex command with AI (Haiku)
-  // categoryOverride is passed from the caller to avoid stale closure
   const parseWithAI = async (text: string): Promise<void> => {
+    if (!createCategoryId) {
+      console.warn('No active category selected for voice task');
+      setVoiceFeedback('⚠️ Bitte erst eine Kategorie auswählen');
+      setTimeout(() => setVoiceFeedback(null), 2000);
+      return;
+    }
+
     setVoiceFeedback('🤖 Analysiere...');
-    
-    // CAPTURE GLOBAL VARIABLE AT START - this is outside React's closure system
-    const categoryToUse = GLOBAL_ACTIVE_CATEGORY;
-    console.log('=== parseWithAI STARTED ===');
-    console.log('GLOBAL_ACTIVE_CATEGORY at start:', categoryToUse);
-    console.log('GLOBAL_ALL_CATEGORIES:', GLOBAL_ALL_CATEGORIES.map(c => c.id));
-    
+
     try {
       const response = await fetch('/api/parse-voice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
       });
-      
+
       if (!response.ok) {
         throw new Error('API Fehler');
       }
-      
+
       const data = await response.json();
-      
-      console.log('API returned:', data);
-      console.log('Using category:', categoryToUse);
-      
-      // IMPORTANT: Only use persons/meetings that actually exist in the system
-      // Filter out any that the AI invented
-      const validPersons = data.persons?.length > 0 
+
+      const validPersons = data.persons?.length > 0
         ? data.persons
-            .map((p: string) => p.replace('@', '')) // Remove @ if present
-            .filter((p: string) => allPersons.some(existing => 
+            .map((p: string) => p.replace('@', ''))
+            .filter((p: string) => allPersons.some(existing =>
               existing.toLowerCase() === p.toLowerCase()
             ))
             .map((p: string) => `@${p}`)
         : undefined;
-      
-      const validMeetings = data.meetings?.length > 0 
+
+      const validMeetings = data.meetings?.length > 0
         ? data.meetings
-            .map((m: string) => m.replace('#', '')) // Remove # if present
-            .filter((m: string) => allMeetings.some(existing => 
+            .map((m: string) => m.replace('#', ''))
+            .filter((m: string) => allMeetings.some(existing =>
               existing.toLowerCase() === m.toLowerCase()
             ))
             .map((m: string) => `#${m}`)
         : undefined;
-      
-      // Create todo from AI response - USE THE CAPTURED GLOBAL VARIABLE
+
       const newTodo: Todo = {
         id: crypto.randomUUID(),
         title: data.title,
         description: data.description || undefined,
-        category: categoryToUse,
+        category: createCategoryId,
         actionType: data.actionType || 'check',
         priority: data.priority || 3,
         status: 'Offen',
@@ -2828,40 +2814,28 @@ END:VCALENDAR`;
         unread: true,
         completed: false,
       };
-      
-      console.log('=== TASK CREATE DEBUG ===');
-      console.log('ALL CATEGORY STATES SNAPSHOT', {
-        GLOBAL_ACTIVE_CATEGORY,
-        GLOBAL_CATEGORY_USER_SET,
-        activeCategoryForNewTasks,
-        selectedCategories,
-        categoryToUse,
-      });
-      console.log('CATEGORY USED FOR INSERT:', newTodo.category);
 
       saveTodoToSupabase(newTodo);
       setTodos(prev => [newTodo, ...prev]);
-      
-      // Build feedback message
+
       let feedback = `✓ "${newTodo.title}"`;
       if (newTodo.description) feedback += ` mit Beschreibung`;
       if (newTodo.persons?.length) feedback += ` für ${newTodo.persons.join(', ')}`;
-      
+
       setVoiceFeedback(feedback);
-      
+
       setTimeout(() => {
         setShowVoiceModal(false);
         setVoiceFeedback(null);
       }, 2500);
-      
+
     } catch (error) {
       console.error('AI parsing error:', error);
-      
-      // Fallback: create simple todo - ALSO USE GLOBAL VARIABLE
+
       const newTodo: Todo = {
         id: crypto.randomUUID(),
         title: text.substring(0, 60),
-        category: GLOBAL_ACTIVE_CATEGORY, // Use global here too!
+        category: createCategoryId,
         actionType: 'check',
         priority: 3,
         status: 'Offen',
@@ -2869,11 +2843,11 @@ END:VCALENDAR`;
         unread: true,
         completed: false,
       };
-      console.log('Fallback todo created with category:', newTodo.category);
+
       saveTodoToSupabase(newTodo);
       setTodos(prev => [newTodo, ...prev]);
       setVoiceFeedback(`✓ Aufgabe erstellt: "${newTodo.title}"`);
-      
+
       setTimeout(() => {
         setShowVoiceModal(false);
         setVoiceFeedback(null);
@@ -3075,9 +3049,6 @@ END:VCALENDAR`;
     // ============ CHECK IF COMPLEX → USE AI ============
     if (isComplexCommand(text)) {
       console.log('=== COMPLEX COMMAND DETECTED ===');
-      console.log('GLOBAL_ACTIVE_CATEGORY:', GLOBAL_ACTIVE_CATEGORY);
-      console.log('GLOBAL_ALL_CATEGORIES:', GLOBAL_ALL_CATEGORIES.map(c => c.id));
-      
       await parseWithAI(text);
       return;
     }
@@ -3092,33 +3063,37 @@ END:VCALENDAR`;
         .trim();
       
       if (title.length > 2 && title.split(' ').length <= 10) {
-        console.log('Simple task - using GLOBAL_ACTIVE_CATEGORY:', GLOBAL_ACTIVE_CATEGORY);
+        if (!createCategoryId) {
+          console.warn('No active category selected for simple voice task');
+          setVoiceFeedback('⚠️ Bitte erst eine Kategorie auswählen');
+          setTimeout(() => setVoiceFeedback(null), 2000);
+          return;
+        }
+
         const newTodo: Todo = {
           id: crypto.randomUUID(),
           title: title.charAt(0).toUpperCase() + title.slice(1),
-          category: GLOBAL_ACTIVE_CATEGORY, // USE GLOBAL VARIABLE
+          category: createCategoryId,
           actionType: parseActionType(lower),
           priority: parsePriority(lower) || 3,
           status: 'Offen',
           date: parseDate(lower),
           unread: true,
           completed: false,
-          // NO persons or meetings from voice - only what exists
         };
-        
+
         saveTodoToSupabase(newTodo);
         setTodos(prev => [newTodo, ...prev]);
         setVoiceFeedback(`✓ Neue Aufgabe erstellt: "${newTodo.title}"`);
-        
+
         setTimeout(() => {
           setShowVoiceModal(false);
           setVoiceFeedback(null);
         }, 2000);
-        
+
         return;
       } else {
         // Too long for simple parsing, use AI
-        console.log('Long task - using AI. GLOBAL_ACTIVE_CATEGORY:', GLOBAL_ACTIVE_CATEGORY);
         await parseWithAI(text);
         return;
       }
@@ -3476,7 +3451,6 @@ END:VCALENDAR`;
     
     // ============ FALLBACK: Use AI for anything else ============
     if (lower.length > 5) {
-      console.log('Fallback to AI. GLOBAL_ACTIVE_CATEGORY:', GLOBAL_ACTIVE_CATEGORY);
       await parseWithAI(text);
       return;
     }
@@ -3946,13 +3920,20 @@ END:VCALENDAR`;
             ? allCategories.filter(c => selectedCategories.includes(c.id))
             : (showAllCategories ? allCategories : allCategories.filter(c => selectedCategories.includes(c.id)))
           ).map(cat => {
-            const isSelected = selectedCategories.includes(cat.id);
+            const isCreate = createCategoryId === cat.id;
+            const isFilter = selectedCategories.includes(cat.id);
             let pressTimer: NodeJS.Timeout | null = null;
 
             return (
               <button
                 key={cat.id}
-                onClick={() => toggleCategory(cat.id)}
+                onClick={(e) => {
+                  if (e.shiftKey) {
+                    toggleFilterCategory(cat.id);   // FILTER
+                  } else {
+                    selectCreateCategory(cat.id);   // CREATE
+                  }
+                }}
                 onMouseDown={() => {
                   pressTimer = setTimeout(() => {
                     deleteCategory(cat.id, cat.label);
@@ -3970,16 +3951,16 @@ END:VCALENDAR`;
                   padding: '6px 12px',
                   borderRadius: '9999px',
                   fontSize: '14px',
-                  fontWeight: '600',
-                  background: isSelected
+                  fontWeight: isCreate ? '700' : '600',
+                  background: isFilter
                     ? cat.color
                     : (darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255,255,255,0.5)'),
-                  color: isSelected
+                  color: isFilter
                     ? '#000'
                     : (darkMode ? '#6B7280' : '#9ca3af'),
-                  border: 'none',
+                  border: isCreate ? `2px solid ${cat.color}` : 'none',
                   cursor: 'pointer',
-                  boxShadow: 'none',
+                  boxShadow: isCreate ? `0 0 0 2px ${darkMode ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.2)'}` : 'none',
                   transition: 'all 0.2s',
                   userSelect: 'none',
                 }}
