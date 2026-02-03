@@ -1547,6 +1547,11 @@ export default function MindFlowApp() {
   
   // Load all user data from Supabase
   const loadUserDataFromSupabase = async (userId: string) => {
+    // Guard: prevent multiple simultaneous loads
+    if (dataLoading) {
+      console.log('=== Already loading, skipping ===');
+      return;
+    }
     console.log('=== Loading user data from Supabase ===');
     setDataLoading(true);
     
@@ -1944,29 +1949,43 @@ export default function MindFlowApp() {
 
   // Check for existing session on mount
   useEffect(() => {
+    let isMounted = true;
+    let hasLoadedInitialSession = false;
+
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
+      if (session?.user && isMounted && !hasLoadedInitialSession) {
+        hasLoadedInitialSession = true;
         setUser({ id: session.user.id, email: session.user.email || '' });
         await loadUserDataFromSupabase(session.user.id);
       }
     };
-    
+
     checkSession();
-    
-    // Listen for auth changes
+
+    // Listen for auth changes (only for actual changes, not initial session)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('Auth state changed:', event);
-      if (event === 'SIGNED_IN' && session?.user) {
+      if (!isMounted) return;
+
+      // Skip INITIAL_SESSION - already handled by checkSession
+      if (event === 'INITIAL_SESSION') return;
+
+      if (event === 'SIGNED_IN' && session?.user && !hasLoadedInitialSession) {
+        hasLoadedInitialSession = true;
         setUser({ id: session.user.id, email: session.user.email || '' });
         await loadUserDataFromSupabase(session.user.id);
       } else if (event === 'SIGNED_OUT') {
+        hasLoadedInitialSession = false;
         setUser(null);
         setTodos([]);
       }
     });
-    
-    return () => subscription.unsubscribe();
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Auto-save settings to Supabase when they change
