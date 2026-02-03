@@ -3906,9 +3906,8 @@ END:VCALENDAR`;
             : (showAllCategories ? allCategories : allCategories.filter(c => selectedCategories.includes(c.id)))
           ).map(cat => {
             const isSelected = selectedCategories.includes(cat.id);
-            const isActiveForNewTasks = activeCategoryForNewTasks === cat.id;
             let pressTimer: NodeJS.Timeout | null = null;
-            
+
             return (
               <button
                 key={cat.id}
@@ -3931,21 +3930,15 @@ END:VCALENDAR`;
                   borderRadius: '9999px',
                   fontSize: '14px',
                   fontWeight: '600',
-                  background: isActiveForNewTasks
-                    ? cat.color  // SOLID background for active category
-                    : isSelected 
-                      ? (darkMode ? `${cat.color}20` : `${cat.color}25`)
-                      : (darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255,255,255,0.5)'),
-                  color: isActiveForNewTasks 
-                    ? '#FFFFFF'  // White text for active category
-                    : isSelected ? cat.color : (darkMode ? '#6B7280' : '#9ca3af'),
-                  border: isActiveForNewTasks
-                    ? `2px solid ${cat.color}`  // Thick border for active
-                    : isSelected 
-                      ? (darkMode ? `1px solid ${cat.color}30` : 'none')
-                      : 'none',
+                  background: isSelected
+                    ? cat.color
+                    : (darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255,255,255,0.5)'),
+                  color: isSelected
+                    ? '#000'
+                    : (darkMode ? '#6B7280' : '#9ca3af'),
+                  border: 'none',
                   cursor: 'pointer',
-                  boxShadow: isActiveForNewTasks ? `0 0 8px ${cat.color}50` : 'none',
+                  boxShadow: 'none',
                   transition: 'all 0.2s',
                   userSelect: 'none',
                 }}
