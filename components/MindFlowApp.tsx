@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 // GLOBAL VARIABLE - Always holds the ACTIVE category for new tasks
 // This is SEPARATE from the filter selection!
 let GLOBAL_ACTIVE_CATEGORY = 'default';
+let GLOBAL_CATEGORY_USER_SET = false; // Tracks if user manually selected a category
 let GLOBAL_ALL_CATEGORIES: { id: string; label: string; color: string }[] = [];
 
 // Supabase Configuration
@@ -1625,15 +1626,19 @@ export default function MindFlowApp() {
         }
         setSelectedCategories(categoriesToSelect);
         
-        // SET ACTIVE CATEGORY FOR NEW TASKS - both React state AND global variable
-        if (categoriesToSelect.length > 0) {
-          setActiveCategoryForNewTasks(categoriesToSelect[0]);
-          GLOBAL_ACTIVE_CATEGORY = categoriesToSelect[0];
-          console.log('GLOBAL: Set active category to:', GLOBAL_ACTIVE_CATEGORY);
-        } else if (loadedCategories.length > 0) {
-          setActiveCategoryForNewTasks(loadedCategories[0].id);
-          GLOBAL_ACTIVE_CATEGORY = loadedCategories[0].id;
-          console.log('GLOBAL: Set active category to first available:', GLOBAL_ACTIVE_CATEGORY);
+        // SET ACTIVE CATEGORY FOR NEW TASKS - only if user hasn't manually selected one
+        if (!GLOBAL_CATEGORY_USER_SET) {
+          if (categoriesToSelect.length > 0) {
+            setActiveCategoryForNewTasks(categoriesToSelect[0]);
+            GLOBAL_ACTIVE_CATEGORY = categoriesToSelect[0];
+            console.log('GLOBAL: Set active category to:', GLOBAL_ACTIVE_CATEGORY);
+          } else if (loadedCategories.length > 0) {
+            setActiveCategoryForNewTasks(loadedCategories[0].id);
+            GLOBAL_ACTIVE_CATEGORY = loadedCategories[0].id;
+            console.log('GLOBAL: Set active category to first available:', GLOBAL_ACTIVE_CATEGORY);
+          }
+        } else {
+          console.log('GLOBAL: User already selected category, keeping:', GLOBAL_ACTIVE_CATEGORY);
         }
         
         setHiddenCategories(settingsData.hidden_categories || []);
@@ -1654,10 +1659,12 @@ export default function MindFlowApp() {
         // Auto-select all loaded categories
         if (loadedCategories.length > 0) {
           setSelectedCategories(loadedCategories.map(c => c.id));
-          // SET ACTIVE CATEGORY for new users - both React state AND global variable
-          setActiveCategoryForNewTasks(loadedCategories[0].id);
-          GLOBAL_ACTIVE_CATEGORY = loadedCategories[0].id;
-          console.log('GLOBAL_ACTIVE_CATEGORY (new user):', GLOBAL_ACTIVE_CATEGORY);
+          // SET ACTIVE CATEGORY for new users - only if user hasn't manually selected one
+          if (!GLOBAL_CATEGORY_USER_SET) {
+            setActiveCategoryForNewTasks(loadedCategories[0].id);
+            GLOBAL_ACTIVE_CATEGORY = loadedCategories[0].id;
+            console.log('GLOBAL_ACTIVE_CATEGORY (new user):', GLOBAL_ACTIVE_CATEGORY);
+          }
         }
       }
       
@@ -1988,6 +1995,7 @@ export default function MindFlowApp() {
       setSelectedCategories([]);
       lastLoadedUserId.current = null;
       GLOBAL_ACTIVE_CATEGORY = 'default';
+      GLOBAL_CATEGORY_USER_SET = false; // Reset user selection flag
       GLOBAL_ALL_CATEGORIES = [];
       return;
     }
@@ -2389,6 +2397,7 @@ END:VCALENDAR`;
     // ALWAYS set this category as the ACTIVE one for new tasks
     setActiveCategoryForNewTasks(catId);
     GLOBAL_ACTIVE_CATEGORY = catId;
+    GLOBAL_CATEGORY_USER_SET = true; // User manually selected a category
     console.log('=== CATEGORY CLICKED ===');
     console.log('Active category for new tasks set to:', catId);
     console.log('GLOBAL_ACTIVE_CATEGORY:', GLOBAL_ACTIVE_CATEGORY);
