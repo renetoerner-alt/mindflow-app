@@ -2403,17 +2403,11 @@ END:VCALENDAR`;
     console.log('GLOBAL_ACTIVE_CATEGORY:', GLOBAL_ACTIVE_CATEGORY);
     
     // Also update filter selection (multi-select behavior)
-    let newSelected: string[];
+    // User can now deselect ALL categories (shows no tasks, but '+ Weitere' is visible)
     if (selectedCategories.includes(catId)) {
-      if (selectedCategories.length > 1) {
-        newSelected = selectedCategories.filter(c => c !== catId);
-        setSelectedCategories(newSelected);
-      } else {
-        newSelected = selectedCategories; // Can't deselect last one
-      }
+      setSelectedCategories(selectedCategories.filter(c => c !== catId));
     } else {
-      newSelected = [...selectedCategories, catId];
-      setSelectedCategories(newSelected);
+      setSelectedCategories([...selectedCategories, catId]);
     }
   };
 
