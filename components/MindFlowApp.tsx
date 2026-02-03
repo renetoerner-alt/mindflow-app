@@ -1813,8 +1813,8 @@ export default function MindFlowApp() {
       }
       
       if (data.user) {
-        setUser({ id: data.user.id, email: data.user.email || '' });
-        await loadUserDataFromSupabase(data.user.id);
+        // Don't call setUser/loadUserDataFromSupabase here!
+        // The onAuthStateChange handler will do it when SIGNED_IN fires
         setShowAuthModal(false);
         setAuthEmail('');
         setAuthPassword('');
@@ -1863,14 +1863,10 @@ export default function MindFlowApp() {
         
         // Auto-login after registration (if no email confirmation required)
         if (data.session) {
-          setUser({ id: data.user.id, email: data.user.email || '' });
-          
-          // Create default settings (empty)
+          // Don't call setUser here - onAuthStateChange will handle it
+          // But we need to create default settings for new users
           await createDefaultSettings(data.user.id);
-          
-          // User starts with empty todos - they create their own
-          setTodos([]);
-          
+
           setShowAuthModal(false);
           setAuthEmail('');
           setAuthPassword('');
