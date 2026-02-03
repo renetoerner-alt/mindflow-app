@@ -5,7 +5,25 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-const SYSTEM_PROMPT = `Du bist ein Assistent der Aufgaben-Befehle analysiert. Extrahiere: title, description, priority (1-5), actionType (email/call/chat/document/research/check), date (Heute/Morgen/Diese Woche/Nächste Woche). Antworte NUR mit JSON.`;
+const SYSTEM_PROMPT = `Du extrahierst strukturierte Task-Daten aus deutschem Sprachtext.
+Antworte AUSSCHLIESSLICH mit gültigem JSON - kein Text davor oder danach.
+
+Schema:
+{
+  "title": string (nur die Aufgabe selbst, ohne Datum/Priorität/Zeitangaben),
+  "description": string | null,
+  "priority": 1 | 2 | 3 | 4 | 5 (1=kritisch, 5=niedrig, 3=normal),
+  "actionType": "email" | "call" | "chat" | "document" | "research" | "check",
+  "date": "YYYY-MM-DD" | "Heute" | "Morgen" | null
+}
+
+Regeln:
+- Extrahiere Datum aus Text (z.B. "10. Juni" → "2025-06-10", "morgen" → "Morgen", "heute" → "Heute")
+- Extrahiere Priorität aus Text ("dringend/wichtig/kritisch" → 1-2, "niedrig/unwichtig" → 4-5)
+- Title enthält NUR die Aufgabenbeschreibung, NICHT Datum, Priorität oder Zeitangaben
+- Wenn kein Datum erkannt wird, setze null
+- Wenn keine Priorität erkannt wird, setze 3
+- actionType: email=E-Mail, call=Anruf, chat=Besprechung/Meeting, document=Dokument, research=Recherche, check=Standard`;
 
 export async function POST(request: NextRequest) {
   try {
@@ -32,11 +50,11 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
-      title: parsedData.title || text.substring(0, 50),
-      description: parsedData.description || '',
+      title: parsedData.title || 'Neue Aufgabe',
+      description: parsedData.description || null,
       priority: Number(parsedData.priority) || 3,
       actionType: parsedData.actionType || 'check',
-      date: parsedData.date || 'Heute',
+      date: parsedData.date || null,
     });
 
   } catch (error) {

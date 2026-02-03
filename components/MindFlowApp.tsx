@@ -1987,6 +1987,8 @@ export default function MindFlowApp() {
       setCustomCategories([]);
       setSelectedCategories([]);
       lastLoadedUserId.current = null;
+      GLOBAL_ACTIVE_CATEGORY = 'default';
+      GLOBAL_ALL_CATEGORIES = [];
       return;
     }
 
