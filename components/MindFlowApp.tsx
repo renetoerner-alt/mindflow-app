@@ -1436,8 +1436,10 @@ export default function MindFlowApp() {
   // Refs to track current values for async functions (avoid stale closure)
   const selectedCategoriesRef = React.useRef<string[]>([]);
   const customCategoriesRef = React.useRef<Category[]>([]);
-  const isLoadingRef = React.useRef<boolean>(false);
-  const hasLoadedSessionRef = React.useRef<boolean>(false);
+  const lastLoadedUserId = React.useRef<string | null>(null);
+
+  // Session state for auth flow
+  const [session, setSession] = useState<any>(null);
 
   // Update refs whenever state changes (inline, no useEffect needed)
   selectedCategoriesRef.current = selectedCategories;
@@ -1549,13 +1551,7 @@ export default function MindFlowApp() {
   
   // Load all user data from Supabase
   const loadUserDataFromSupabase = async (userId: string) => {
-    // Guard: prevent multiple simultaneous loads (using ref to avoid stale closure)
-    if (isLoadingRef.current) {
-      console.log('=== Already loading, skipping ===');
-      return;
-    }
-    isLoadingRef.current = true;
-    console.log('=== Loading user data from Supabase ===');
+    console.log('=== Loading user data from Supabase ===', userId);
     setDataLoading(true);
     
     try {
@@ -1668,7 +1664,6 @@ export default function MindFlowApp() {
     } catch (error) {
       console.error('Error loading data from Supabase:', error);
     } finally {
-      isLoadingRef.current = false;
       setDataLoading(false);
     }
   };
@@ -1950,51 +1945,57 @@ export default function MindFlowApp() {
     setMounted(true);
   }, []);
 
-  // Check for existing session on mount
+  // 1. Auth-Listener: NUR Session spiegeln (idempotent)
   useEffect(() => {
-    let isMounted = true;
-
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user && isMounted && !hasLoadedSessionRef.current) {
-        hasLoadedSessionRef.current = true;
-        setUser({ id: session.user.id, email: session.user.email || '' });
-        await loadUserDataFromSupabase(session.user.id);
-      }
-    };
-
-    checkSession();
-
-    // Listen for auth changes (only for actual changes, not initial session)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state changed:', event);
-      if (!isMounted) return;
-
-      // Skip INITIAL_SESSION - already handled by checkSession
-      if (event === 'INITIAL_SESSION') return;
-
-      // Skip if we already loaded the session (prevents double-load)
-      if (event === 'SIGNED_IN' && hasLoadedSessionRef.current) {
-        console.log('Session already loaded, skipping SIGNED_IN');
-        return;
-      }
-
-      if (event === 'SIGNED_IN' && session?.user) {
-        hasLoadedSessionRef.current = true;
-        setUser({ id: session.user.id, email: session.user.email || '' });
-        await loadUserDataFromSupabase(session.user.id);
-      } else if (event === 'SIGNED_OUT') {
-        hasLoadedSessionRef.current = false;
-        setUser(null);
-        setTodos([]);
-      }
+    // Initial session holen
+    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
+      setSession(initialSession);
     });
 
-    return () => {
-      isMounted = false;
-      subscription.unsubscribe();
-    };
+    // Listener für Änderungen
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      console.log('Auth state changed:', _event);
+      // Nur updaten wenn sich wirklich was geändert hat
+      setSession(prev => {
+        if (prev?.access_token === newSession?.access_token) return prev;
+        return newSession;
+      });
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  // 2. User-State abgeleitet aus Session
+  useEffect(() => {
+    if (!session?.user) {
+      setUser(null);
+      return;
+    }
+
+    // Nur updaten wenn sich User-ID geändert hat
+    setUser(prev => {
+      if (prev?.id === session.user.id) return prev;
+      return { id: session.user.id, email: session.user.email || '' };
+    });
+  }, [session?.user?.id]);
+
+  // 3. Daten laden NUR bei User-ID-Wechsel
+  useEffect(() => {
+    if (!user?.id) {
+      // Kein User = zurücksetzen
+      setTodos([]);
+      setCustomCategories([]);
+      setSelectedCategories([]);
+      lastLoadedUserId.current = null;
+      return;
+    }
+
+    // Nur laden wenn sich die User-ID geändert hat
+    if (lastLoadedUserId.current === user.id) return;
+
+    lastLoadedUserId.current = user.id;
+    loadUserDataFromSupabase(user.id);
+  }, [user?.id]);
 
   // Auto-save settings to Supabase when they change
   useEffect(() => {
