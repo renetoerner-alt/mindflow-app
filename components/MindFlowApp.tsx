@@ -1437,6 +1437,7 @@ export default function MindFlowApp() {
   const selectedCategoriesRef = React.useRef<string[]>([]);
   const customCategoriesRef = React.useRef<Category[]>([]);
   const isLoadingRef = React.useRef<boolean>(false);
+  const hasLoadedSessionRef = React.useRef<boolean>(false);
 
   // Update refs whenever state changes (inline, no useEffect needed)
   selectedCategoriesRef.current = selectedCategories;
@@ -1921,14 +1922,14 @@ export default function MindFlowApp() {
   const handleLogout = async () => {
     // Save current settings before logout
     await saveSettingsToSupabase();
-    
+
     // Sign out from Supabase
     await supabase.auth.signOut();
-    
+
     // Clear user and reset to guest state
     setUser(null);
     setShowProfileDropdown(false);
-    
+
     // Reset to empty/guest state
     setTodos([]);
     setSelectedCategories([]);
@@ -1943,6 +1944,9 @@ export default function MindFlowApp() {
     setActiveStatFilter(null);
     setSearchQuery('');
     setShowSearch(false);
+
+    // Show login modal after logout
+    setShowAuthModal(true);
   };
 
   // Set mounted to true after hydration
@@ -1953,12 +1957,11 @@ export default function MindFlowApp() {
   // Check for existing session on mount
   useEffect(() => {
     let isMounted = true;
-    let hasLoadedInitialSession = false;
 
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user && isMounted && !hasLoadedInitialSession) {
-        hasLoadedInitialSession = true;
+      if (session?.user && isMounted && !hasLoadedSessionRef.current) {
+        hasLoadedSessionRef.current = true;
         setUser({ id: session.user.id, email: session.user.email || '' });
         await loadUserDataFromSupabase(session.user.id);
       }
@@ -1974,12 +1977,18 @@ export default function MindFlowApp() {
       // Skip INITIAL_SESSION - already handled by checkSession
       if (event === 'INITIAL_SESSION') return;
 
-      if (event === 'SIGNED_IN' && session?.user && !hasLoadedInitialSession) {
-        hasLoadedInitialSession = true;
+      // Skip if we already loaded the session (prevents double-load)
+      if (event === 'SIGNED_IN' && hasLoadedSessionRef.current) {
+        console.log('Session already loaded, skipping SIGNED_IN');
+        return;
+      }
+
+      if (event === 'SIGNED_IN' && session?.user) {
+        hasLoadedSessionRef.current = true;
         setUser({ id: session.user.id, email: session.user.email || '' });
         await loadUserDataFromSupabase(session.user.id);
       } else if (event === 'SIGNED_OUT') {
-        hasLoadedInitialSession = false;
+        hasLoadedSessionRef.current = false;
         setUser(null);
         setTodos([]);
       }
