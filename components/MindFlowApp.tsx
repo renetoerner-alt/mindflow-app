@@ -2829,8 +2829,16 @@ END:VCALENDAR`;
         completed: false,
       };
       
-      console.log('newTodo created with category:', newTodo.category);
-      
+      console.log('=== TASK CREATE DEBUG ===');
+      console.log('ALL CATEGORY STATES SNAPSHOT', {
+        GLOBAL_ACTIVE_CATEGORY,
+        GLOBAL_CATEGORY_USER_SET,
+        activeCategoryForNewTasks,
+        selectedCategories,
+        categoryToUse,
+      });
+      console.log('CATEGORY USED FOR INSERT:', newTodo.category);
+
       saveTodoToSupabase(newTodo);
       setTodos(prev => [newTodo, ...prev]);
       
