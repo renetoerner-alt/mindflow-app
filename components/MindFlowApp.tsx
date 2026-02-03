@@ -1436,7 +1436,8 @@ export default function MindFlowApp() {
   // Refs to track current values for async functions (avoid stale closure)
   const selectedCategoriesRef = React.useRef<string[]>([]);
   const customCategoriesRef = React.useRef<Category[]>([]);
-  
+  const isLoadingRef = React.useRef<boolean>(false);
+
   // Update refs whenever state changes (inline, no useEffect needed)
   selectedCategoriesRef.current = selectedCategories;
   customCategoriesRef.current = customCategories;
@@ -1547,11 +1548,12 @@ export default function MindFlowApp() {
   
   // Load all user data from Supabase
   const loadUserDataFromSupabase = async (userId: string) => {
-    // Guard: prevent multiple simultaneous loads
-    if (dataLoading) {
+    // Guard: prevent multiple simultaneous loads (using ref to avoid stale closure)
+    if (isLoadingRef.current) {
       console.log('=== Already loading, skipping ===');
       return;
     }
+    isLoadingRef.current = true;
     console.log('=== Loading user data from Supabase ===');
     setDataLoading(true);
     
@@ -1665,6 +1667,7 @@ export default function MindFlowApp() {
     } catch (error) {
       console.error('Error loading data from Supabase:', error);
     } finally {
+      isLoadingRef.current = false;
       setDataLoading(false);
     }
   };
