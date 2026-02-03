@@ -1465,7 +1465,8 @@ export default function MindFlowApp() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(false);
   const [dataLoading, setDataLoading] = useState<boolean>(false);
-  
+  const [mounted, setMounted] = useState<boolean>(false);
+
   // Voice Control States
   const [isListening, setIsListening] = useState<boolean>(false);
   const [voiceTranscript, setVoiceTranscript] = useState<string>('');
@@ -1935,6 +1936,11 @@ export default function MindFlowApp() {
     setSearchQuery('');
     setShowSearch(false);
   };
+
+  // Set mounted to true after hydration
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Check for existing session on mount
   useEffect(() => {
@@ -3664,8 +3670,8 @@ END:VCALENDAR`;
       <header className="mindflow-header" style={{ position: 'relative', zIndex: 10, padding: '48px 20px 16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <div>
-            <p style={{ fontSize: '14px', color: theme.textMuted, margin: 0 }}>
-              {(() => {
+            <p style={{ fontSize: '14px', color: theme.textMuted, margin: 0 }} suppressHydrationWarning>
+              {!mounted ? 'Willkommen!' : (() => {
                 const hour = new Date().getHours();
                 if (hour >= 5 && hour < 12) return 'Guten Morgen!';
                 if (hour >= 12 && hour < 18) return 'Guten Tag!';
