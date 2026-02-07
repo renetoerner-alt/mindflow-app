@@ -318,7 +318,7 @@ const StatCard: React.FC<StatCardProps> = ({ value, label, color, darkMode, acti
               }}
             >
               {option}
-              {label === option && <span style={{ color: colors.mint }}>â</span>}
+              {label === option && <span style={{ color: colors.mint }}>Ã¢ÂÂ</span>}
             </button>
           ))}
         </div>
@@ -474,21 +474,21 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
   const statusOptions = [
     { id: 'Offen', color: colors.purple },
     { id: 'In Bearbeitung', color: colors.orange },
-    { id: 'Auf RÃ¼ckmeldung', color: colors.skyBlue },
+    { id: 'Auf RÃÂ¼ckmeldung', color: colors.skyBlue },
     { id: 'Erledigt', color: colors.mint },
   ];
 
   const actionOptions = [
     { id: 'email', label: 'E-Mail', icon: Icons.email },
-    { id: 'chat', label: 'GesprÃ¤ch', icon: Icons.chat },
-    { id: 'check', label: 'PrÃ¼fen', icon: Icons.check },
+    { id: 'chat', label: 'GesprÃÂ¤ch', icon: Icons.chat },
+    { id: 'check', label: 'PrÃÂ¼fen', icon: Icons.check },
     { id: 'call', label: 'Anruf', icon: Icons.email },
     { id: 'document', label: 'Dokument', icon: Icons.email },
     { id: 'research', label: 'Recherche', icon: Icons.search },
   ];
 
   const dateOptions = [
-    'Heute', 'Morgen', 'Diese Woche', 'NÃ¤chste Woche', 'Diesen Monat', 'Kein Datum'
+    'Heute', 'Morgen', 'Diese Woche', 'NÃÂ¤chste Woche', 'Diesen Monat', 'Kein Datum'
   ];
 
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
@@ -516,7 +516,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
     return { daysInMonth, startingDay };
   };
 
-  const monthNames = ['Januar', 'Februar', 'MÃ¤rz', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+  const monthNames = ['Januar', 'Februar', 'MÃÂ¤rz', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
   const dayNames = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 
   const handleDateSelect = (day) => {
@@ -554,7 +554,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
           fontSize: '13px',
           whiteSpace: 'nowrap',
         }}>
-          LÃ¶schen?
+          LÃÂ¶schen?
         </span>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
@@ -682,7 +682,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                     >
                       <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: cat.color }} />
                       {cat.label}
-                      {todo.category === cat.id && <span style={{ marginLeft: 'auto', color: colors.mint }}>â</span>}
+                      {todo.category === cat.id && <span style={{ marginLeft: 'auto', color: colors.mint }}>Ã¢ÂÂ</span>}
                     </button>
                   ))}
                 </div>
@@ -711,7 +711,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                 }}
               >
                 {actionIcons[todo.actionType]}
-                {todo.actionType === 'email' ? 'E-Mail' : todo.actionType === 'chat' ? 'GesprÃ¤ch' : todo.actionType === 'check' ? 'PrÃ¼fen' : todo.actionType === 'call' ? 'Anruf' : todo.actionType === 'document' ? 'Dokument' : 'Recherche'}
+                {todo.actionType === 'email' ? 'E-Mail' : todo.actionType === 'chat' ? 'GesprÃÂ¤ch' : todo.actionType === 'check' ? 'PrÃÂ¼fen' : todo.actionType === 'call' ? 'Anruf' : todo.actionType === 'document' ? 'Dokument' : 'Recherche'}
               </button>
               {showActionTypeDropdown && (
                 <div style={{
@@ -747,7 +747,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                     >
                       {action.icon}
                       {action.label}
-                      {todo.actionType === action.id && <span style={{ marginLeft: 'auto', color: colors.mint }}>â</span>}
+                      {todo.actionType === action.id && <span style={{ marginLeft: 'auto', color: colors.mint }}>Ã¢ÂÂ</span>}
                     </button>
                   ))}
                 </div>
@@ -824,7 +824,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
               const statusColors = {
                 'Offen': { bg: 'rgba(107, 114, 128, 0.2)', color: '#9ca3af', border: 'rgba(107, 114, 128, 0.3)' },
                 'In Bearbeitung': { bg: 'rgba(255, 171, 94, 0.2)', color: colors.orange, border: 'rgba(255, 171, 94, 0.3)' },
-                'Auf RÃ¼ckmeldung': { bg: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24', border: 'rgba(251, 191, 36, 0.3)' },
+                'Auf RÃÂ¼ckmeldung': { bg: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24', border: 'rgba(251, 191, 36, 0.3)' },
                 'Erledigt': { bg: 'rgba(70, 240, 210, 0.2)', color: colors.mint, border: 'rgba(70, 240, 210, 0.3)' },
               };
               const statusStyle = statusColors[todo.status] || statusColors['Offen'];
@@ -918,7 +918,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                         outline: 'none',
                         fontFamily: 'inherit',
                       }}
-                      placeholder="Beschreibung hinzufÃ¼gen..."
+                      placeholder="Beschreibung hinzufÃÂ¼gen..."
                     />
                   ) : (
                     <p 
@@ -937,15 +937,15 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                         cursor: 'pointer',
                         minHeight: '20px',
                       }}>
-                      {todo.description || 'Klicken um Beschreibung hinzuzufÃ¼gen...'}
+                      {todo.description || 'Klicken um Beschreibung hinzuzufÃÂ¼gen...'}
                     </p>
                   )}
                 </div>
               )}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '14px' }}>
-                {/* Row 1: PrioritÃ¤t + Aktionstyp */}
+                {/* Row 1: PrioritÃÂ¤t + Aktionstyp */}
                 <div style={{ position: 'relative' }}>
-                  <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>PrioritÃ¤t</span>
+                  <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>PrioritÃÂ¤t</span>
                   <button
                     onClick={() => { closeAllDropdowns(); setShowPriorityDropdown(!showPriorityDropdown); }}
                     style={{
@@ -1002,7 +1002,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                           }}
                         >
                           P{p.level} - {p.label}
-                          {todo.priority === p.level && <span style={{ marginLeft: 'auto', color: colors.mint }}>â</span>}
+                          {todo.priority === p.level && <span style={{ marginLeft: 'auto', color: colors.mint }}>Ã¢ÂÂ</span>}
                         </button>
                       ))}
                     </div>
@@ -1068,14 +1068,14 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                         >
                           {action.icon}
                           {action.label}
-                          {todo.actionType === action.id && <span style={{ marginLeft: 'auto', color: colors.mint }}>â</span>}
+                          {todo.actionType === action.id && <span style={{ marginLeft: 'auto', color: colors.mint }}>Ã¢ÂÂ</span>}
                         </button>
                       ))}
                     </div>
                   )}
                 </div>
 
-                {/* Row 2: Status + FÃ¤llig */}
+                {/* Row 2: Status + FÃÂ¤llig */}
                 <div style={{ position: 'relative' }}>
                   <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>Status</span>
                   <button
@@ -1135,7 +1135,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                         >
                           <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: status.color, boxShadow: `0 0 6px ${status.color}60` }} />
                           {status.id}
-                          {todo.status === status.id && <span style={{ marginLeft: 'auto', color: colors.mint }}>â</span>}
+                          {todo.status === status.id && <span style={{ marginLeft: 'auto', color: colors.mint }}>Ã¢ÂÂ</span>}
                         </button>
                       ))}
                     </div>
@@ -1143,7 +1143,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                 </div>
 
                 <div style={{ position: 'relative' }}>
-                  <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>FÃ¤llig</span>
+                  <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>FÃÂ¤llig</span>
                   <button
                     onClick={() => { closeAllDropdowns(); setShowDateDropdown(!showDateDropdown); }}
                     style={{
@@ -1200,7 +1200,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                           }}
                         >
                           {date}
-                          {todo.date === date && <span style={{ marginLeft: 'auto', color: colors.mint }}>â</span>}
+                          {todo.date === date && <span style={{ marginLeft: 'auto', color: colors.mint }}>Ã¢ÂÂ</span>}
                         </button>
                       ))}
                       {/* Divider */}
@@ -1225,7 +1225,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                         }}
                       >
                         <span style={{ color: colors.mint }}>{Icons.calendar}</span>
-                        <span style={{ color: darkMode ? '#d1d5db' : '#6b7280', fontSize: '14px' }}>Datum wÃ¤hlen</span>
+                        <span style={{ color: darkMode ? '#d1d5db' : '#6b7280', fontSize: '14px' }}>Datum wÃÂ¤hlen</span>
                       </button>
 
                       {/* Calendar Picker */}
@@ -1252,7 +1252,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                                 padding: '4px 8px',
                               }}
                             >
-                              â¹
+                              Ã¢ÂÂ¹
                             </button>
                             <span style={{ 
                               color: darkMode ? '#f3f4f6' : '#1f2937', 
@@ -1272,7 +1272,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                                 padding: '4px 8px',
                               }}
                             >
-                              âº
+                              Ã¢ÂÂº
                             </button>
                           </div>
 
@@ -1451,7 +1451,7 @@ export default function MindFlowApp() {
   const [dateFilterDropdown, setDateFilterDropdown] = useState<boolean>(false);
   const [selectedDateFilter, setSelectedDateFilter] = useState<string>('Heute');
   const [statusFilterDropdown, setStatusFilterDropdown] = useState<boolean>(false);
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('RÃ¼ckmeldung');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('RÃÂ¼ckmeldung');
   const [activeStatFilter, setActiveStatFilter] = useState<string | null>(null);
   const [showSearch, setShowSearch] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -1492,8 +1492,8 @@ export default function MindFlowApp() {
   // Delete confirmation states
   const [deleteConfirm, setDeleteConfirm] = useState<{type: string; id: string; label: string; usageCount: number} | null>(null);
 
-  const dateFilterOptions: string[] = ['Heute', 'Diese Woche', 'NÃ¤chste Woche', 'Diesen Monat', 'Alle'];
-  const statusFilterOptions: string[] = ['RÃ¼ckmeldung', 'Offen', 'In Bearbeitung', 'Alle Status'];
+  const dateFilterOptions: string[] = ['Heute', 'Diese Woche', 'NÃÂ¤chste Woche', 'Diesen Monat', 'Alle'];
+  const statusFilterOptions: string[] = ['RÃÂ¼ckmeldung', 'Offen', 'In Bearbeitung', 'Alle Status'];
 
   // No default items - users create everything themselves
   const defaultActions: string[] = [];
@@ -1514,8 +1514,8 @@ export default function MindFlowApp() {
       if (filter === 'Alle') return true;
       if (filter === 'Heute') return t.date === 'Heute';
       if (filter === 'Diese Woche') return ['Heute', 'Morgen', 'Diese Woche'].includes(t.date);
-      if (filter === 'NÃ¤chste Woche') return t.date === 'NÃ¤chste Woche';
-      if (filter === 'Diesen Monat') return ['Heute', 'Morgen', 'Diese Woche', 'NÃ¤chste Woche', 'Diesen Monat'].includes(t.date);
+      if (filter === 'NÃÂ¤chste Woche') return t.date === 'NÃÂ¤chste Woche';
+      if (filter === 'Diesen Monat') return ['Heute', 'Morgen', 'Diese Woche', 'NÃÂ¤chste Woche', 'Diesen Monat'].includes(t.date);
       return false;
     }).length;
   };
@@ -1527,7 +1527,7 @@ export default function MindFlowApp() {
       // Only count tasks in selected categories
       if (!selectedCategories.includes(t.category)) return false;
       if (filter === 'Alle Status') return true;
-      if (filter === 'RÃ¼ckmeldung') return t.status === 'Auf RÃ¼ckmeldung';
+      if (filter === 'RÃÂ¼ckmeldung') return t.status === 'Auf RÃÂ¼ckmeldung';
       if (filter === 'Offen') return t.status === 'Offen';
       if (filter === 'In Bearbeitung') return t.status === 'In Bearbeitung';
       return false;
@@ -1641,7 +1641,7 @@ export default function MindFlowApp() {
         setDarkMode(settingsData.dark_mode ?? true);
         // Load filter settings
         setSelectedDateFilter(settingsData.selected_date_filter || 'Heute');
-        setSelectedStatusFilter(settingsData.selected_status_filter || 'RÃ¼ckmeldung');
+        setSelectedStatusFilter(settingsData.selected_status_filter || 'RÃÂ¼ckmeldung');
         setActiveStatFilter(settingsData.active_stat_filter || null);
       } else {
         // Create default settings for new user
@@ -1675,7 +1675,7 @@ export default function MindFlowApp() {
         custom_actions: [],
         dark_mode: true,
         selected_date_filter: 'Heute',
-        selected_status_filter: 'RÃ¼ckmeldung',
+        selected_status_filter: 'RÃÂ¼ckmeldung',
         active_stat_filter: null,
       });
     
@@ -1791,7 +1791,7 @@ export default function MindFlowApp() {
         if (error.message.includes('Invalid login credentials')) {
           setAuthError('E-Mail oder Passwort falsch');
         } else if (error.message.includes('Email not confirmed')) {
-          setAuthError('Bitte bestÃ¤tige zuerst deine E-Mail');
+          setAuthError('Bitte bestÃÂ¤tige zuerst deine E-Mail');
         } else {
           setAuthError(error.message);
         }
@@ -1858,7 +1858,7 @@ export default function MindFlowApp() {
           setAuthPassword('');
         } else {
           // Email confirmation required
-          setAuthError('Bitte bestÃ¤tige deine E-Mail-Adresse. Wir haben dir einen Link geschickt.');
+          setAuthError('Bitte bestÃÂ¤tige deine E-Mail-Adresse. Wir haben dir einen Link geschickt.');
         }
       }
     } catch (error) {
@@ -1891,7 +1891,7 @@ export default function MindFlowApp() {
       setAuthError(null);
       setAuthMode('login');
       setAuthEmail('');
-      alert('â E-Mail gesendet!\n\nWir haben dir einen Link zum ZurÃ¼cksetzen deines Passworts geschickt. Bitte prÃ¼fe dein Postfach.');
+      alert('Ã¢ÂÂ E-Mail gesendet!\n\nWir haben dir einen Link zum ZurÃÂ¼cksetzen deines Passworts geschickt. Bitte prÃÂ¼fe dein Postfach.');
       
     } catch (error) {
       console.error('Password reset error:', error);
@@ -1943,10 +1943,10 @@ export default function MindFlowApp() {
       setSession(initialSession);
     });
 
-    // Listener fÃ¼r Ãnderungen
+    // Listener fÃÂ¼r ÃÂnderungen
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
       console.log('Auth state changed:', _event);
-      // Nur updaten wenn sich wirklich was geÃ¤ndert hat
+      // Nur updaten wenn sich wirklich was geÃÂ¤ndert hat
       setSession(prev => {
         if (prev?.access_token === newSession?.access_token) return prev;
         return newSession;
@@ -1963,7 +1963,7 @@ export default function MindFlowApp() {
       return;
     }
 
-    // Nur updaten wenn sich User-ID geÃ¤ndert hat
+    // Nur updaten wenn sich User-ID geÃÂ¤ndert hat
     setUser(prev => {
       if (prev?.id === session.user.id) return prev;
       return { id: session.user.id, email: session.user.email || '' };
@@ -1973,7 +1973,7 @@ export default function MindFlowApp() {
   // 3. Daten laden NUR bei User-ID-Wechsel
   useEffect(() => {
     if (!user?.id) {
-      // Kein User = zurÃ¼cksetzen
+      // Kein User = zurÃÂ¼cksetzen
       setTodos([]);
       setCustomCategories([]);
       setSelectedCategories([]);
@@ -1983,7 +1983,7 @@ export default function MindFlowApp() {
       return;
     }
 
-    // Nur laden wenn sich die User-ID geÃ¤ndert hat
+    // Nur laden wenn sich die User-ID geÃÂ¤ndert hat
     if (lastLoadedUserId.current === user.id) return;
 
     lastLoadedUserId.current = user.id;
@@ -2031,7 +2031,7 @@ export default function MindFlowApp() {
       );
     }
     
-    // Apply category filter (immer anwenden wenn Kategorien ausgewählt)
+    // Apply category filter (immer anwenden wenn Kategorien ausgewÃ¤hlt)
     if (selectedCategories.length > 0) {
       filtered = filtered.filter(t => selectedCategories.includes(t.category));
     }
@@ -2058,7 +2058,7 @@ export default function MindFlowApp() {
     } else if (activeStatFilter === 'high') {
       filtered = filtered.filter(t => t.priority === 2);
     } else if (activeStatFilter === 'status') {
-      if (selectedStatusFilter === 'RÃ¼ckmeldung') filtered = filtered.filter(t => t.status === 'Auf RÃ¼ckmeldung');
+      if (selectedStatusFilter === 'RÃÂ¼ckmeldung') filtered = filtered.filter(t => t.status === 'Auf RÃÂ¼ckmeldung');
       else if (selectedStatusFilter === 'Offen') filtered = filtered.filter(t => t.status === 'Offen');
       else if (selectedStatusFilter === 'In Bearbeitung') filtered = filtered.filter(t => t.status === 'In Bearbeitung');
       else if (selectedStatusFilter === 'Erledigt') filtered = filtered.filter(t => t.status === 'Erledigt');
@@ -2072,7 +2072,7 @@ export default function MindFlowApp() {
       'Heute': 1,
       'Morgen': 2,
       'Diese Woche': 3,
-      'NÃ¤chste Woche': 4,
+      'NÃÂ¤chste Woche': 4,
       'Diesen Monat': 5,
     };
     
@@ -2095,7 +2095,7 @@ export default function MindFlowApp() {
     today: todos.filter(t => t.date === 'Heute' && t.unread && selectedCategories.includes(t.category)).length,
     critical: todos.filter(t => t.priority === 1 && t.unread && selectedCategories.includes(t.category)).length,
     high: todos.filter(t => t.priority === 2 && t.unread && selectedCategories.includes(t.category)).length,
-    waiting: todos.filter(t => t.status === 'Auf RÃ¼ckmeldung' && t.unread && selectedCategories.includes(t.category)).length,
+    waiting: todos.filter(t => t.status === 'Auf RÃÂ¼ckmeldung' && t.unread && selectedCategories.includes(t.category)).length,
   };
 
   // Mark task as read when expanded
@@ -2123,7 +2123,7 @@ export default function MindFlowApp() {
     if (type === 'today') filter = t => t.date === 'Heute';
     else if (type === 'critical') filter = t => t.priority === 1;
     else if (type === 'high') filter = t => t.priority === 2;
-    else if (type === 'waiting') filter = t => t.status === 'Auf RÃ¼ckmeldung';
+    else if (type === 'waiting') filter = t => t.status === 'Auf RÃÂ¼ckmeldung';
     
     // Don't mark as read immediately, just for demo show the filter would work
   };
@@ -2138,7 +2138,7 @@ export default function MindFlowApp() {
       return tomorrow;
     }
     // Parse "30. Jan." format
-    const months: Record<string, number> = { 'Jan': 0, 'Feb': 1, 'MÃ¤rz': 2, 'Apr': 3, 'Mai': 4, 'Jun': 5, 'Jul': 6, 'Aug': 7, 'Sep': 8, 'Okt': 9, 'Nov': 10, 'Dez': 11 };
+    const months: Record<string, number> = { 'Jan': 0, 'Feb': 1, 'MÃÂ¤rz': 2, 'Apr': 3, 'Mai': 4, 'Jun': 5, 'Jul': 6, 'Aug': 7, 'Sep': 8, 'Okt': 9, 'Nov': 10, 'Dez': 11 };
     const match = dateStr.match(/(\d+)\.\s*(\w+)/);
     if (match) {
       const day = parseInt(match[1]);
@@ -2575,7 +2575,7 @@ END:VCALENDAR`;
   // Toggle Voice Recognition
   const toggleVoiceRecognition = () => {
     if (!recognitionRef.current) {
-      setVoiceError('Spracherkennung wird nicht unterstÃ¼tzt');
+      setVoiceError('Spracherkennung wird nicht unterstÃÂ¼tzt');
       return;
     }
     
@@ -2584,7 +2584,7 @@ END:VCALENDAR`;
     } else {
       // Check if user has at least one category
       if (allCategories.length === 0) {
-        setVoiceFeedback('â Bitte erstelle zuerst eine Kategorie');
+        setVoiceFeedback('Ã¢ÂÂ Bitte erstelle zuerst eine Kategorie');
         setShowVoiceModal(true);
         setTimeout(() => {
           setShowVoiceModal(false);
@@ -2622,7 +2622,7 @@ END:VCALENDAR`;
     const lower = text.toLowerCase();
     if (lower.includes('offen') || lower.includes('neu')) return 'Offen';
     if (lower.includes('bearbeitung') || lower.includes('starte') || lower.includes('beginne')) return 'In Bearbeitung';
-    if (lower.includes('rÃ¼ckmeldung') || lower.includes('warte')) return 'Auf RÃ¼ckmeldung';
+    if (lower.includes('rÃÂ¼ckmeldung') || lower.includes('warte')) return 'Auf RÃÂ¼ckmeldung';
     if (lower.includes('erledigt') || lower.includes('fertig') || lower.includes('done')) return 'Erledigt';
     return undefined;
   };
@@ -2636,9 +2636,9 @@ END:VCALENDAR`;
     const lower = text.toLowerCase();
     if (lower.includes('heute')) return 'Heute';
     if (lower.includes('morgen')) return 'Morgen';
-    if (lower.includes('Ã¼bermorgen')) return 'Ãbermorgen';
+    if (lower.includes('ÃÂ¼bermorgen')) return 'ÃÂbermorgen';
     if (lower.includes('diese woche')) return 'Diese Woche';
-    if (lower.includes('nÃ¤chste woche')) return 'NÃ¤chste Woche';
+    if (lower.includes('nÃÂ¤chste woche')) return 'NÃÂ¤chste Woche';
     return 'Heute';
   };
 
@@ -2646,8 +2646,8 @@ END:VCALENDAR`;
     const lower = text.toLowerCase();
     if (lower.includes('email') || lower.includes('mail') || lower.includes('schreiben')) return 'email';
     if (lower.includes('anruf') || lower.includes('telefo')) return 'call';
-    if (lower.includes('gesprÃ¤ch') || lower.includes('meeting') || lower.includes('besprechen')) return 'chat';
-    if (lower.includes('prÃ¼fen') || lower.includes('check')) return 'check';
+    if (lower.includes('gesprÃÂ¤ch') || lower.includes('meeting') || lower.includes('besprechen')) return 'chat';
+    if (lower.includes('prÃÂ¼fen') || lower.includes('check')) return 'check';
     if (lower.includes('dokument')) return 'document';
     if (lower.includes('recherche') || lower.includes('suchen')) return 'research';
     return 'check';
@@ -2683,22 +2683,22 @@ END:VCALENDAR`;
     // Simple command patterns (should NOT use AI) - check these FIRST
     const simplePatterns = [
       /^(erledigt|fertig|done|abhaken)/i,
-      /^(lÃ¶sche|entferne|delete)/i,
+      /^(lÃÂ¶sche|entferne|delete)/i,
       /^(zeige|filter|nur)\s*(aufgaben)?\s*(@|#|offen|kritisch)/i,
-      /^(alle aufgaben|alles anzeigen|filter zurÃ¼ck)/i,
+      /^(alle aufgaben|alles anzeigen|filter zurÃÂ¼ck)/i,
       /^(suche|such|finde)/i,
       /^@\w+/i,
       /^#\w+/i,
-      /prioritÃ¤t\s*(kritisch|hoch|mittel|niedrig)/i,
-      /status\s*(offen|bearbeitung|rÃ¼ckmeldung|erledigt)/i,
-      /auf\s*(heute|morgen|diese woche|nÃ¤chste woche)$/i,
+      /prioritÃÂ¤t\s*(kritisch|hoch|mittel|niedrig)/i,
+      /status\s*(offen|bearbeitung|rÃÂ¼ckmeldung|erledigt)/i,
+      /auf\s*(heute|morgen|diese woche|nÃÂ¤chste woche)$/i,
       // Voice reading commands - should NOT use AI
       /(lies|lese|vorlesen|sag|nenn|zeig)\s*(mir)?\s*(bitte)?\s*(mal)?\s*(die|alle|meine)?\s*(aufgaben|todos|to-dos|tasks)/i,
-      /(was|welche)\s*(sind|habe ich|gibt es)\s*(fÃ¼r)?\s*(aufgaben|todos)/i,
+      /(was|welche)\s*(sind|habe ich|gibt es)\s*(fÃÂ¼r)?\s*(aufgaben|todos)/i,
       /(aufgaben|todos).*(vorlesen|lesen|ansagen)/i,
-      /(lies|lese|vorlesen).*(heute|hoch|kritisch|prioritÃ¤t|person)/i,
+      /(lies|lese|vorlesen).*(heute|hoch|kritisch|prioritÃÂ¤t|person)/i,
       // Add person/meeting/action to list commands - should NOT use AI
-      /(fÃ¼ge|add|neue).*(person|kontakt|meeting|termin|aktion)\s*(hinzu)?/i,
+      /(fÃÂ¼ge|add|neue).*(person|kontakt|meeting|termin|aktion)\s*(hinzu)?/i,
       /(person|kontakt)\s+\w+/i,
       /(meeting|termin)\s+\w+/i,
       /neue\s*(person|kontakt|meeting|termin|aktion)/i,
@@ -2717,7 +2717,7 @@ END:VCALENDAR`;
     }
     
     // Complex indicators (only check if not already identified as simple)
-    const hasDescription = lower.includes('beschreibung') || lower.includes('details') || lower.includes('hinzufÃ¼gen dass');
+    const hasDescription = lower.includes('beschreibung') || lower.includes('details') || lower.includes('hinzufÃÂ¼gen dass');
     const hasMultipleClauses = lower.includes(' und ') || lower.includes(' weil ') || lower.includes(' damit ') || lower.includes(' dass ');
     const isLongText = wordCount > 12;
     
@@ -2762,12 +2762,12 @@ END:VCALENDAR`;
   const parseWithAI = async (text: string): Promise<void> => {
     if (!createCategoryId) {
       console.warn('No active category selected for voice task');
-      setVoiceFeedback('â ï¸ Bitte erst eine Kategorie auswÃ¤hlen');
+      setVoiceFeedback('Ã¢ÂÂ Ã¯Â¸Â Bitte erst eine Kategorie auswÃÂ¤hlen');
       setTimeout(() => setVoiceFeedback(null), 2000);
       return;
     }
 
-    setVoiceFeedback('ð¤ Analysiere...');
+    setVoiceFeedback('Ã°ÂÂ¤Â Analysiere...');
 
     try {
       const response = await fetch('/api/parse-voice', {
@@ -2818,9 +2818,9 @@ END:VCALENDAR`;
       saveTodoToSupabase(newTodo);
       setTodos(prev => [newTodo, ...prev]);
 
-      let feedback = `â "${newTodo.title}"`;
+      let feedback = `Ã¢ÂÂ "${newTodo.title}"`;
       if (newTodo.description) feedback += ` mit Beschreibung`;
-      if (newTodo.persons?.length) feedback += ` fÃ¼r ${newTodo.persons.join(', ')}`;
+      if (newTodo.persons?.length) feedback += ` fÃÂ¼r ${newTodo.persons.join(', ')}`;
 
       setVoiceFeedback(feedback);
 
@@ -2846,7 +2846,7 @@ END:VCALENDAR`;
 
       saveTodoToSupabase(newTodo);
       setTodos(prev => [newTodo, ...prev]);
-      setVoiceFeedback(`â Aufgabe erstellt: "${newTodo.title}"`);
+      setVoiceFeedback(`Ã¢ÂÂ Aufgabe erstellt: "${newTodo.title}"`);
 
       setTimeout(() => {
         setShowVoiceModal(false);
@@ -2863,10 +2863,10 @@ END:VCALENDAR`;
     console.log('Original text:', text);
     console.log('Lowercase:', lower);
     
-    // ============ ABSOLUTE PRIORITY: PERSON/MEETING/AKTION HINZUFÃGEN ============
+    // ============ ABSOLUTE PRIORITY: PERSON/MEETING/AKTION HINZUFÃÂGEN ============
     // These MUST be processed FIRST - no exceptions!
     
-    // Check for PERSON command - "fÃ¼ge Person Mia hinzu", "fÃ¼ge Mia hinzu bei Personen", etc.
+    // Check for PERSON command - "fÃÂ¼ge Person Mia hinzu", "fÃÂ¼ge Mia hinzu bei Personen", etc.
     const hasPersonKeyword = lower.includes('person');
     console.log('Has person keyword:', hasPersonKeyword);
     
@@ -2882,33 +2882,33 @@ END:VCALENDAR`;
       
       let personName = '';
       
-      // Strategy 1: Name is AFTER "person" (e.g., "fÃ¼ge Person Mia hinzu")
+      // Strategy 1: Name is AFTER "person" (e.g., "fÃÂ¼ge Person Mia hinzu")
       if (personIndex !== -1 && personIndex < words.length - 1) {
         const nextWord = words[personIndex + 1];
-        const skipWords = ['hinzu', 'hinzufÃ¼gen', 'bitte', 'eine', 'einen', 'zur', 'liste', 'erstellen', 'anlegen', 'neue', 'neuen', 'die', 'der', 'das', 'namens', 'mit', 'dem', 'namen', 'an', 'bei'];
+        const skipWords = ['hinzu', 'hinzufÃÂ¼gen', 'bitte', 'eine', 'einen', 'zur', 'liste', 'erstellen', 'anlegen', 'neue', 'neuen', 'die', 'der', 'das', 'namens', 'mit', 'dem', 'namen', 'an', 'bei'];
         if (!skipWords.includes(nextWord)) {
           personName = nextWord;
           console.log('Strategy 1 - Name after keyword:', personName);
         }
       }
       
-      // Strategy 2: Name is BEFORE "person/personen" (e.g., "fÃ¼ge Mia hinzu bei Personen")
+      // Strategy 2: Name is BEFORE "person/personen" (e.g., "fÃÂ¼ge Mia hinzu bei Personen")
       if (!personName) {
-        // Look for pattern: "fÃ¼ge X hinzu" where X is the name
-        const fÃ¼geIndex = words.findIndex(w => w === 'fÃ¼ge' || w === 'add' || w === 'neue' || w === 'neuen');
-        if (fÃ¼geIndex !== -1 && fÃ¼geIndex < words.length - 1) {
-          const potentialName = words[fÃ¼geIndex + 1];
-          const skipWords = ['hinzu', 'hinzufÃ¼gen', 'bitte', 'eine', 'einen', 'person', 'personen', 'kontakt', 'meeting', 'meetings', 'termin', 'aktion'];
+        // Look for pattern: "fÃÂ¼ge X hinzu" where X is the name
+        const fÃÂ¼geIndex = words.findIndex(w => w === 'fÃÂ¼ge' || w === 'add' || w === 'neue' || w === 'neuen');
+        if (fÃÂ¼geIndex !== -1 && fÃÂ¼geIndex < words.length - 1) {
+          const potentialName = words[fÃÂ¼geIndex + 1];
+          const skipWords = ['hinzu', 'hinzufÃÂ¼gen', 'bitte', 'eine', 'einen', 'person', 'personen', 'kontakt', 'meeting', 'meetings', 'termin', 'aktion'];
           if (!skipWords.includes(potentialName)) {
             personName = potentialName;
-            console.log('Strategy 2 - Name after fÃ¼ge:', personName);
+            console.log('Strategy 2 - Name after fÃÂ¼ge:', personName);
           }
         }
       }
       
       // Clean up the name
       if (personName) {
-        personName = personName.replace(/[^a-zÃ¤Ã¶Ã¼ÃA-ZÃÃÃ]/gi, '');
+        personName = personName.replace(/[^a-zÃÂ¤ÃÂ¶ÃÂ¼ÃÂA-ZÃÂÃÂÃÂ]/gi, '');
         console.log('Cleaned person name:', personName);
         
         if (personName && personName.length > 1) {
@@ -2920,11 +2920,11 @@ END:VCALENDAR`;
           
           if (!allPersonsList.some(p => p.toLowerCase() === personName.toLowerCase())) {
             setCustomPersons(prev => [...prev, capitalizedName]);
-            setVoiceFeedback(`â @${capitalizedName} zur Personenliste hinzugefÃ¼gt`);
+            setVoiceFeedback(`Ã¢ÂÂ @${capitalizedName} zur Personenliste hinzugefÃÂ¼gt`);
             console.log('SUCCESS: Person added:', capitalizedName);
             console.log('SUCCESS: Person added:', capitalizedName);
           } else {
-            setVoiceFeedback(`â¹ï¸ @${capitalizedName} existiert bereits`);
+            setVoiceFeedback(`Ã¢ÂÂ¹Ã¯Â¸Â @${capitalizedName} existiert bereits`);
             console.log('INFO: Person already exists');
           }
           setTimeout(() => setShowVoiceModal(false), 2000);
@@ -2933,7 +2933,7 @@ END:VCALENDAR`;
       }
     }
     
-    // Check for MEETING command - "fÃ¼ge Meeting Standup hinzu", "fÃ¼ge Standup hinzu bei Meetings", etc.
+    // Check for MEETING command - "fÃÂ¼ge Meeting Standup hinzu", "fÃÂ¼ge Standup hinzu bei Meetings", etc.
     const hasMeetingKeyword = lower.includes('meeting') || lower.includes('termin');
     console.log('Has meeting keyword:', hasMeetingKeyword);
     
@@ -2945,13 +2945,13 @@ END:VCALENDAR`;
       console.log('Meeting keyword index:', meetingIndex);
       
       let meetingWords: string[] = [];
-      const stopWords = ['hinzu', 'hinzufÃ¼gen', 'bitte', 'erstellen', 'anlegen', 'bei', 'an', 'zu'];
+      const stopWords = ['hinzu', 'hinzufÃÂ¼gen', 'bitte', 'erstellen', 'anlegen', 'bei', 'an', 'zu'];
       const skipWords = ['ein', 'eine', 'einen', 'neues', 'neuen', 'zur', 'liste', 'meeting', 'meetings', 'termin', 'termine'];
       
-      // Strategy 1: Name is AFTER "meeting" (e.g., "fÃ¼ge Meeting Standup hinzu")
+      // Strategy 1: Name is AFTER "meeting" (e.g., "fÃÂ¼ge Meeting Standup hinzu")
       if (meetingIndex !== -1 && meetingIndex < words.length - 1) {
         for (let i = meetingIndex + 1; i < words.length; i++) {
-          const word = words[i].replace(/[^a-zÃ¤Ã¶Ã¼ÃA-ZÃÃÃ]/gi, '');
+          const word = words[i].replace(/[^a-zÃÂ¤ÃÂ¶ÃÂ¼ÃÂA-ZÃÂÃÂÃÂ]/gi, '');
           if (stopWords.includes(word.toLowerCase()) || !word) break;
           if (!skipWords.includes(word.toLowerCase())) {
             meetingWords.push(word);
@@ -2960,16 +2960,16 @@ END:VCALENDAR`;
         console.log('Strategy 1 - Words after meeting:', meetingWords);
       }
       
-      // Strategy 2: Name is BEFORE "meeting/meetings" (e.g., "fÃ¼ge Standup hinzu bei Meetings")
+      // Strategy 2: Name is BEFORE "meeting/meetings" (e.g., "fÃÂ¼ge Standup hinzu bei Meetings")
       if (meetingWords.length === 0) {
-        const fÃ¼geIndex = words.findIndex(w => w === 'fÃ¼ge' || w === 'add' || w === 'neues' || w === 'neuen');
-        if (fÃ¼geIndex !== -1) {
-          for (let i = fÃ¼geIndex + 1; i < words.length; i++) {
-            const word = words[i].replace(/[^a-zÃ¤Ã¶Ã¼ÃA-ZÃÃÃ]/gi, '');
+        const fÃÂ¼geIndex = words.findIndex(w => w === 'fÃÂ¼ge' || w === 'add' || w === 'neues' || w === 'neuen');
+        if (fÃÂ¼geIndex !== -1) {
+          for (let i = fÃÂ¼geIndex + 1; i < words.length; i++) {
+            const word = words[i].replace(/[^a-zÃÂ¤ÃÂ¶ÃÂ¼ÃÂA-ZÃÂÃÂÃÂ]/gi, '');
             if (stopWords.includes(word.toLowerCase()) || skipWords.includes(word.toLowerCase()) || !word) break;
             meetingWords.push(word);
           }
-          console.log('Strategy 2 - Words after fÃ¼ge:', meetingWords);
+          console.log('Strategy 2 - Words after fÃÂ¼ge:', meetingWords);
         }
       }
       
@@ -2982,18 +2982,18 @@ END:VCALENDAR`;
         
         if (!allMeetingsList.some(m => m.toLowerCase() === meetingName.toLowerCase())) {
           setCustomMeetings(prev => [...prev, capitalizedName]);
-          setVoiceFeedback(`â #${capitalizedName} zur Meetingliste hinzugefÃ¼gt`);
+          setVoiceFeedback(`Ã¢ÂÂ #${capitalizedName} zur Meetingliste hinzugefÃÂ¼gt`);
           console.log('SUCCESS: Meeting added:', capitalizedName);
         } else {
-          setVoiceFeedback(`â¹ï¸ #${capitalizedName} existiert bereits`);
+          setVoiceFeedback(`Ã¢ÂÂ¹Ã¯Â¸Â #${capitalizedName} existiert bereits`);
         }
         setTimeout(() => setShowVoiceModal(false), 2000);
         return; // STOP HERE
       }
     }
     
-    // Check for AKTION command - "fÃ¼ge Aktion Review hinzu", etc.
-    // Check for AKTION command - "fÃ¼ge Aktion Review hinzu", "fÃ¼ge Review hinzu bei Aktionen", etc.
+    // Check for AKTION command - "fÃÂ¼ge Aktion Review hinzu", etc.
+    // Check for AKTION command - "fÃÂ¼ge Aktion Review hinzu", "fÃÂ¼ge Review hinzu bei Aktionen", etc.
     const hasAktionKeyword = lower.includes('aktion');
     console.log('Has aktion keyword:', hasAktionKeyword);
     
@@ -3005,25 +3005,25 @@ END:VCALENDAR`;
       console.log('Action keyword index:', actionIndex);
       
       let actionName = '';
-      const skipWords = ['hinzu', 'hinzufÃ¼gen', 'bitte', 'eine', 'einen', 'zur', 'liste', 'erstellen', 'anlegen', 'neue', 'neuen', 'bei', 'an', 'zu', 'aktion', 'aktionen'];
+      const skipWords = ['hinzu', 'hinzufÃÂ¼gen', 'bitte', 'eine', 'einen', 'zur', 'liste', 'erstellen', 'anlegen', 'neue', 'neuen', 'bei', 'an', 'zu', 'aktion', 'aktionen'];
       
-      // Strategy 1: Name is AFTER "aktion" (e.g., "fÃ¼ge Aktion Review hinzu")
+      // Strategy 1: Name is AFTER "aktion" (e.g., "fÃÂ¼ge Aktion Review hinzu")
       if (actionIndex !== -1 && actionIndex < words.length - 1) {
-        const nextWord = words[actionIndex + 1].replace(/[^a-zÃ¤Ã¶Ã¼ÃA-ZÃÃÃ]/gi, '');
+        const nextWord = words[actionIndex + 1].replace(/[^a-zÃÂ¤ÃÂ¶ÃÂ¼ÃÂA-ZÃÂÃÂÃÂ]/gi, '');
         if (nextWord && !skipWords.includes(nextWord.toLowerCase())) {
           actionName = nextWord;
           console.log('Strategy 1 - Name after aktion:', actionName);
         }
       }
       
-      // Strategy 2: Name is BEFORE "aktion/aktionen" (e.g., "fÃ¼ge Review hinzu bei Aktionen")
+      // Strategy 2: Name is BEFORE "aktion/aktionen" (e.g., "fÃÂ¼ge Review hinzu bei Aktionen")
       if (!actionName) {
-        const fÃ¼geIndex = words.findIndex(w => w === 'fÃ¼ge' || w === 'add' || w === 'neue' || w === 'neuen');
-        if (fÃ¼geIndex !== -1 && fÃ¼geIndex < words.length - 1) {
-          const potentialName = words[fÃ¼geIndex + 1].replace(/[^a-zÃ¤Ã¶Ã¼ÃA-ZÃÃÃ]/gi, '');
+        const fÃÂ¼geIndex = words.findIndex(w => w === 'fÃÂ¼ge' || w === 'add' || w === 'neue' || w === 'neuen');
+        if (fÃÂ¼geIndex !== -1 && fÃÂ¼geIndex < words.length - 1) {
+          const potentialName = words[fÃÂ¼geIndex + 1].replace(/[^a-zÃÂ¤ÃÂ¶ÃÂ¼ÃÂA-ZÃÂÃÂÃÂ]/gi, '');
           if (potentialName && !skipWords.includes(potentialName.toLowerCase())) {
             actionName = potentialName;
-            console.log('Strategy 2 - Name after fÃ¼ge:', actionName);
+            console.log('Strategy 2 - Name after fÃÂ¼ge:', actionName);
           }
         }
       }
@@ -3034,10 +3034,10 @@ END:VCALENDAR`;
         
         if (!allActionsList.some(a => a.toLowerCase() === actionName.toLowerCase())) {
           setCustomActions(prev => [...prev, capitalizedName]);
-          setVoiceFeedback(`â "${capitalizedName}" zur Aktionsliste hinzugefÃ¼gt`);
+          setVoiceFeedback(`Ã¢ÂÂ "${capitalizedName}" zur Aktionsliste hinzugefÃÂ¼gt`);
           console.log('SUCCESS: Action added:', capitalizedName);
         } else {
-          setVoiceFeedback(`â¹ï¸ "${capitalizedName}" existiert bereits`);
+          setVoiceFeedback(`Ã¢ÂÂ¹Ã¯Â¸Â "${capitalizedName}" existiert bereits`);
         }
         setTimeout(() => setShowVoiceModal(false), 2000);
         return; // STOP HERE
@@ -3046,7 +3046,7 @@ END:VCALENDAR`;
     
     console.log('>>> No person/meeting/action detected, continuing...');
     
-    // ============ CHECK IF COMPLEX â USE AI ============
+    // ============ CHECK IF COMPLEX Ã¢ÂÂ USE AI ============
     if (isComplexCommand(text)) {
       console.log('=== COMPLEX COMMAND DETECTED ===');
       await parseWithAI(text);
@@ -3058,14 +3058,14 @@ END:VCALENDAR`;
     // ============ NEUE AUFGABE ERSTELLEN (einfach) ============
     if (lower.match(/^(neue aufgabe|neues todo|erstelle|erstell)\s*[:\s]?\s*\w/i)) {
       const title = text
-        .replace(/^(neue aufgabe|neues todo|erstelle|erstell|hinzufÃ¼gen)\s*[:\s]?\s*/i, '')
+        .replace(/^(neue aufgabe|neues todo|erstelle|erstell|hinzufÃÂ¼gen)\s*[:\s]?\s*/i, '')
         .replace(/\s*(bitte|mal|doch)\s*/gi, ' ')
         .trim();
       
       if (title.length > 2 && title.split(' ').length <= 10) {
         if (!createCategoryId) {
           console.warn('No active category selected for simple voice task');
-          setVoiceFeedback('â ï¸ Bitte erst eine Kategorie auswÃ¤hlen');
+          setVoiceFeedback('Ã¢ÂÂ Ã¯Â¸Â Bitte erst eine Kategorie auswÃÂ¤hlen');
           setTimeout(() => setVoiceFeedback(null), 2000);
           return;
         }
@@ -3084,7 +3084,7 @@ END:VCALENDAR`;
 
         saveTodoToSupabase(newTodo);
         setTodos(prev => [newTodo, ...prev]);
-        setVoiceFeedback(`â Neue Aufgabe erstellt: "${newTodo.title}"`);
+        setVoiceFeedback(`Ã¢ÂÂ Neue Aufgabe erstellt: "${newTodo.title}"`);
 
         setTimeout(() => {
           setShowVoiceModal(false);
@@ -3111,15 +3111,15 @@ END:VCALENDAR`;
         const found = findTodoByText(searchText);
         if (found) {
           handleToggleComplete(found.id);
-          setVoiceFeedback(`â "${found.title}" als erledigt markiert`);
+          setVoiceFeedback(`Ã¢ÂÂ "${found.title}" als erledigt markiert`);
         } else {
-          setVoiceFeedback(`â Aufgabe "${searchText}" nicht gefunden`);
+          setVoiceFeedback(`Ã¢ÂÂ Aufgabe "${searchText}" nicht gefunden`);
         }
       } else {
         const openTodo = todos.find(t => !t.completed);
         if (openTodo) {
           handleToggleComplete(openTodo.id);
-          setVoiceFeedback(`â "${openTodo.title}" als erledigt markiert`);
+          setVoiceFeedback(`Ã¢ÂÂ "${openTodo.title}" als erledigt markiert`);
         }
       }
       
@@ -3127,26 +3127,26 @@ END:VCALENDAR`;
       return;
     }
     
-    // ============ STATUS ÃNDERN ============
-    if (lower.match(/(status|setze|Ã¤ndere).*(auf|zu)\s*(offen|bearbeitung|rÃ¼ckmeldung|erledigt)/i) ||
+    // ============ STATUS ÃÂNDERN ============
+    if (lower.match(/(status|setze|ÃÂ¤ndere).*(auf|zu)\s*(offen|bearbeitung|rÃÂ¼ckmeldung|erledigt)/i) ||
         lower.match(/(starte|beginne|warte auf)/i)) {
       const newStatus = parseStatus(lower);
       
       if (newStatus) {
         const words = lower.split(' ').filter(w => w.length > 3 && 
-          !['status', 'setze', 'Ã¤ndere', 'bitte', 'auf', 'offen', 'bearbeitung', 'rÃ¼ckmeldung', 'erledigt', 'starte', 'beginne', 'warte'].includes(w));
+          !['status', 'setze', 'ÃÂ¤ndere', 'bitte', 'auf', 'offen', 'bearbeitung', 'rÃÂ¼ckmeldung', 'erledigt', 'starte', 'beginne', 'warte'].includes(w));
         
         if (words.length > 0) {
           const found = findTodoByText(words.join(' '));
           if (found) {
             handleStatusChange(found.id, newStatus);
-            setVoiceFeedback(`â "${found.title}" â ${newStatus}`);
+            setVoiceFeedback(`Ã¢ÂÂ "${found.title}" Ã¢ÂÂ ${newStatus}`);
           }
         } else {
           const openTodo = todos.find(t => !t.completed && t.status !== newStatus);
           if (openTodo) {
             handleStatusChange(openTodo.id, newStatus);
-            setVoiceFeedback(`â "${openTodo.title}" â ${newStatus}`);
+            setVoiceFeedback(`Ã¢ÂÂ "${openTodo.title}" Ã¢ÂÂ ${newStatus}`);
           }
         }
       }
@@ -3155,20 +3155,20 @@ END:VCALENDAR`;
       return;
     }
     
-    // ============ PRIORITÃT ÃNDERN ============
-    if (lower.match(/(prioritÃ¤t|prio).*(auf|zu|ist)?\s*(kritisch|hoch|mittel|niedrig|minimal|p[1-5])/i) ||
+    // ============ PRIORITÃÂT ÃÂNDERN ============
+    if (lower.match(/(prioritÃÂ¤t|prio).*(auf|zu|ist)?\s*(kritisch|hoch|mittel|niedrig|minimal|p[1-5])/i) ||
         lower.match(/^(kritisch|hoch|dringend|wichtig)\s*[:\s]/i)) {
       const newPriority = parsePriority(lower);
       
       if (newPriority) {
         const words = lower.split(' ').filter(w => w.length > 3 &&
-          !['prioritÃ¤t', 'prio', 'bitte', 'auf', 'zu', 'ist', 'kritisch', 'hoch', 'mittel', 'niedrig', 'minimal', 'dringend', 'wichtig'].includes(w));
+          !['prioritÃÂ¤t', 'prio', 'bitte', 'auf', 'zu', 'ist', 'kritisch', 'hoch', 'mittel', 'niedrig', 'minimal', 'dringend', 'wichtig'].includes(w));
         
         if (words.length > 0) {
           const found = findTodoByText(words.join(' '));
           if (found) {
             handlePriorityChange(found.id, newPriority);
-            setVoiceFeedback(`â "${found.title}" â PrioritÃ¤t ${newPriority}`);
+            setVoiceFeedback(`Ã¢ÂÂ "${found.title}" Ã¢ÂÂ PrioritÃÂ¤t ${newPriority}`);
           }
         }
       }
@@ -3178,13 +3178,13 @@ END:VCALENDAR`;
     }
     
     // ============ PERSON ZUWEISEN ============
-    if (lower.match(/@(\w+)\s*(zu|hinzufÃ¼gen|bei)/i) || lower.match(/(zu|bei|hinzufÃ¼gen).*@(\w+)/i)) {
+    if (lower.match(/@(\w+)\s*(zu|hinzufÃÂ¼gen|bei)/i) || lower.match(/(zu|bei|hinzufÃÂ¼gen).*@(\w+)/i)) {
       const personMatch = lower.match(/@(\w+)/i);
       const person = personMatch ? personMatch[1] : null;
       
       if (person) {
         const words = lower.split(' ').filter(w => w.length > 3 && !w.startsWith('@') &&
-          !['bitte', 'hinzufÃ¼gen', 'zu', 'bei'].includes(w));
+          !['bitte', 'hinzufÃÂ¼gen', 'zu', 'bei'].includes(w));
         
         if (words.length > 0) {
           const found = findTodoByText(words.join(' '));
@@ -3194,7 +3194,7 @@ END:VCALENDAR`;
               persons: [...(found.persons || []), `@${person}`]
             };
             setTodos(prev => prev.map(t => t.id === found.id ? updatedTodo : t));
-            setVoiceFeedback(`â @${person} zu "${found.title}" hinzugefÃ¼gt`);
+            setVoiceFeedback(`Ã¢ÂÂ @${person} zu "${found.title}" hinzugefÃÂ¼gt`);
           }
         }
       }
@@ -3204,15 +3204,15 @@ END:VCALENDAR`;
     }
     
     // ============ NACH PERSON FILTERN ============
-    if (lower.match(/(zeige|filter|nur).*(von|fÃ¼r|mit|@)\s*(\w+)/i) || lower.match(/^@\w+$/i)) {
-      const personMatch = lower.match(/@(\w+)/i) || lower.match(/(von|fÃ¼r|mit)\s+(\w+)/i);
+    if (lower.match(/(zeige|filter|nur).*(von|fÃÂ¼r|mit|@)\s*(\w+)/i) || lower.match(/^@\w+$/i)) {
+      const personMatch = lower.match(/@(\w+)/i) || lower.match(/(von|fÃÂ¼r|mit)\s+(\w+)/i);
       if (personMatch) {
         const person = '@' + (personMatch[1] || personMatch[2]);
         setPersonFilter(person);
         setMeetingFilter(null);
         setSearchQuery(person);
         setShowSearch(true);
-        setVoiceFeedback(`ð Filter: Aufgaben mit ${person}`);
+        setVoiceFeedback(`Ã°ÂÂÂ Filter: Aufgaben mit ${person}`);
       }
       
       setTimeout(() => setShowVoiceModal(false), 2000);
@@ -3228,7 +3228,7 @@ END:VCALENDAR`;
         setPersonFilter(null);
         setSearchQuery(meeting);
         setShowSearch(true);
-        setVoiceFeedback(`ð Filter: Aufgaben fÃ¼r ${meeting}`);
+        setVoiceFeedback(`Ã°ÂÂÂ Filter: Aufgaben fÃÂ¼r ${meeting}`);
       }
       
       setTimeout(() => setShowVoiceModal(false), 2000);
@@ -3243,42 +3243,42 @@ END:VCALENDAR`;
     
     if (mentionedCategory && lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die)?\s*(aufgaben)?/i)) {
       setSelectedCategories([mentionedCategory.id]);
-      setVoiceFeedback(`ð Filter: Kategorie "${mentionedCategory.label}"`);
+      setVoiceFeedback(`Ã°ÂÂÂ Filter: Kategorie "${mentionedCategory.label}"`);
       
       setTimeout(() => setShowVoiceModal(false), 2000);
       return;
     }
     
     // ============ NACH STATUS FILTERN ============
-    if (lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die|mir|alle)?\s*(aufgaben)?\s*(die)?\s*(offen|bearbeitung|rÃ¼ckmeldung|erledigt)/i) ||
+    if (lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die|mir|alle)?\s*(aufgaben)?\s*(die)?\s*(offen|bearbeitung|rÃÂ¼ckmeldung|erledigt)/i) ||
         lower.match(/^(offene|erledigte|wartende)\s*(aufgaben)?$/i)) {
       const status = parseStatus(lower);
       if (status) {
-        if (status === 'Auf RÃ¼ckmeldung') {
-          setSelectedStatusFilter('RÃ¼ckmeldung');
+        if (status === 'Auf RÃÂ¼ckmeldung') {
+          setSelectedStatusFilter('RÃÂ¼ckmeldung');
         } else if (status === 'In Bearbeitung') {
           setSelectedStatusFilter('In Bearbeitung');
         } else if (status === 'Offen') {
           setSelectedStatusFilter('Offen');
         }
         setActiveStatFilter('status');
-        setVoiceFeedback(`ð Filter: Status "${status}"`);
+        setVoiceFeedback(`Ã°ÂÂÂ Filter: Status "${status}"`);
       }
       
       setTimeout(() => setShowVoiceModal(false), 2000);
       return;
     }
     
-    // ============ NACH PRIORITÃT FILTERN ============
+    // ============ NACH PRIORITÃÂT FILTERN ============
     if (lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die|mir|alle)?\s*(aufgaben)?\s*(mit)?\s*(kritisch|hoch|wichtig|dringend)/i) ||
         lower.match(/^(kritische|wichtige|dringende)\s*(aufgaben)?$/i)) {
       const priority = parsePriority(lower);
       if (priority === 1) {
         setActiveStatFilter('critical');
-        setVoiceFeedback(`ð Filter: Kritische Aufgaben`);
+        setVoiceFeedback(`Ã°ÂÂÂ Filter: Kritische Aufgaben`);
       } else if (priority === 2) {
         setActiveStatFilter('high');
-        setVoiceFeedback(`ð Filter: Hohe PrioritÃ¤t`);
+        setVoiceFeedback(`Ã°ÂÂÂ Filter: Hohe PrioritÃÂ¤t`);
       }
       
       setTimeout(() => setShowVoiceModal(false), 2000);
@@ -3293,15 +3293,15 @@ END:VCALENDAR`;
       if (query) {
         setSearchQuery(query);
         setShowSearch(true);
-        setVoiceFeedback(`ð Suche: "${query}"`);
+        setVoiceFeedback(`Ã°ÂÂÂ Suche: "${query}"`);
       }
       
       setTimeout(() => setShowVoiceModal(false), 2000);
       return;
     }
     
-    // ============ FILTER ZURÃCKSETZEN ============
-    if (lower.match(/(alle aufgaben|alles anzeigen|zeige alle|reset|zurÃ¼cksetzen|filter lÃ¶schen|filter zurÃ¼ck)/i)) {
+    // ============ FILTER ZURÃÂCKSETZEN ============
+    if (lower.match(/(alle aufgaben|alles anzeigen|zeige alle|reset|zurÃÂ¼cksetzen|filter lÃÂ¶schen|filter zurÃÂ¼ck)/i)) {
       setActiveStatFilter(null);
       setPersonFilter(null);
       setMeetingFilter(null);
@@ -3309,25 +3309,25 @@ END:VCALENDAR`;
       setShowSearch(false);
       // Select all available categories
       setSelectedCategories(allCategories.map(c => c.id));
-      setVoiceFeedback(`â Alle Filter zurÃ¼ckgesetzt`);
+      setVoiceFeedback(`Ã¢ÂÂ Alle Filter zurÃÂ¼ckgesetzt`);
       
       setTimeout(() => setShowVoiceModal(false), 2000);
       return;
     }
     
-    // ============ AUFGABE LÃSCHEN ============
-    if (lower.match(/^(lÃ¶sche|entferne|delete|remove)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo)?\s*/i)) {
+    // ============ AUFGABE LÃÂSCHEN ============
+    if (lower.match(/^(lÃÂ¶sche|entferne|delete|remove)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo)?\s*/i)) {
       const searchText = text
-        .replace(/^(lÃ¶sche|entferne|delete|remove)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo)?\s*/i, '')
+        .replace(/^(lÃÂ¶sche|entferne|delete|remove)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo)?\s*/i, '')
         .trim();
       
       if (searchText) {
         const found = findTodoByText(searchText);
         if (found) {
           setTodos(prev => prev.filter(t => t.id !== found.id));
-          setVoiceFeedback(`â "${found.title}" gelÃ¶scht`);
+          setVoiceFeedback(`Ã¢ÂÂ "${found.title}" gelÃÂ¶scht`);
         } else {
-          setVoiceFeedback(`â Aufgabe "${searchText}" nicht gefunden`);
+          setVoiceFeedback(`Ã¢ÂÂ Aufgabe "${searchText}" nicht gefunden`);
         }
       }
       
@@ -3337,29 +3337,29 @@ END:VCALENDAR`;
     
     // ============ AUFGABEN VORLESEN ============
     if (lower.match(/(lies|lese|vorlesen|sag|nenn|zeig)\s*(mir)?\s*(bitte)?\s*(mal)?\s*(die|alle|meine)?\s*(aufgaben|todos|to-dos|tasks)/i) ||
-        lower.match(/(was|welche)\s*(sind|habe ich|gibt es)\s*(fÃ¼r)?\s*(aufgaben|todos|to-dos)/i) ||
-        lower.match(/(lies|lese|vorlesen).*?(heute|hoch|kritisch|prioritÃ¤t|person|michael|sarah|lisa|thomas|anna)/i) ||
+        lower.match(/(was|welche)\s*(sind|habe ich|gibt es)\s*(fÃÂ¼r)?\s*(aufgaben|todos|to-dos)/i) ||
+        lower.match(/(lies|lese|vorlesen).*?(heute|hoch|kritisch|prioritÃÂ¤t|person|michael|sarah|lisa|thomas|anna)/i) ||
         lower.match(/(aufgaben|todos).*(vorlesen|lesen|ansagen)/i)) {
       
       let tasksToRead = todos.filter(t => !t.completed);
       let filterDescription = 'alle offenen Aufgaben';
       
       // Check for person filter in command
-      const personMatch = lower.match(/(von|fÃ¼r|zu|bei|mit)\s+@?(\w+)/i) || lower.match(/@(\w+)/i);
+      const personMatch = lower.match(/(von|fÃÂ¼r|zu|bei|mit)\s+@?(\w+)/i) || lower.match(/@(\w+)/i);
       if (personMatch) {
         const personName = personMatch[2] || personMatch[1];
         tasksToRead = tasksToRead.filter(t => 
           t.persons && t.persons.some(p => p.toLowerCase().includes(personName.toLowerCase()))
         );
-        filterDescription = `Aufgaben fÃ¼r ${personName}`;
+        filterDescription = `Aufgaben fÃÂ¼r ${personName}`;
       }
       // Check for priority filter in command
       else if (lower.includes('kritisch')) {
         tasksToRead = tasksToRead.filter(t => t.priority === 1);
         filterDescription = 'kritische Aufgaben';
-      } else if (lower.includes('hoch') || lower.includes('wichtig') || lower.includes('dringend') || lower.match(/prioritÃ¤t\s*hoch/i)) {
+      } else if (lower.includes('hoch') || lower.includes('wichtig') || lower.includes('dringend') || lower.match(/prioritÃÂ¤t\s*hoch/i)) {
         tasksToRead = tasksToRead.filter(t => t.priority === 2);
-        filterDescription = 'Aufgaben mit hoher PrioritÃ¤t';
+        filterDescription = 'Aufgaben mit hoher PrioritÃÂ¤t';
       } else if (lower.includes('heute')) {
         tasksToRead = tasksToRead.filter(t => t.date === 'Heute');
         filterDescription = 'heutige Aufgaben';
@@ -3372,9 +3372,9 @@ END:VCALENDAR`;
       } else if (lower.includes('offen')) {
         tasksToRead = tasksToRead.filter(t => t.status === 'Offen');
         filterDescription = 'offene Aufgaben';
-      } else if (lower.includes('rÃ¼ckmeldung') || lower.includes('wartend')) {
-        tasksToRead = tasksToRead.filter(t => t.status === 'Auf RÃ¼ckmeldung');
-        filterDescription = 'Aufgaben auf RÃ¼ckmeldung';
+      } else if (lower.includes('rÃÂ¼ckmeldung') || lower.includes('wartend')) {
+        tasksToRead = tasksToRead.filter(t => t.status === 'Auf RÃÂ¼ckmeldung');
+        filterDescription = 'Aufgaben auf RÃÂ¼ckmeldung';
       } else if (lower.includes('bearbeitung')) {
         tasksToRead = tasksToRead.filter(t => t.status === 'In Bearbeitung');
         filterDescription = 'Aufgaben in Bearbeitung';
@@ -3387,7 +3387,7 @@ END:VCALENDAR`;
         tasksToRead = tasksToRead.filter(t => 
           t.meetings && t.meetings.some(m => m.toLowerCase().includes(meetingName.toLowerCase()))
         );
-        filterDescription = `Aufgaben fÃ¼r Meeting ${meetingName}`;
+        filterDescription = `Aufgaben fÃÂ¼r Meeting ${meetingName}`;
       }
       
       // Helper function to speak text (with iOS fix)
@@ -3420,7 +3420,7 @@ END:VCALENDAR`;
       };
       
       if (tasksToRead.length === 0) {
-        setVoiceFeedback(`â¹ï¸ Keine ${filterDescription} vorhanden`);
+        setVoiceFeedback(`Ã¢ÂÂ¹Ã¯Â¸Â Keine ${filterDescription} vorhanden`);
         speakText(`Du hast keine ${filterDescription}.`, () => {
           setTimeout(() => setShowVoiceModal(false), 1500);
         });
@@ -3436,10 +3436,10 @@ END:VCALENDAR`;
           speechText += `. Und ${count - 5} weitere.`;
         }
         
-        setVoiceFeedback(`ð Lese ${count} Aufgaben vor...`);
+        setVoiceFeedback(`Ã°ÂÂÂ Lese ${count} Aufgaben vor...`);
         
         speakText(speechText, () => {
-          setVoiceFeedback(`â ${count} Aufgaben vorgelesen`);
+          setVoiceFeedback(`Ã¢ÂÂ ${count} Aufgaben vorgelesen`);
           setTimeout(() => setShowVoiceModal(false), 1500);
         });
         return;
@@ -3456,7 +3456,7 @@ END:VCALENDAR`;
     }
     
     // Nichts erkannt
-    setVoiceFeedback(`â Konnte Befehl nicht verstehen: "${text}"`);
+    setVoiceFeedback(`Ã¢ÂÂ Konnte Befehl nicht verstehen: "${text}"`);
     setTimeout(() => setShowVoiceModal(false), 3000);
   };
 
@@ -3896,7 +3896,7 @@ END:VCALENDAR`;
                     padding: '4px',
                   }}
                 >
-                  â
+                  Ã¢ÂÂ
                 </button>
               )}
             </div>
@@ -3907,7 +3907,7 @@ END:VCALENDAR`;
                 marginTop: '8px',
                 marginLeft: '4px',
               }}>
-                {getFilteredTasks().length} Ergebnis{getFilteredTasks().length !== 1 ? 'se' : ''} fÃ¼r "{searchQuery}"
+                {getFilteredTasks().length} Ergebnis{getFilteredTasks().length !== 1 ? 'se' : ''} fÃÂ¼r "{searchQuery}"
               </p>
             )}
           </div>
@@ -3931,11 +3931,11 @@ END:VCALENDAR`;
                   const isCurrentlyActive = selectedCategories.includes(cat.id);
                   // Toggle: Kategorie ein-/ausblenden
                   toggleFilterCategory(cat.id);
-                  // Wenn gerade aktiviert → als Create-Kategorie setzen
+                  // Wenn gerade aktiviert â als Create-Kategorie setzen
                   if (!isCurrentlyActive) {
                     selectCreateCategory(cat.id);
                   } else {
-                    // Wenn deaktiviert → nächste verbleibende aktive als Create setzen
+                    // Wenn deaktiviert â nÃ¤chste verbleibende aktive als Create setzen
                     const remaining = selectedCategories.filter(id => id !== cat.id);
                     if (remaining.length > 0) {
                       selectCreateCategory(remaining[remaining.length - 1]);
@@ -4073,7 +4073,7 @@ END:VCALENDAR`;
                   fontSize: '14px',
                 }}
               >
-                â
+                Ã¢ÂÂ
               </button>
               {/* Cancel */}
               <button
@@ -4092,7 +4092,7 @@ END:VCALENDAR`;
                   fontSize: '14px',
                 }}
               >
-                â
+                Ã¢ÂÂ
               </button>
             </div>
           )}
@@ -4257,8 +4257,8 @@ END:VCALENDAR`;
                   boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                 }}>
                   {action === 'E-Mail' && Icons.email}
-                  {action === 'GesprÃ¤ch' && Icons.chat}
-                  {action === 'PrÃ¼fen' && Icons.check}
+                  {action === 'GesprÃÂ¤ch' && Icons.chat}
+                  {action === 'PrÃÂ¼fen' && Icons.check}
                   {action}
                 </button>
               );
@@ -4310,7 +4310,7 @@ END:VCALENDAR`;
                       cursor: 'pointer',
                       fontSize: '14px',
                     }}
-                  >â</button>
+                  >Ã¢ÂÂ</button>
                   <button
                     onClick={() => { setAddingAction(false); setNewActionName(''); }}
                     style={{
@@ -4323,7 +4323,7 @@ END:VCALENDAR`;
                       cursor: 'pointer',
                       fontSize: '14px',
                     }}
-                  >â</button>
+                  >Ã¢ÂÂ</button>
                 </div>
               ) : (
                 <button 
@@ -4446,7 +4446,7 @@ END:VCALENDAR`;
                       cursor: 'pointer',
                       fontSize: '14px',
                     }}
-                  >â</button>
+                  >Ã¢ÂÂ</button>
                   <button
                     onClick={() => { setAddingPerson(false); setNewPersonName(''); }}
                     style={{
@@ -4459,7 +4459,7 @@ END:VCALENDAR`;
                       cursor: 'pointer',
                       fontSize: '14px',
                     }}
-                  >â</button>
+                  >Ã¢ÂÂ</button>
                 </div>
               ) : (
                 <button 
@@ -4582,7 +4582,7 @@ END:VCALENDAR`;
                       cursor: 'pointer',
                       fontSize: '14px',
                     }}
-                  >â</button>
+                  >Ã¢ÂÂ</button>
                   <button
                     onClick={() => { setAddingMeeting(false); setNewMeetingName(''); }}
                     style={{
@@ -4595,7 +4595,7 @@ END:VCALENDAR`;
                       cursor: 'pointer',
                       fontSize: '14px',
                     }}
-                  >â</button>
+                  >Ã¢ÂÂ</button>
                 </div>
               ) : (
                 <button 
@@ -4630,7 +4630,7 @@ END:VCALENDAR`;
             border: `1px solid ${darkMode ? 'rgba(70, 240, 210, 0.3)' : 'rgba(70, 240, 210, 0.4)'}`,
             marginBottom: '20px',
           }}>
-            <div style={{ fontSize: '48px', marginBottom: '16px' }}>ð</div>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>Ã°ÂÂÂ</div>
             <h2 style={{ 
               fontSize: '20px', 
               fontWeight: '700', 
@@ -4776,7 +4776,7 @@ END:VCALENDAR`;
                   fontSize: '14px',
                   fontWeight: '500',
                 }}>
-                  <span style={{ fontSize: '18px' }}>â ï¸</span>
+                  <span style={{ fontSize: '18px' }}>Ã¢ÂÂ Ã¯Â¸Â</span>
                   In Verwendung
                 </div>
                 <p style={{ 
@@ -4785,7 +4785,7 @@ END:VCALENDAR`;
                   marginBottom: '8px',
                   fontWeight: '500',
                 }}>
-                  "{deleteConfirm.label}" lÃ¶schen?
+                  "{deleteConfirm.label}" lÃÂ¶schen?
                 </p>
                 <p style={{ 
                   color: theme.textMuted, 
@@ -4802,7 +4802,7 @@ END:VCALENDAR`;
                 marginBottom: '20px',
                 fontWeight: '500',
               }}>
-                "{deleteConfirm.label}" lÃ¶schen?
+                "{deleteConfirm.label}" lÃÂ¶schen?
               </p>
             )}
             
@@ -4832,7 +4832,7 @@ END:VCALENDAR`;
                   fontSize: '14px',
                   fontWeight: '600',
                 }}
-              >LÃ¶schen</button>
+              >LÃÂ¶schen</button>
             </div>
           </div>
         </div>
@@ -4889,7 +4889,7 @@ END:VCALENDAR`;
                 color: theme.text, 
                 margin: '0 0 4px 0' 
               }}>
-                {authMode === 'login' ? 'Willkommen zurÃ¼ck!' : authMode === 'register' ? 'Konto erstellen' : 'Passwort vergessen?'}
+                {authMode === 'login' ? 'Willkommen zurÃÂ¼ck!' : authMode === 'register' ? 'Konto erstellen' : 'Passwort vergessen?'}
               </h2>
               <p style={{ fontSize: '14px', color: theme.textMuted, margin: 0 }}>
                 {authMode === 'login' ? 'Melde dich bei MindFlow an' : authMode === 'register' ? 'Registriere dich bei MindFlow' : 'Wir senden dir einen Reset-Link'}
@@ -4954,7 +4954,7 @@ END:VCALENDAR`;
                 type="password"
                 value={authPassword}
                 onChange={(e) => setAuthPassword(e.target.value)}
-                placeholder="â¢â¢â¢â¢â¢â¢â¢â¢"
+                placeholder="Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     authMode === 'login' ? handleLogin() : handleRegister();
@@ -5040,7 +5040,7 @@ END:VCALENDAR`;
                     fontSize: '14px',
                   }}
                 >
-                  â ZurÃ¼ck zum Login
+                  Ã¢ÂÂ ZurÃÂ¼ck zum Login
                 </button>
               ) : (
                 <>
@@ -5102,7 +5102,7 @@ END:VCALENDAR`;
               fontSize: '18px',
               fontWeight: '600',
             }}>
-              Kalender auswÃ¤hlen
+              Kalender auswÃÂ¤hlen
             </h3>
             <p style={{ 
               color: darkMode ? '#6B7280' : '#9ca3af', 
@@ -5139,7 +5139,7 @@ END:VCALENDAR`;
                   color: 'white',
                   fontSize: '18px',
                 }}>
-                  ð
+                  Ã°ÂÂÂ
                 </div>
                 <div style={{ textAlign: 'left' }}>
                   <p style={{ margin: 0, fontWeight: '500', color: darkMode ? '#f3f4f6' : '#1f2937' }}>Apple Kalender</p>
@@ -5173,7 +5173,7 @@ END:VCALENDAR`;
                   color: 'white',
                   fontSize: '18px',
                 }}>
-                  ð
+                  Ã°ÂÂÂ
                 </div>
                 <div style={{ textAlign: 'left' }}>
                   <p style={{ margin: 0, fontWeight: '500', color: darkMode ? '#f3f4f6' : '#1f2937' }}>Google Kalender</p>
@@ -5207,7 +5207,7 @@ END:VCALENDAR`;
                   color: darkMode ? colors.mint : '#1f2937',
                   fontSize: '18px',
                 }}>
-                  â¬ï¸
+                  Ã¢Â¬ÂÃ¯Â¸Â
                 </div>
                 <div style={{ textAlign: 'left' }}>
                   <p style={{ margin: 0, fontWeight: '500', color: darkMode ? '#f3f4f6' : '#1f2937' }}>Herunterladen</p>
@@ -5299,7 +5299,7 @@ END:VCALENDAR`;
               color: theme.text, 
               marginBottom: '8px',
             }}>
-              {isListening ? 'Ich hÃ¶re zu...' : 'Sprachsteuerung'}
+              {isListening ? 'Ich hÃÂ¶re zu...' : 'Sprachsteuerung'}
             </h3>
             
             <p style={{ 
@@ -5335,9 +5335,9 @@ END:VCALENDAR`;
             {/* Feedback Message */}
             {voiceFeedback && (
               <div style={{
-                background: voiceFeedback.startsWith('â') 
+                background: voiceFeedback.startsWith('Ã¢ÂÂ') 
                   ? 'rgba(70, 240, 210, 0.2)' 
-                  : voiceFeedback.startsWith('â') 
+                  : voiceFeedback.startsWith('Ã¢ÂÂ') 
                     ? 'rgba(255, 107, 138, 0.2)'
                     : 'rgba(255, 171, 94, 0.2)',
                 borderRadius: '12px',
@@ -5346,9 +5346,9 @@ END:VCALENDAR`;
               }}>
                 <p style={{ 
                   fontSize: '14px', 
-                  color: voiceFeedback.startsWith('â') 
+                  color: voiceFeedback.startsWith('Ã¢ÂÂ') 
                     ? colors.mint 
-                    : voiceFeedback.startsWith('â')
+                    : voiceFeedback.startsWith('Ã¢ÂÂ')
                       ? colors.coral
                       : colors.orange,
                   fontWeight: '500',
@@ -5387,7 +5387,7 @@ END:VCALENDAR`;
                     '"Suche Budget"',
                   ].map((example, i) => (
                     <p key={i} style={{ fontSize: '12px', color: theme.textMuted }}>
-                      â¢ {example}
+                      Ã¢ÂÂ¢ {example}
                     </p>
                   ))}
                 </div>
@@ -5415,7 +5415,7 @@ END:VCALENDAR`;
                 fontSize: '14px',
               }}
             >
-              SchlieÃen
+              SchlieÃÂen
             </button>
           </div>
         </div>
@@ -5451,7 +5451,7 @@ END:VCALENDAR`;
                   color: theme.text,
                   fontSize: '18px',
                 }}
-              >â</button>
+              >Ã¢ÂÂ</button>
             </div>
 
             {/* Kategorien */}
@@ -5489,7 +5489,7 @@ END:VCALENDAR`;
             <div style={{ marginBottom: '24px' }}>
               <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</h3>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {['Offen', 'In Bearbeitung', 'Auf RÃ¼ckmeldung', 'Erledigt'].map(status => (
+                {['Offen', 'In Bearbeitung', 'Auf RÃÂ¼ckmeldung', 'Erledigt'].map(status => (
                   <button
                     key={status}
                     onClick={() => {
@@ -5518,9 +5518,9 @@ END:VCALENDAR`;
               </div>
             </div>
 
-            {/* PrioritÃ¤t */}
+            {/* PrioritÃÂ¤t */}
             <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>PrioritÃ¤t</h3>
+              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>PrioritÃÂ¤t</h3>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                 {priorities.map(prio => (
                   <button
@@ -5643,7 +5643,7 @@ END:VCALENDAR`;
               onClick={() => {
                 // Select all available categories
                 setSelectedCategories(allCategories.map(c => c.id));
-                setSelectedStatusFilter('RÃ¼ckmeldung');
+                setSelectedStatusFilter('RÃÂ¼ckmeldung');
                 setSelectedDateFilter('Heute');
                 setActiveStatFilter(null);
                 setPersonFilter(null);
@@ -5663,7 +5663,7 @@ END:VCALENDAR`;
                 marginBottom: '16px',
               }}
             >
-              Filter zurÃ¼cksetzen
+              Filter zurÃÂ¼cksetzen
             </button>
 
             {/* Apply Button */}
