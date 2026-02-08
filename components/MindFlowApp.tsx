@@ -2326,10 +2326,14 @@ END:VCALENDAR`;
       if (showProfileDropdown) {
         setShowProfileDropdown(false);
       }
+      // Close filter panels on scroll
+      if (expandedFilter) {
+        setExpandedFilter(null);
+      }
     };
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [showAllCategories, showProfileDropdown]);
+  }, [showAllCategories, showProfileDropdown, expandedFilter]);
 
   // Close profile dropdown when clicking outside
   React.useEffect(() => {
@@ -2359,6 +2363,20 @@ END:VCALENDAR`;
     document.addEventListener('click', handleClickOutsideCategories);
     return () => document.removeEventListener('click', handleClickOutsideCategories);
   }, [showAllCategories]);
+
+  // Close filter panels (Aktion/Personen/Meetings) when clicking outside
+  React.useEffect(() => {
+    const handleClickOutsideFilters = (e: MouseEvent) => {
+      if (expandedFilter) {
+        const target = e.target as HTMLElement;
+        if (!target.closest('[data-filter-panel]')) {
+          setExpandedFilter(null);
+        }
+      }
+    };
+    document.addEventListener('click', handleClickOutsideFilters);
+    return () => document.removeEventListener('click', handleClickOutsideFilters);
+  }, [expandedFilter]);
 
   const allCategories = [...categories.filter(c => !hiddenCategories.includes(c.id)), ...customCategories];
   
@@ -4216,7 +4234,7 @@ END:VCALENDAR`;
       {/* Content */}
       <main className="mindflow-main-content" style={{ position: 'relative', zIndex: 1, padding: '0 20px' }}>
         {/* Filter Buttons */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '8px' }}>
+        <div data-filter-panel style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '8px' }}>
           <FilterButton 
             icon={Icons.bolt} 
             label="Aktion" 
@@ -4242,7 +4260,7 @@ END:VCALENDAR`;
 
         {/* Expanded Filter Panels */}
         {expandedFilter === 'action' && (
-          <div style={{
+          <div data-filter-panel style={{
             padding: '12px',
             marginBottom: '12px',
             borderRadius: '16px',
@@ -4382,7 +4400,7 @@ END:VCALENDAR`;
         )}
 
         {expandedFilter === 'persons' && (
-          <div style={{
+          <div data-filter-panel style={{
             padding: '12px',
             marginBottom: '12px',
             borderRadius: '16px',
@@ -4518,7 +4536,7 @@ END:VCALENDAR`;
         )}
 
         {expandedFilter === 'meetings' && (
-          <div style={{
+          <div data-filter-panel style={{
             padding: '12px',
             marginBottom: '12px',
             borderRadius: '16px',
