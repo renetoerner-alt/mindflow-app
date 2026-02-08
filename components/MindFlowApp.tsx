@@ -1433,6 +1433,7 @@ export default function MindFlowApp() {
   // Refs to track current values for async functions (avoid stale closure)
   const selectedCategoriesRef = React.useRef<string[]>([]);
   const customCategoriesRef = React.useRef<Category[]>([]);
+  const createCategoryIdRef = React.useRef<string | null>(null);
   const lastLoadedUserId = React.useRef<string | null>(null);
 
   // Session state for auth flow
@@ -1441,6 +1442,7 @@ export default function MindFlowApp() {
   // Update refs whenever state changes (inline, no useEffect needed)
   selectedCategoriesRef.current = selectedCategories;
   customCategoriesRef.current = customCategories;
+  createCategoryIdRef.current = createCategoryId;
   
   const [addingCategory, setAddingCategory] = useState<boolean>(false);
   const [newCategoryName, setNewCategoryName] = useState<string>('');
@@ -2760,19 +2762,17 @@ END:VCALENDAR`;
 
   // Parse complex command with AI (Haiku)
   const parseWithAI = async (text: string): Promise<void> => {
-    // Fallback: createCategoryId → erste selektierte Kategorie → erste verfügbare
-    const effectiveCategoryId = createCategoryId 
-      || (selectedCategories.length > 0 ? selectedCategories[0] : null)
-      || (allCategories.length > 0 ? allCategories[0].id : null);
+    // Use refs to avoid stale closure (voice recognition useEffect captures initial state)
+    const effectiveCategoryId = createCategoryIdRef.current || getCurrentCategory();
     
-    if (!effectiveCategoryId) {
+    if (!effectiveCategoryId || effectiveCategoryId === 'keine-kategorie') {
       setVoiceFeedback('⚠️ Bitte erstelle zuerst eine Kategorie');
       setTimeout(() => setVoiceFeedback(null), 2000);
       return;
     }
 
-    // Für zukünftige Nutzung setzen falls noch nicht gesetzt
-    if (!createCategoryId) {
+    // Persist for future use if not yet set
+    if (!createCategoryIdRef.current) {
       selectCreateCategory(effectiveCategoryId);
     }
 
@@ -3072,18 +3072,16 @@ END:VCALENDAR`;
         .trim();
       
       if (title.length > 2 && title.split(' ').length <= 10) {
-        // Fallback: createCategoryId → erste selektierte → erste verfügbare
-        const effectiveCatId = createCategoryId 
-          || (selectedCategories.length > 0 ? selectedCategories[0] : null)
-          || (allCategories.length > 0 ? allCategories[0].id : null);
+        // Use refs to avoid stale closure
+        const effectiveCatId = createCategoryIdRef.current || getCurrentCategory();
         
-        if (!effectiveCatId) {
+        if (!effectiveCatId || effectiveCatId === 'keine-kategorie') {
           setVoiceFeedback('⚠️ Bitte erstelle zuerst eine Kategorie');
           setTimeout(() => setVoiceFeedback(null), 2000);
           return;
         }
         
-        if (!createCategoryId) {
+        if (!createCategoryIdRef.current) {
           selectCreateCategory(effectiveCatId);
         }
 
