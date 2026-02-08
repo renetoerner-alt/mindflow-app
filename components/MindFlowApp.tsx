@@ -2760,11 +2760,20 @@ END:VCALENDAR`;
 
   // Parse complex command with AI (Haiku)
   const parseWithAI = async (text: string): Promise<void> => {
-    if (!createCategoryId) {
-      console.warn('No active category selected for voice task');
-      setVoiceFeedback('⚠️ Bitte erst eine Kategorie auswählen');
+    // Fallback: createCategoryId → erste selektierte Kategorie → erste verfügbare
+    const effectiveCategoryId = createCategoryId 
+      || (selectedCategories.length > 0 ? selectedCategories[0] : null)
+      || (allCategories.length > 0 ? allCategories[0].id : null);
+    
+    if (!effectiveCategoryId) {
+      setVoiceFeedback('⚠️ Bitte erstelle zuerst eine Kategorie');
       setTimeout(() => setVoiceFeedback(null), 2000);
       return;
+    }
+
+    // Für zukünftige Nutzung setzen falls noch nicht gesetzt
+    if (!createCategoryId) {
+      selectCreateCategory(effectiveCategoryId);
     }
 
     setVoiceFeedback('🤖 Analysiere...');
@@ -2804,7 +2813,7 @@ END:VCALENDAR`;
         id: crypto.randomUUID(),
         title: data.title,
         description: data.description || undefined,
-        category: createCategoryId,
+        category: effectiveCategoryId,
         actionType: data.actionType || 'check',
         priority: data.priority || 3,
         status: 'Offen',
@@ -2835,7 +2844,7 @@ END:VCALENDAR`;
       const newTodo: Todo = {
         id: crypto.randomUUID(),
         title: text.substring(0, 60),
-        category: createCategoryId,
+        category: effectiveCategoryId,
         actionType: 'check',
         priority: 3,
         status: 'Offen',
@@ -3063,17 +3072,25 @@ END:VCALENDAR`;
         .trim();
       
       if (title.length > 2 && title.split(' ').length <= 10) {
-        if (!createCategoryId) {
-          console.warn('No active category selected for simple voice task');
-          setVoiceFeedback('⚠️ Bitte erst eine Kategorie auswählen');
+        // Fallback: createCategoryId → erste selektierte → erste verfügbare
+        const effectiveCatId = createCategoryId 
+          || (selectedCategories.length > 0 ? selectedCategories[0] : null)
+          || (allCategories.length > 0 ? allCategories[0].id : null);
+        
+        if (!effectiveCatId) {
+          setVoiceFeedback('⚠️ Bitte erstelle zuerst eine Kategorie');
           setTimeout(() => setVoiceFeedback(null), 2000);
           return;
+        }
+        
+        if (!createCategoryId) {
+          selectCreateCategory(effectiveCatId);
         }
 
         const newTodo: Todo = {
           id: crypto.randomUUID(),
           title: title.charAt(0).toUpperCase() + title.slice(1),
-          category: createCategoryId,
+          category: effectiveCatId,
           actionType: parseActionType(lower),
           priority: parsePriority(lower) || 3,
           status: 'Offen',
