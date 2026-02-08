@@ -420,6 +420,38 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
   const [editedTitle, setEditedTitle] = useState(todo.title || '');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
+  // Close all dropdowns helper
+  const closeAllDropdowns = () => {
+    setShowStatusDropdown(false);
+    setShowPriorityDropdown(false);
+    setShowActionDropdown(false);
+    setShowActionTypeDropdown(false);
+    setShowDateDropdown(false);
+    setShowCategoryDropdown(false);
+  };
+  
+  const anyDropdownOpen = showStatusDropdown || showPriorityDropdown || showActionDropdown || showActionTypeDropdown || showDateDropdown || showCategoryDropdown;
+  
+  // Close dropdowns on scroll or click outside
+  React.useEffect(() => {
+    if (!anyDropdownOpen) return;
+    
+    const handleScroll = () => closeAllDropdowns();
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-task-dropdown]')) {
+        closeAllDropdowns();
+      }
+    };
+    
+    window.addEventListener('scroll', handleScroll, true);
+    document.addEventListener('click', handleClickOutside);
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [anyDropdownOpen]);
+  
   // Long press handlers
   let categoryPressTimer: NodeJS.Timeout | null = null;
   let actionPressTimer: NodeJS.Timeout | null = null;
@@ -622,7 +654,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
           {/* Top row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap', position: 'relative' }}>
             {/* Category Badge with Long Press */}
-            <div style={{ position: 'relative' }}>
+            <div data-task-dropdown style={{ position: 'relative' }}>
               <button
                 onMouseDown={handleCategoryMouseDown}
                 onMouseUp={handleCategoryMouseUp}
@@ -685,7 +717,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
             </div>
 
             {/* Action Type Badge with Long Press */}
-            <div style={{ position: 'relative' }}>
+            <div data-task-dropdown style={{ position: 'relative' }}>
               <button
                 onMouseDown={handleActionMouseDown}
                 onMouseUp={handleActionMouseUp}
@@ -939,7 +971,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
               )}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '14px' }}>
                 {/* Row 1: Priorität + Aktionstyp */}
-                <div style={{ position: 'relative' }}>
+                <div data-task-dropdown style={{ position: 'relative' }}>
                   <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>Priorität</span>
                   <button
                     onClick={() => { closeAllDropdowns(); setShowPriorityDropdown(!showPriorityDropdown); }}
@@ -1004,7 +1036,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                   )}
                 </div>
 
-                <div style={{ position: 'relative' }}>
+                <div data-task-dropdown style={{ position: 'relative' }}>
                   <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>Aktionstyp</span>
                   <button
                     onClick={() => { closeAllDropdowns(); setShowActionDropdown(!showActionDropdown); }}
@@ -1071,7 +1103,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                 </div>
 
                 {/* Row 2: Status + Fällig */}
-                <div style={{ position: 'relative' }}>
+                <div data-task-dropdown style={{ position: 'relative' }}>
                   <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>Status</span>
                   <button
                     onClick={() => { closeAllDropdowns(); setShowStatusDropdown(!showStatusDropdown); }}
@@ -1137,7 +1169,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                   )}
                 </div>
 
-                <div style={{ position: 'relative' }}>
+                <div data-task-dropdown style={{ position: 'relative' }}>
                   <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>Fällig</span>
                   <button
                     onClick={() => { closeAllDropdowns(); setShowDateDropdown(!showDateDropdown); }}
