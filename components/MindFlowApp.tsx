@@ -2723,10 +2723,14 @@ END:VCALENDAR`;
   const findTodoByText = (searchText: string): Todo | undefined => {
     const lower = searchText.toLowerCase().trim();
     
-    // Check if it's a number reference (#3, Nummer 3, Aufgabe 3)
+    // Check if it's a number reference (#3, Nummer 3, Aufgabe 3, Todo 3)
     const numMatch = lower.match(/^#?(\d+)$/);
     if (numMatch) {
       return findTodoByNumber(parseInt(numMatch[1]));
+    }
+    const keywordNumMatch = lower.match(/^(?:aufgabe|todo|nummer|task)\s+(\d+)$/);
+    if (keywordNumMatch) {
+      return findTodoByNumber(parseInt(keywordNumMatch[1]));
     }
     
     // Exact match first
@@ -2978,10 +2982,32 @@ END:VCALENDAR`;
 
   // Main Voice Command Handler
   const handleVoiceCommand = async (text: string) => {
-    const lower = text.toLowerCase().trim();
+    // Convert German number words to digits for task references
+    const numberWords: Record<string, string> = {
+      'null': '0', 'eins': '1', 'eine': '1', 'einen': '1', 'zwei': '2', 'zwo': '2', 'drei': '3',
+      'vier': '4', 'fünf': '5', 'sechs': '6', 'sieben': '7', 'acht': '8', 'neun': '9', 'zehn': '10',
+      'elf': '11', 'zwölf': '12', 'dreizehn': '13', 'vierzehn': '14', 'fünfzehn': '15',
+      'sechzehn': '16', 'siebzehn': '17', 'achtzehn': '18', 'neunzehn': '19', 'zwanzig': '20',
+      'einundzwanzig': '21', 'zweiundzwanzig': '22', 'dreiundzwanzig': '23', 'vierundzwanzig': '24',
+      'fünfundzwanzig': '25', 'dreißig': '30', 'vierzig': '40', 'fünfzig': '50',
+    };
+    
+    // Only convert number words that appear right after task or command keywords
+    let normalizedText = text.replace(
+      /\b(aufgabe|todo|nummer|task|#)\s+(null|eins|eine|einen|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig|dreißig|vierzig|fünfzig)\b/gi,
+      (match, keyword, numWord) => `${keyword} ${numberWords[numWord.toLowerCase()] || numWord}`
+    );
+    // Also convert after command verbs: "erledigt zwei", "lösche drei"
+    normalizedText = normalizedText.replace(
+      /\b(erledigt|fertig|done|abhaken|lösche|entferne|delete)\s+(null|eins|eine|einen|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig|dreißig|vierzig|fünfzig)\b/gi,
+      (match, keyword, numWord) => `${keyword} ${numberWords[numWord.toLowerCase()] || numWord}`
+    );
+    
+    const lower = normalizedText.toLowerCase().trim();
     
     console.log('=== Voice Command Debug ===');
     console.log('Original text:', text);
+    console.log('Normalized text:', normalizedText);
     console.log('Lowercase:', lower);
     
     // ============ ABSOLUTE PRIORITY: PERSON/MEETING/AKTION HINZUFÜGEN ============
