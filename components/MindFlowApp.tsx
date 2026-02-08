@@ -428,6 +428,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
     setShowActionTypeDropdown(false);
     setShowDateDropdown(false);
     setShowCategoryDropdown(false);
+    setShowCalendarPicker(false);
   };
   
   const anyDropdownOpen = showStatusDropdown || showPriorityDropdown || showActionDropdown || showActionTypeDropdown || showDateDropdown || showCategoryDropdown;
@@ -523,14 +524,6 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
 
   const currentStatus = statusOptions.find(s => s.id === todo.status) || statusOptions[0];
   const currentAction = actionOptions.find(a => a.id === todo.actionType) || actionOptions[0];
-
-  const closeAllDropdowns = () => {
-    setShowStatusDropdown(false);
-    setShowPriorityDropdown(false);
-    setShowActionDropdown(false);
-    setShowDateDropdown(false);
-    setShowCalendarPicker(false);
-  };
 
   // Calendar helper functions
   const getDaysInMonth = (date) => {
