@@ -2534,6 +2534,7 @@ END:VCALENDAR`;
   // Speech Recognition Reference
   const recognitionRef = React.useRef<any>(null);
   const transcriptRef = React.useRef<string>('');
+  const handleVoiceCommandRef = React.useRef<(text: string) => Promise<void>>();
   
   // Initialize Speech Recognition
   useEffect(() => {
@@ -2571,8 +2572,8 @@ END:VCALENDAR`;
         setIsListening(false);
         // Process the accumulated transcript when recognition ends
         const finalText = transcriptRef.current.trim();
-        if (finalText) {
-          handleVoiceCommand(finalText);
+        if (finalText && handleVoiceCommandRef.current) {
+          handleVoiceCommandRef.current(finalText);
         }
       };
       
@@ -2982,25 +2983,25 @@ END:VCALENDAR`;
 
   // Main Voice Command Handler
   const handleVoiceCommand = async (text: string) => {
-    // Convert German number words to digits for task references
+    // German number words → digits mapping
     const numberWords: Record<string, string> = {
-      'null': '0', 'eins': '1', 'eine': '1', 'einen': '1', 'zwei': '2', 'zwo': '2', 'drei': '3',
+      'null': '0', 'eins': '1', 'zwei': '2', 'zwo': '2', 'drei': '3',
       'vier': '4', 'fünf': '5', 'sechs': '6', 'sieben': '7', 'acht': '8', 'neun': '9', 'zehn': '10',
       'elf': '11', 'zwölf': '12', 'dreizehn': '13', 'vierzehn': '14', 'fünfzehn': '15',
       'sechzehn': '16', 'siebzehn': '17', 'achtzehn': '18', 'neunzehn': '19', 'zwanzig': '20',
       'einundzwanzig': '21', 'zweiundzwanzig': '22', 'dreiundzwanzig': '23', 'vierundzwanzig': '24',
       'fünfundzwanzig': '25', 'dreißig': '30', 'vierzig': '40', 'fünfzig': '50',
     };
+    const numWordPattern = Object.keys(numberWords).join('|');
     
-    // Only convert number words that appear right after task or command keywords
-    let normalizedText = text.replace(
-      /\b(aufgabe|todo|nummer|task|#)\s+(null|eins|eine|einen|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig|dreißig|vierzig|fünfzig)\b/gi,
-      (match, keyword, numWord) => `${keyword} ${numberWords[numWord.toLowerCase()] || numWord}`
-    );
-    // Also convert after command verbs: "erledigt zwei", "lösche drei"
+    // Step 1: Normalize "to do" / "to-do" → "todo"
+    let normalizedText = text.replace(/\bto[\s-]do\b/gi, 'todo');
+    
+    // Step 2: Convert ALL standalone German number words to digits
+    // (excludes "ein/eine/einen" which are articles — only "eins" is a number)
     normalizedText = normalizedText.replace(
-      /\b(erledigt|fertig|done|abhaken|lösche|entferne|delete)\s+(null|eins|eine|einen|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig|einundzwanzig|zweiundzwanzig|dreiundzwanzig|vierundzwanzig|fünfundzwanzig|dreißig|vierzig|fünfzig)\b/gi,
-      (match, keyword, numWord) => `${keyword} ${numberWords[numWord.toLowerCase()] || numWord}`
+      new RegExp(`\\b(${numWordPattern})\\b`, 'gi'),
+      (match) => numberWords[match.toLowerCase()] || match
     );
     
     const lower = normalizedText.toLowerCase().trim();
@@ -3788,6 +3789,9 @@ END:VCALENDAR`;
     setVoiceFeedback(`❓ Konnte Befehl nicht verstehen: "${text}"`);
     setTimeout(() => setShowVoiceModal(false), 3000);
   };
+
+  // Keep ref in sync so speech recognition callback always uses latest version
+  handleVoiceCommandRef.current = handleVoiceCommand;
 
   // ============================================
   // END VOICE CONTROL
