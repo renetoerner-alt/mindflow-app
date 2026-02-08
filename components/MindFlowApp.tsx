@@ -389,6 +389,7 @@ interface TaskCardProps {
   onStatusChange: (todoId: string, status: string) => void;
   onPriorityChange: (todoId: string, priority: number) => void;
   onActionTypeChange: (todoId: string, actionType: string) => void;
+  allActions: string[];
   onDateChange: (todoId: string, date: string) => void;
   onToggleComplete: (todoId: string) => void;
   onCategoryChange: (todoId: string, category: string) => void;
@@ -398,11 +399,12 @@ interface TaskCardProps {
   onDelete?: (todoId: string) => void;
 }
 
-const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleExpand, onCalendarClick, onStatusChange, onPriorityChange, onActionTypeChange, onDateChange, onToggleComplete, onCategoryChange, allCategories, onDescriptionChange = () => {}, onTitleChange = () => {}, onDelete }) => {
+const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleExpand, onCalendarClick, onStatusChange, onPriorityChange, onActionTypeChange, onDateChange, onToggleComplete, onCategoryChange, allCategories, allActions, onDescriptionChange = () => {}, onTitleChange = () => {}, onDelete }) => {
   const priority = priorities.find(p => p.level === todo.priority);
   // FIX: Use allCategories prop instead of empty global categories array!
   const category = allCategories.find(c => c.id === todo.category);
-  const actionIcons: Record<string, React.ReactNode> = { email: Icons.email, chat: Icons.chat, check: Icons.check, call: Icons.email, document: Icons.email, research: Icons.search };
+  const actionIconMap: Record<string, React.ReactNode> = { 'E-Mail': Icons.email, 'Gespräch': Icons.chat, 'Prüfen': Icons.check, 'Anruf': Icons.email, 'Dokument': Icons.email, 'Recherche': Icons.search };
+  const getActionIcon = (action: string) => actionIconMap[action] || <span style={{ fontSize: '14px' }}>⚡</span>;
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showPriorityDropdown, setShowPriorityDropdown] = useState(false);
   const [showActionDropdown, setShowActionDropdown] = useState(false);
@@ -478,14 +480,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
     { id: 'Erledigt', color: colors.mint },
   ];
 
-  const actionOptions = [
-    { id: 'email', label: 'E-Mail', icon: Icons.email },
-    { id: 'chat', label: 'Gespräch', icon: Icons.chat },
-    { id: 'check', label: 'Prüfen', icon: Icons.check },
-    { id: 'call', label: 'Anruf', icon: Icons.email },
-    { id: 'document', label: 'Dokument', icon: Icons.email },
-    { id: 'research', label: 'Recherche', icon: Icons.search },
-  ];
+  const actionOptions = allActions.map(a => ({ id: a, label: a, icon: getActionIcon(a) }));
 
   const dateOptions = [
     'Heute', 'Morgen', 'Diese Woche', 'Nächste Woche', 'Diesen Monat', 'Kein Datum'
@@ -710,8 +705,8 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
                   cursor: 'pointer',
                 }}
               >
-                {actionIcons[todo.actionType]}
-                {todo.actionType === 'email' ? 'E-Mail' : todo.actionType === 'chat' ? 'Gespräch' : todo.actionType === 'check' ? 'Prüfen' : todo.actionType === 'call' ? 'Anruf' : todo.actionType === 'document' ? 'Dokument' : 'Recherche'}
+                {getActionIcon(todo.actionType)}
+                {todo.actionType || 'Prüfen'}
               </button>
               {showActionTypeDropdown && (
                 <div style={{
@@ -1498,7 +1493,7 @@ export default function MindFlowApp() {
   const statusFilterOptions: string[] = ['Rückmeldung', 'Offen', 'In Bearbeitung', 'Alle Status'];
 
   // No default items - users create everything themselves
-  const defaultActions: string[] = [];
+  const defaultActions: string[] = ['E-Mail', 'Gespräch', 'Prüfen', 'Anruf', 'Dokument', 'Recherche'];
   const defaultPersons: string[] = [];
   const defaultMeetings: string[] = [];
 
@@ -1578,13 +1573,19 @@ export default function MindFlowApp() {
       
       if (categoriesError) throw categoriesError;
       
+      // Migration map: old actionType IDs → new labels
+      const actionTypeMigration: Record<string, string> = {
+        'email': 'E-Mail', 'chat': 'Gespräch', 'check': 'Prüfen',
+        'call': 'Anruf', 'document': 'Dokument', 'research': 'Recherche',
+      };
+      
       // Transform todos from database format
       const transformedTodos: Todo[] = (todosData || []).map(t => ({
         id: t.id,
         title: t.title,
         description: t.description || '',
         category: t.category,
-        actionType: t.action_type,
+        actionType: actionTypeMigration[t.action_type] || t.action_type || 'Prüfen',
         priority: t.priority,
         status: t.status,
         date: t.date,
@@ -2646,13 +2647,17 @@ END:VCALENDAR`;
 
   const parseActionType = (text: string): string => {
     const lower = text.toLowerCase();
-    if (lower.includes('email') || lower.includes('mail') || lower.includes('schreiben')) return 'email';
-    if (lower.includes('anruf') || lower.includes('telefo')) return 'call';
-    if (lower.includes('gespräch') || lower.includes('meeting') || lower.includes('besprechen')) return 'chat';
-    if (lower.includes('prüfen') || lower.includes('check')) return 'check';
-    if (lower.includes('dokument')) return 'document';
-    if (lower.includes('recherche') || lower.includes('suchen')) return 'research';
-    return 'check';
+    if (lower.includes('email') || lower.includes('mail') || lower.includes('schreiben')) return 'E-Mail';
+    if (lower.includes('anruf') || lower.includes('telefo')) return 'Anruf';
+    if (lower.includes('gespräch') || lower.includes('meeting') || lower.includes('besprechen')) return 'Gespräch';
+    if (lower.includes('prüfen') || lower.includes('check')) return 'Prüfen';
+    if (lower.includes('dokument')) return 'Dokument';
+    if (lower.includes('recherche') || lower.includes('suchen')) return 'Recherche';
+    // Check custom actions
+    const allActionsList = [...defaultActions, ...customActions];
+    const matchedAction = allActionsList.find(a => lower.includes(a.toLowerCase()));
+    if (matchedAction) return matchedAction;
+    return 'Prüfen';
   };
 
   // Find todo by search text (fuzzy matching)
@@ -2809,12 +2814,18 @@ END:VCALENDAR`;
             .map((m: string) => `#${m}`)
         : undefined;
 
+      // Migrate AI-returned actionType (API might still return old IDs)
+      const aiActionTypeMigration: Record<string, string> = {
+        'email': 'E-Mail', 'chat': 'Gespräch', 'check': 'Prüfen',
+        'call': 'Anruf', 'document': 'Dokument', 'research': 'Recherche',
+      };
+
       const newTodo: Todo = {
         id: crypto.randomUUID(),
         title: data.title,
         description: data.description || undefined,
         category: effectiveCategoryId,
-        actionType: data.actionType || 'check',
+        actionType: aiActionTypeMigration[data.actionType] || data.actionType || 'Prüfen',
         priority: data.priority || 3,
         status: 'Offen',
         date: data.date || 'Heute',
@@ -2845,7 +2856,7 @@ END:VCALENDAR`;
         id: crypto.randomUUID(),
         title: text.substring(0, 60),
         category: effectiveCategoryId,
-        actionType: 'check',
+        actionType: 'Prüfen',
         priority: 3,
         status: 'Offen',
         date: 'Heute',
@@ -4242,8 +4253,10 @@ END:VCALENDAR`;
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
               {allActions.map(action => {
                 let pressTimer: NodeJS.Timeout | null = null;
+                const isDefault = defaultActions.includes(action);
                 
                 const handleDelete = () => {
+                  if (isDefault) return; // Default actions can't be deleted
                   const usageCount = isActionInUse(action);
                   setDeleteConfirm({ type: 'action', id: action, label: action, usageCount });
                 };
@@ -4252,12 +4265,12 @@ END:VCALENDAR`;
                 <button 
                   key={action} 
                   onMouseDown={() => {
-                    pressTimer = setTimeout(handleDelete, 600);
+                    if (!isDefault) pressTimer = setTimeout(handleDelete, 600);
                   }}
                   onMouseUp={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   onMouseLeave={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   onTouchStart={() => {
-                    pressTimer = setTimeout(handleDelete, 600);
+                    if (!isDefault) pressTimer = setTimeout(handleDelete, 600);
                   }}
                   onTouchEnd={() => { if (pressTimer) clearTimeout(pressTimer); }}
                   style={{
@@ -4277,6 +4290,10 @@ END:VCALENDAR`;
                   {action === 'E-Mail' && Icons.email}
                   {action === 'Gespräch' && Icons.chat}
                   {action === 'Prüfen' && Icons.check}
+                  {action === 'Anruf' && Icons.email}
+                  {action === 'Dokument' && Icons.email}
+                  {action === 'Recherche' && Icons.search}
+                  {!['E-Mail', 'Gespräch', 'Prüfen', 'Anruf', 'Dokument', 'Recherche'].includes(action) && <span style={{ fontSize: '12px' }}>⚡</span>}
                   {action}
                 </button>
               );
@@ -4707,6 +4724,7 @@ END:VCALENDAR`;
               onTitleChange={handleTitleChange}
               onDelete={handleDeleteTask}
               allCategories={allCategories}
+              allActions={allActions}
             />
           ))}
         </div>
