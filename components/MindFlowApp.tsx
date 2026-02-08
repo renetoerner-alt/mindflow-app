@@ -2879,7 +2879,12 @@ END:VCALENDAR`;
     const hasPersonKeyword = lower.includes('person');
     console.log('Has person keyword:', hasPersonKeyword);
     
-    if (hasPersonKeyword) {
+    // Only treat as list-add if the sentence is short (≤8 words) and looks like a simple command
+    const wordCountForListCheck = lower.split(/\s+/).length;
+    const hasComplexIndicators = /[,.]/.test(lower) || /(dass|weil|damit|möchte|soll|bitte besprechen|folgendes)/.test(lower);
+    const isSimpleListCommand = wordCountForListCheck <= 8 && !hasComplexIndicators;
+    
+    if (hasPersonKeyword && isSimpleListCommand) {
       console.log('>>> Processing PERSON command');
       
       const words = lower.split(/\s+/);
@@ -2915,12 +2920,13 @@ END:VCALENDAR`;
         }
       }
       
-      // Clean up the name
+      // Clean up the name - only allow single word (with underscores)
       if (personName) {
-        personName = personName.replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
+        personName = personName.replace(/[^a-zäöüßA-ZÄÖÜ_]/gi, '');
         console.log('Cleaned person name:', personName);
         
-        if (personName && personName.length > 1) {
+        // Must be a single word (no spaces) and at least 2 chars
+        if (personName && personName.length > 1 && /^[a-zäöüßA-ZÄÖÜ_]+$/i.test(personName)) {
           const capitalizedName = personName.charAt(0).toUpperCase() + personName.slice(1).toLowerCase();
           const allPersonsList = [...defaultPersons, ...customPersons];
           
@@ -2946,45 +2952,41 @@ END:VCALENDAR`;
     const hasMeetingKeyword = lower.includes('meeting') || lower.includes('termin');
     console.log('Has meeting keyword:', hasMeetingKeyword);
     
-    if (hasMeetingKeyword) {
+    if (hasMeetingKeyword && isSimpleListCommand) {
       console.log('>>> Processing MEETING command');
       
       const words = lower.split(/\s+/);
       const meetingIndex = words.findIndex(w => w === 'meeting' || w === 'meetings' || w === 'termin' || w === 'termine');
       console.log('Meeting keyword index:', meetingIndex);
       
-      let meetingWords: string[] = [];
+      let meetingName = '';
       const stopWords = ['hinzu', 'hinzufügen', 'bitte', 'erstellen', 'anlegen', 'bei', 'an', 'zu'];
       const skipWords = ['ein', 'eine', 'einen', 'neues', 'neuen', 'zur', 'liste', 'meeting', 'meetings', 'termin', 'termine'];
       
-      // Strategy 1: Name is AFTER "meeting" (e.g., "füge Meeting Standup hinzu")
+      // Strategy 1: Name is AFTER "meeting" — only take ONE word
       if (meetingIndex !== -1 && meetingIndex < words.length - 1) {
-        for (let i = meetingIndex + 1; i < words.length; i++) {
-          const word = words[i].replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
-          if (stopWords.includes(word.toLowerCase()) || !word) break;
-          if (!skipWords.includes(word.toLowerCase())) {
-            meetingWords.push(word);
-          }
+        const nextWord = words[meetingIndex + 1].replace(/[^a-zäöüßA-ZÄÖÜ_]/gi, '');
+        if (nextWord && !stopWords.includes(nextWord.toLowerCase()) && !skipWords.includes(nextWord.toLowerCase())) {
+          meetingName = nextWord;
+          console.log('Strategy 1 - Single word after meeting:', meetingName);
         }
-        console.log('Strategy 1 - Words after meeting:', meetingWords);
       }
       
-      // Strategy 2: Name is BEFORE "meeting/meetings" (e.g., "füge Standup hinzu bei Meetings")
-      if (meetingWords.length === 0) {
+      // Strategy 2: Name is BEFORE "meeting/meetings" — only take ONE word
+      if (!meetingName) {
         const fügeIndex = words.findIndex(w => w === 'füge' || w === 'add' || w === 'neues' || w === 'neuen');
-        if (fügeIndex !== -1) {
-          for (let i = fügeIndex + 1; i < words.length; i++) {
-            const word = words[i].replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
-            if (stopWords.includes(word.toLowerCase()) || skipWords.includes(word.toLowerCase()) || !word) break;
-            meetingWords.push(word);
+        if (fügeIndex !== -1 && fügeIndex < words.length - 1) {
+          const potentialName = words[fügeIndex + 1].replace(/[^a-zäöüßA-ZÄÖÜ_]/gi, '');
+          if (potentialName && !stopWords.includes(potentialName.toLowerCase()) && !skipWords.includes(potentialName.toLowerCase())) {
+            meetingName = potentialName;
+            console.log('Strategy 2 - Single word after füge:', meetingName);
           }
-          console.log('Strategy 2 - Words after füge:', meetingWords);
         }
       }
       
-      if (meetingWords.length > 0) {
-        const meetingName = meetingWords.join(' ');
-        const capitalizedName = meetingWords.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+      // Must be a single word (with underscores) and at least 2 chars
+      if (meetingName && meetingName.length > 1 && /^[a-zäöüßA-ZÄÖÜ_]+$/i.test(meetingName)) {
+        const capitalizedName = meetingName.charAt(0).toUpperCase() + meetingName.slice(1).toLowerCase();
         const allMeetingsList = [...defaultMeetings, ...customMeetings];
         
         console.log('Adding meeting:', capitalizedName);
@@ -3006,7 +3008,7 @@ END:VCALENDAR`;
     const hasAktionKeyword = lower.includes('aktion');
     console.log('Has aktion keyword:', hasAktionKeyword);
     
-    if (hasAktionKeyword) {
+    if (hasAktionKeyword && isSimpleListCommand) {
       console.log('>>> Processing AKTION command');
       
       const words = lower.split(/\s+/);
@@ -3018,7 +3020,7 @@ END:VCALENDAR`;
       
       // Strategy 1: Name is AFTER "aktion" (e.g., "füge Aktion Review hinzu")
       if (actionIndex !== -1 && actionIndex < words.length - 1) {
-        const nextWord = words[actionIndex + 1].replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
+        const nextWord = words[actionIndex + 1].replace(/[^a-zäöüßA-ZÄÖÜ_]/gi, '');
         if (nextWord && !skipWords.includes(nextWord.toLowerCase())) {
           actionName = nextWord;
           console.log('Strategy 1 - Name after aktion:', actionName);
@@ -3029,7 +3031,7 @@ END:VCALENDAR`;
       if (!actionName) {
         const fügeIndex = words.findIndex(w => w === 'füge' || w === 'add' || w === 'neue' || w === 'neuen');
         if (fügeIndex !== -1 && fügeIndex < words.length - 1) {
-          const potentialName = words[fügeIndex + 1].replace(/[^a-zäöüßA-ZÄÖÜ]/gi, '');
+          const potentialName = words[fügeIndex + 1].replace(/[^a-zäöüßA-ZÄÖÜ_]/gi, '');
           if (potentialName && !skipWords.includes(potentialName.toLowerCase())) {
             actionName = potentialName;
             console.log('Strategy 2 - Name after füge:', actionName);
@@ -3037,7 +3039,8 @@ END:VCALENDAR`;
         }
       }
       
-      if (actionName && actionName.length > 1) {
+      // Must be a single word (with underscores) and at least 2 chars
+      if (actionName && actionName.length > 1 && /^[a-zäöüßA-ZÄÖÜ_]+$/i.test(actionName)) {
         const capitalizedName = actionName.charAt(0).toUpperCase() + actionName.slice(1).toLowerCase();
         const allActionsList = [...defaultActions, ...customActions];
         
