@@ -382,6 +382,7 @@ const FilterButton: React.FC<FilterButtonProps> = ({ icon, label, darkMode, expa
 // Task Card Component
 interface TaskCardProps {
   todo: Todo;
+  displayNumber: number;
   darkMode: boolean;
   expanded: boolean;
   onToggleExpand: () => void;
@@ -399,7 +400,7 @@ interface TaskCardProps {
   onDelete?: (todoId: string) => void;
 }
 
-const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleExpand, onCalendarClick, onStatusChange, onPriorityChange, onActionTypeChange, onDateChange, onToggleComplete, onCategoryChange, allCategories, allActions, onDescriptionChange = () => {}, onTitleChange = () => {}, onDelete }) => {
+const TaskCard: React.FC<TaskCardProps> = ({ todo, displayNumber, darkMode, expanded, onToggleExpand, onCalendarClick, onStatusChange, onPriorityChange, onActionTypeChange, onDateChange, onToggleComplete, onCategoryChange, allCategories, allActions, onDescriptionChange = () => {}, onTitleChange = () => {}, onDelete }) => {
   const priority = priorities.find(p => p.level === todo.priority);
   // FIX: Use allCategories prop instead of empty global categories array!
   const category = allCategories.find(c => c.id === todo.category);
@@ -643,7 +644,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
         </button>
 
         {/* Content */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
           {/* Top row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap', position: 'relative' }}>
             {/* Category Badge with Long Press */}
@@ -836,6 +837,21 @@ const TaskCard: React.FC<TaskCardProps> = ({ todo, darkMode, expanded, onToggleE
               }}>
               {todo.title}
             </h3>
+          )}
+
+          {/* Task number badge */}
+          {displayNumber > 0 && (
+          <span style={{
+            position: 'absolute',
+            top: '8px',
+            right: '10px',
+            fontSize: '11px',
+            fontWeight: '600',
+            color: darkMode ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.18)',
+            fontFamily: 'monospace',
+          }}>
+            #{displayNumber}
+          </span>
           )}
 
           {/* Meta row */}
@@ -2707,6 +2723,12 @@ END:VCALENDAR`;
   const findTodoByText = (searchText: string): Todo | undefined => {
     const lower = searchText.toLowerCase().trim();
     
+    // Check if it's a number reference (#3, Nummer 3, Aufgabe 3)
+    const numMatch = lower.match(/^#?(\d+)$/);
+    if (numMatch) {
+      return findTodoByNumber(parseInt(numMatch[1]));
+    }
+    
     // Exact match first
     let found = todos.find(t => t.title.toLowerCase() === lower);
     if (found) return found;
@@ -2725,6 +2747,40 @@ END:VCALENDAR`;
     return found;
   };
 
+  // Find todo by display number (1-based index in filtered list)
+  const findTodoByNumber = (num: number): Todo | undefined => {
+    const filtered = getFilteredTasks();
+    if (num >= 1 && num <= filtered.length) {
+      return filtered[num - 1];
+    }
+    return undefined;
+  };
+
+  // Extract task number from voice text (e.g., "Aufgabe 3", "Nummer 5", "#2")
+  const extractTaskNumber = (text: string): { num: number | null; rest: string } => {
+    const lower = text.toLowerCase();
+    
+    // Pattern: "aufgabe 3 ...", "nummer 3 ...", "#3 ...", "task 3 ..."
+    const match = lower.match(/^(?:aufgabe|nummer|task|todo|#)\s*(\d+)\s*(.*)/i);
+    if (match) {
+      return { num: parseInt(match[1]), rest: match[2].trim() };
+    }
+    
+    // Pattern: "... aufgabe 3", "... nummer 3" at end
+    const endMatch = lower.match(/(.*?)\s*(?:aufgabe|nummer|task|todo|#)\s*(\d+)\s*$/i);
+    if (endMatch) {
+      return { num: parseInt(endMatch[2]), rest: endMatch[1].trim() };
+    }
+    
+    // Pattern: just a number at the start "3 erledigt"
+    const numStart = lower.match(/^(\d+)\s+(.+)/);
+    if (numStart) {
+      return { num: parseInt(numStart[1]), rest: numStart[2].trim() };
+    }
+    
+    return { num: null, rest: text };
+  };
+
   // Check if command is complex (should use AI)
   const isComplexCommand = (text: string): boolean => {
     const wordCount = text.split(' ').length;
@@ -2734,8 +2790,8 @@ END:VCALENDAR`;
     const simplePatterns = [
       /^(erledigt|fertig|done|abhaken)/i,
       /^(lösche|entferne|delete)/i,
-      /^(zeige|filter|nur)\s*(aufgaben)?\s*(@|#|offen|kritisch)/i,
-      /^(alle aufgaben|alles anzeigen|filter zurück)/i,
+      /^(zeige|filter|nur)\s*(aufgaben|todos)?\s*(@|#|offen|kritisch)/i,
+      /^(alle aufgaben|alle todos|alles anzeigen|filter zurück)/i,
       /^(suche|such|finde)/i,
       /^@\w+/i,
       /^#\w+/i,
@@ -2752,6 +2808,8 @@ END:VCALENDAR`;
       /(person|kontakt)\s+\w+/i,
       /(meeting|termin)\s+\w+/i,
       /neue\s*(person|kontakt|meeting|termin|aktion)/i,
+      // Task modification by number or name - should NOT use AI
+      /^(?:bei\s+|in\s+|an\s+|für\s+)?(?:aufgabe|todo|nummer|task|#)\s+\S+\s+(beschreibung|notiz|datum|fällig|aktionstyp|aktion|priorität|prio|status|person|meeting|titel|umbenennen|erledigt|fertig|löschen|kritisch|hoch|mittel|niedrig)/i,
     ];
     
     // Check if any available category is mentioned - this is also simple
@@ -3172,18 +3230,20 @@ END:VCALENDAR`;
     }
     
     // ============ AUFGABE ERLEDIGEN ============
-    if (lower.match(/^(erledigt|fertig|done|abhaken|check)\s*/i) || lower.match(/ist\s*(erledigt|fertig|done)$/i)) {
+    if (lower.match(/^(erledigt|fertig|done|abhaken|check)\s*/i) || lower.match(/ist\s*(erledigt|fertig|done)$/i) ||
+        lower.match(/^(aufgabe|todo|nummer|task|#)\s*\d+\s*(erledigt|fertig|done|abhaken)/i)) {
       const searchText = text
-        .replace(/^(erledigt|fertig|done|abhaken|check)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe)?\s*[:\s]?\s*/i, '')
+        .replace(/^(erledigt|fertig|done|abhaken|check)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo)?\s*[:\s]?\s*/i, '')
         .replace(/\s*(ist\s*)?(erledigt|fertig|done)$/i, '')
         .replace(/\s*(bitte|mal|doch)\s*/gi, ' ')
         .trim();
       
       if (searchText) {
-        const found = findTodoByText(searchText);
+        const { num } = extractTaskNumber(searchText);
+        const found = num ? findTodoByNumber(num) : findTodoByText(searchText);
         if (found) {
           handleToggleComplete(found.id);
-          setVoiceFeedback(`✓ "${found.title}" als erledigt markiert`);
+          setVoiceFeedback(`✓ #${num || '?'} "${found.title}" als erledigt markiert`);
         } else {
           setVoiceFeedback(`✗ Aufgabe "${searchText}" nicht gefunden`);
         }
@@ -3201,25 +3261,26 @@ END:VCALENDAR`;
     
     // ============ STATUS ÄNDERN ============
     if (lower.match(/(status|setze|ändere).*(auf|zu)\s*(offen|bearbeitung|rückmeldung|erledigt)/i) ||
-        lower.match(/(starte|beginne|warte auf)/i)) {
+        lower.match(/(starte|beginne|warte auf)/i) ||
+        lower.match(/^(aufgabe|todo|nummer|task|#)\s*\d+\s*(status|auf|offen|bearbeitung|rückmeldung|erledigt)/i)) {
       const newStatus = parseStatus(lower);
+      const { num } = extractTaskNumber(lower);
       
       if (newStatus) {
-        const words = lower.split(' ').filter(w => w.length > 3 && 
-          !['status', 'setze', 'ändere', 'bitte', 'auf', 'offen', 'bearbeitung', 'rückmeldung', 'erledigt', 'starte', 'beginne', 'warte'].includes(w));
-        
-        if (words.length > 0) {
-          const found = findTodoByText(words.join(' '));
-          if (found) {
-            handleStatusChange(found.id, newStatus);
-            setVoiceFeedback(`✓ "${found.title}" → ${newStatus}`);
-          }
+        let found: Todo | undefined;
+        if (num) {
+          found = findTodoByNumber(num);
         } else {
-          const openTodo = todos.find(t => !t.completed && t.status !== newStatus);
-          if (openTodo) {
-            handleStatusChange(openTodo.id, newStatus);
-            setVoiceFeedback(`✓ "${openTodo.title}" → ${newStatus}`);
-          }
+          const words = lower.split(' ').filter(w => w.length > 3 && 
+            !['status', 'setze', 'ändere', 'bitte', 'auf', 'offen', 'bearbeitung', 'rückmeldung', 'erledigt', 'starte', 'beginne', 'warte'].includes(w));
+          found = words.length > 0 ? findTodoByText(words.join(' ')) : todos.find(t => !t.completed && t.status !== newStatus);
+        }
+        
+        if (found) {
+          handleStatusChange(found.id, newStatus);
+          setVoiceFeedback(`✓ "${found.title}" → ${newStatus}`);
+        } else {
+          setVoiceFeedback(`✗ Aufgabe nicht gefunden`);
         }
       }
       
@@ -3229,19 +3290,26 @@ END:VCALENDAR`;
     
     // ============ PRIORITÄT ÄNDERN ============
     if (lower.match(/(priorität|prio).*(auf|zu|ist)?\s*(kritisch|hoch|mittel|niedrig|minimal|p[1-5])/i) ||
-        lower.match(/^(kritisch|hoch|dringend|wichtig)\s*[:\s]/i)) {
+        lower.match(/^(kritisch|hoch|dringend|wichtig)\s*[:\s]/i) ||
+        lower.match(/^(aufgabe|todo|nummer|task|#)\s*\d+\s*(priorität|prio|kritisch|hoch|mittel|niedrig|minimal)/i)) {
       const newPriority = parsePriority(lower);
+      const { num } = extractTaskNumber(lower);
       
       if (newPriority) {
-        const words = lower.split(' ').filter(w => w.length > 3 &&
-          !['priorität', 'prio', 'bitte', 'auf', 'zu', 'ist', 'kritisch', 'hoch', 'mittel', 'niedrig', 'minimal', 'dringend', 'wichtig'].includes(w));
+        let found: Todo | undefined;
+        if (num) {
+          found = findTodoByNumber(num);
+        } else {
+          const words = lower.split(' ').filter(w => w.length > 3 &&
+            !['priorität', 'prio', 'bitte', 'auf', 'zu', 'ist', 'kritisch', 'hoch', 'mittel', 'niedrig', 'minimal', 'dringend', 'wichtig'].includes(w));
+          found = words.length > 0 ? findTodoByText(words.join(' ')) : undefined;
+        }
         
-        if (words.length > 0) {
-          const found = findTodoByText(words.join(' '));
-          if (found) {
-            handlePriorityChange(found.id, newPriority);
-            setVoiceFeedback(`✓ "${found.title}" → Priorität ${newPriority}`);
-          }
+        if (found) {
+          handlePriorityChange(found.id, newPriority);
+          setVoiceFeedback(`✓ "${found.title}" → Priorität ${newPriority}`);
+        } else {
+          setVoiceFeedback(`✗ Aufgabe nicht gefunden`);
         }
       }
       
@@ -3313,7 +3381,7 @@ END:VCALENDAR`;
       lower.includes(cat.label.toLowerCase()) || lower.includes(cat.id.toLowerCase())
     );
     
-    if (mentionedCategory && lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die)?\s*(aufgaben)?/i)) {
+    if (mentionedCategory && lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die)?\s*(aufgaben|todos)?/i)) {
       setSelectedCategories([mentionedCategory.id]);
       setVoiceFeedback(`🔍 Filter: Kategorie "${mentionedCategory.label}"`);
       
@@ -3322,8 +3390,8 @@ END:VCALENDAR`;
     }
     
     // ============ NACH STATUS FILTERN ============
-    if (lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die|mir|alle)?\s*(aufgaben)?\s*(die)?\s*(offen|bearbeitung|rückmeldung|erledigt)/i) ||
-        lower.match(/^(offene|erledigte|wartende)\s*(aufgaben)?$/i)) {
+    if (lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die|mir|alle)?\s*(aufgaben|todos)?\s*(die)?\s*(offen|bearbeitung|rückmeldung|erledigt)/i) ||
+        lower.match(/^(offene|erledigte|wartende)\s*(aufgaben|todos)?$/i)) {
       const status = parseStatus(lower);
       if (status) {
         if (status === 'Auf Rückmeldung') {
@@ -3342,8 +3410,8 @@ END:VCALENDAR`;
     }
     
     // ============ NACH PRIORITÄT FILTERN ============
-    if (lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die|mir|alle)?\s*(aufgaben)?\s*(mit)?\s*(kritisch|hoch|wichtig|dringend)/i) ||
-        lower.match(/^(kritische|wichtige|dringende)\s*(aufgaben)?$/i)) {
+    if (lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die|mir|alle)?\s*(aufgaben|todos)?\s*(mit)?\s*(kritisch|hoch|wichtig|dringend)/i) ||
+        lower.match(/^(kritische|wichtige|dringende)\s*(aufgaben|todos)?$/i)) {
       const priority = parsePriority(lower);
       if (priority === 1) {
         setActiveStatFilter('critical');
@@ -3373,7 +3441,7 @@ END:VCALENDAR`;
     }
     
     // ============ FILTER ZURÜCKSETZEN ============
-    if (lower.match(/(alle aufgaben|alles anzeigen|zeige alle|reset|zurücksetzen|filter löschen|filter zurück)/i)) {
+    if (lower.match(/(alle aufgaben|alle todos|alles anzeigen|zeige alle|reset|zurücksetzen|filter löschen|filter zurück)/i)) {
       setActiveStatFilter(null);
       setPersonFilter(null);
       setMeetingFilter(null);
@@ -3388,15 +3456,17 @@ END:VCALENDAR`;
     }
     
     // ============ AUFGABE LÖSCHEN ============
-    if (lower.match(/^(lösche|entferne|delete|remove)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo)?\s*/i)) {
+    if (lower.match(/^(lösche|entferne|delete|remove)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo|nummer|#)?\s*/i)) {
       const searchText = text
-        .replace(/^(lösche|entferne|delete|remove)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo)?\s*/i, '')
+        .replace(/^(lösche|entferne|delete|remove)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo|nummer|#)?\s*/i, '')
         .trim();
       
       if (searchText) {
-        const found = findTodoByText(searchText);
+        const { num } = extractTaskNumber(searchText);
+        const found = num ? findTodoByNumber(num) : findTodoByText(searchText);
         if (found) {
           setTodos(prev => prev.filter(t => t.id !== found.id));
+          deleteTodoFromSupabase(found.id);
           setVoiceFeedback(`✓ "${found.title}" gelöscht`);
         } else {
           setVoiceFeedback(`✗ Aufgabe "${searchText}" nicht gefunden`);
@@ -3519,6 +3589,167 @@ END:VCALENDAR`;
       
       setTimeout(() => setShowVoiceModal(false), 2000);
       return;
+    }
+    
+    // ============ AUFGABE/TODO BEARBEITEN (per Nummer oder Name) ============
+    // Catches: "Aufgabe 3 Beschreibung ...", "Todo Einkaufen Priorität hoch", "bei Aufgabe 3 Datum morgen", etc.
+    const taskKeywordMatch = lower.match(/^(?:bei\s+|in\s+|an\s+|für\s+)?(?:aufgabe|todo|nummer|task|#)\s+(.+)/i);
+    if (taskKeywordMatch) {
+      const afterKeyword = taskKeywordMatch[1].trim();
+      
+      // Instruction keywords that signal where the task identifier ends
+      const instructionKeywords = /\b(beschreibung|notiz|details?|datum|fällig|deadline|termin|bis|aktionstyp|aktion|typ|priorität|prio|kritisch|hoch|mittel|niedrig|minimal|status|offen|bearbeitung|rückmeldung|starte|beginne|warte|person|meeting|titel|name|umbenennen|erledigt|fertig|done|abhaken|löschen|entfernen|delete|hinzufügen|ergänze|füge)\b/i;
+      
+      const keywordPos = afterKeyword.search(instructionKeywords);
+      
+      let found: Todo | undefined;
+      let instruction = '';
+      
+      if (keywordPos > 0) {
+        // "3 Priorität hoch" or "Einkaufen Priorität hoch"
+        const taskRef = afterKeyword.substring(0, keywordPos).trim();
+        instruction = afterKeyword.substring(keywordPos).trim();
+        const numOnly = taskRef.match(/^(\d+)$/);
+        found = numOnly ? findTodoByNumber(parseInt(numOnly[1])) : findTodoByText(taskRef);
+      } else if (afterKeyword.match(/^(\d+)\s*$/)) {
+        // Just "Aufgabe 3" without instruction — expand the task
+        const num = parseInt(afterKeyword);
+        found = findTodoByNumber(num);
+        if (found) {
+          handleToggleExpand(found.id);
+          setVoiceFeedback(`📋 #${num} "${found.title}" geöffnet`);
+          setTimeout(() => setShowVoiceModal(false), 2000);
+          return;
+        }
+      } else {
+        // No instruction keyword found — "Aufgabe 3 blabla" where blabla goes to AI
+        const numStart = afterKeyword.match(/^(\d+)\s+(.+)/);
+        if (numStart) {
+          found = findTodoByNumber(parseInt(numStart[1]));
+          instruction = numStart[2].trim();
+        }
+      }
+      
+      if (!found && instruction) {
+        setVoiceFeedback(`✗ Aufgabe nicht gefunden`);
+        setTimeout(() => setShowVoiceModal(false), 2000);
+        return;
+      }
+      
+      if (found && instruction) {
+        const instructionLower = instruction.toLowerCase();
+        let handled = false;
+        
+        // Beschreibung/Notiz hinzufügen
+        if (instructionLower.match(/^(beschreibung|notiz|details?|hinzufügen|ergänze|füge hinzu)/)) {
+          const desc = instruction
+            .replace(/^(beschreibung|notiz|details?)\s*(hinzufügen|setzen|ändern|auf|:)?\s*/i, '')
+            .replace(/^(hinzufügen|ergänze|füge hinzu)\s*(beschreibung|notiz|details?)?\s*(:|auf)?\s*/i, '')
+            .trim();
+          if (desc) {
+            const newDesc = found.description ? `${found.description}\n${desc}` : desc;
+            handleDescriptionChange(found.id, newDesc);
+            setVoiceFeedback(`✓ Beschreibung zu "${found.title}" hinzugefügt`);
+            handled = true;
+          }
+        }
+        
+        // Datum ändern
+        if (!handled && instructionLower.match(/^(datum|fällig|deadline|termin|bis)/)) {
+          const newDate = parseDate(instructionLower);
+          handleDateChange(found.id, newDate);
+          setVoiceFeedback(`✓ "${found.title}" → Fällig: ${newDate}`);
+          handled = true;
+        }
+        
+        // Aktionstyp ändern
+        if (!handled && instructionLower.match(/^(aktionstyp|aktion|typ)/)) {
+          const actionText = instruction.replace(/^(aktionstyp|aktion|typ)\s*(auf|:|\s)?\s*/i, '').trim();
+          const newAction = parseActionType(actionText) || actionText;
+          handleActionTypeChange(found.id, newAction);
+          setVoiceFeedback(`✓ "${found.title}" → Aktion: ${newAction}`);
+          handled = true;
+        }
+        
+        // Priorität ändern
+        if (!handled && instructionLower.match(/^(priorität|prio|kritisch|hoch|mittel|niedrig|minimal)/)) {
+          const newPriority = parsePriority(instructionLower);
+          if (newPriority) {
+            handlePriorityChange(found.id, newPriority);
+            setVoiceFeedback(`✓ "${found.title}" → Priorität ${newPriority}`);
+            handled = true;
+          }
+        }
+        
+        // Status ändern
+        if (!handled && instructionLower.match(/^(status|offen|bearbeitung|rückmeldung|erledigt|starte|beginne|warte)/)) {
+          const newStatus = parseStatus(instructionLower);
+          if (newStatus) {
+            handleStatusChange(found.id, newStatus);
+            setVoiceFeedback(`✓ "${found.title}" → ${newStatus}`);
+            handled = true;
+          }
+        }
+        
+        // Person hinzufügen
+        if (!handled && instructionLower.match(/^(person|@)/)) {
+          const personName = instruction.replace(/^(person|@)\s*/i, '').replace(/\s*(hinzufügen|zuweisen).*$/i, '').trim();
+          if (personName) {
+            const updatedTodo = { ...found, persons: [...(found.persons || []), personName] };
+            setTodos(prev => prev.map(t => t.id === found.id ? updatedTodo : t));
+            saveTodoToSupabase(updatedTodo);
+            setVoiceFeedback(`✓ ${personName} zu "${found.title}" hinzugefügt`);
+            handled = true;
+          }
+        }
+        
+        // Meeting hinzufügen
+        if (!handled && instructionLower.match(/^(meeting)/)) {
+          const meetingName = instruction.replace(/^meeting\s*/i, '').replace(/\s*(hinzufügen|zuweisen).*$/i, '').trim();
+          if (meetingName) {
+            const updatedTodo = { ...found, meetings: [...(found.meetings || []), meetingName] };
+            setTodos(prev => prev.map(t => t.id === found.id ? updatedTodo : t));
+            saveTodoToSupabase(updatedTodo);
+            setVoiceFeedback(`✓ Meeting ${meetingName} zu "${found.title}" hinzugefügt`);
+            handled = true;
+          }
+        }
+        
+        // Titel ändern
+        if (!handled && instructionLower.match(/^(titel|name|umbenennen)/)) {
+          const newTitle = instruction.replace(/^(titel|name|umbenennen)\s*(auf|zu|in|:)?\s*/i, '').trim();
+          if (newTitle) {
+            handleTitleChange(found.id, newTitle);
+            setVoiceFeedback(`✓ "${found.title}" umbenannt zu "${newTitle}"`);
+            handled = true;
+          }
+        }
+        
+        // Erledigt/Fertig
+        if (!handled && instructionLower.match(/^(erledigt|fertig|done|abhaken)/)) {
+          handleToggleComplete(found.id);
+          setVoiceFeedback(`✓ "${found.title}" als erledigt markiert`);
+          handled = true;
+        }
+        
+        // Löschen
+        if (!handled && instructionLower.match(/^(löschen|entfernen|delete)/)) {
+          setTodos(prev => prev.filter(t => t.id !== found.id));
+          deleteTodoFromSupabase(found.id);
+          setVoiceFeedback(`✓ "${found.title}" gelöscht`);
+          handled = true;
+        }
+        
+        // Nicht erkannt → an AI weitergeben mit Aufgaben-Kontext
+        if (!handled) {
+          const aiText = `Ändere die bestehende Aufgabe "${found.title}" (ID: ${found.id}): ${instruction}`;
+          await parseWithAI(aiText);
+          return;
+        }
+        
+        setTimeout(() => setShowVoiceModal(false), 2000);
+        return;
+      }
     }
     
     // ============ FALLBACK: Use AI for anything else ============
@@ -4749,10 +4980,11 @@ END:VCALENDAR`;
 
         {/* Task List - Active Tasks */}
         <div className="mindflow-task-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {getFilteredTasks().map(todo => (
+          {getFilteredTasks().map((todo, index) => (
             <TaskCard 
               key={todo.id} 
               todo={todo} 
+              displayNumber={index + 1}
               darkMode={darkMode} 
               expanded={expandedTask === todo.id}
               onToggleExpand={() => handleToggleExpand(todo.id)}
@@ -4790,10 +5022,11 @@ END:VCALENDAR`;
               Erledigt ({todos.filter(t => t.completed).length})
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', opacity: 0.7 }}>
-              {todos.filter(t => t.completed).map(todo => (
+              {todos.filter(t => t.completed).map((todo) => (
                 <TaskCard 
                   key={todo.id} 
                   todo={todo} 
+                  displayNumber={0}
                   darkMode={darkMode} 
                   expanded={expandedTask === todo.id}
                   onToggleExpand={() => handleToggleExpand(todo.id)}
@@ -4808,6 +5041,7 @@ END:VCALENDAR`;
                   onTitleChange={handleTitleChange}
                   onDelete={handleDeleteTask}
                   allCategories={allCategories}
+                  allActions={allActions}
                 />
               ))}
             </div>
