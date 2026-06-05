@@ -1,6126 +1,9614 @@
-'use client';
+import React, { useState, useMemo, useEffect, useRef, createContext, useContext } from 'react';
 
-import React, { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+// ============================================================================
+// SUPABASE CONFIGURATION
+// ============================================================================
+const SUPABASE_URL = 'https://gcotfldbnuatkewauvhv.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdjb3RmbGRibnVhdGtld2F1dmh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzNzM5ODgsImV4cCI6MjA4NDk0OTk4OH0.OvK6e9owY_zRKsxkcAEHcuVRlcMUvmrMOVez_hmuTcM';
+const FIRST_USER_EMAIL = 'renetoerner@gmail.com';
 
-let GLOBAL_ALL_CATEGORIES: { id: string; label: string; color: string }[] = [];
-
-// Supabase Configuration
-const supabaseUrl = 'https://gcotfldbnuatkewauvhv.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdjb3RmbGRibnVhdGtld2F1dmh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzNzM5ODgsImV4cCI6MjA4NDk0OTk4OH0.OvK6e9owY_zRKsxkcAEHcuVRlcMUvmrMOVez_hmuTcM';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-// Type Definitions
-interface Category {
-  id: string;
-  label: string;
-  color: string;
-}
-
-interface Priority {
-  level: number;
-  label: string;
-  color: string;
-}
-
-interface Todo {
-  id: string;
-  title: string;
-  description?: string;
-  category: string;
-  actionType: string;
-  priority: number;
-  status: string;
-  date: string;
-  persons?: string[];
-  meetings?: string[];
-  unread: boolean;
-  completed: boolean;
-}
-
-interface CalendarModalState {
-  show: boolean;
-  todo: Todo | null;
-}
-
-// Color Palette - Mint Dark Liquid Glass
-const colors = {
-  mint: '#46F0D2',
-  coral: '#FF6B8A',
-  orange: '#FFAB5E',
-  purple: '#A78BFA',
-  skyBlue: '#5BC0EB',
-  peach: '#FBE2B4',
-  darkBg: '#131321',
-  white: '#FFFFFF',
+const supabase = {
+  auth: {
+    getSession: async () => {
+      const token = localStorage.getItem('sb_access_token');
+      const user = localStorage.getItem('sb_user');
+      if (token && user) return { data: { session: { access_token: token, user: JSON.parse(user) } }, error: null };
+      return { data: { session: null }, error: null };
+    },
+    signUp: async ({ email, password }) => {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+          body: JSON.stringify({ email, password, data: {} }),
+        });
+        const data = await res.json();
+        if (data.error || data.msg || data.code) return { data: null, error: { message: data.error_description || data.msg || data.error || 'Registrierung fehlgeschlagen' } };
+        if (data.user || data.id) {
+          const user = data.user || data;
+          if (data.access_token) {
+            localStorage.setItem('sb_access_token', data.access_token);
+            localStorage.setItem('sb_refresh_token', data.refresh_token);
+            localStorage.setItem('sb_user', JSON.stringify(user));
+          }
+          return { data: { user }, error: null };
+        }
+        return { data: null, error: { message: 'Unerwartete Antwort vom Server' } };
+      } catch (err) { return { data: null, error: { message: err.message } }; }
+    },
+    signInWithPassword: async ({ email, password }) => {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (data.error || !data.access_token) return { data: null, error: { message: data.error_description || data.msg || 'Anmeldung fehlgeschlagen' } };
+        localStorage.setItem('sb_access_token', data.access_token);
+        localStorage.setItem('sb_refresh_token', data.refresh_token);
+        localStorage.setItem('sb_user', JSON.stringify(data.user));
+        return { data: { user: data.user }, error: null };
+      } catch (err) { return { data: null, error: { message: err.message } }; }
+    },
+    signOut: async () => {
+      localStorage.removeItem('sb_access_token');
+      localStorage.removeItem('sb_refresh_token');
+      localStorage.removeItem('sb_user');
+      return { error: null };
+    },
+    resetPasswordForEmail: async (email) => {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+          body: JSON.stringify({ email }),
+        });
+        if (res.ok) return { error: null };
+        const data = await res.json();
+        return { error: { message: data.error_description || 'Fehler beim Zurücksetzen' } };
+      } catch (err) { return { error: { message: err.message } }; }
+    },
+  },
+  from: (table) => ({
+    select: (cols = '*') => ({
+      eq: (col, val) => ({
+        single: async () => {
+          try {
+            const token = localStorage.getItem('sb_access_token');
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=${cols}&${col}=eq.${val}&limit=1`, {
+              headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}` },
+            });
+            const data = await res.json();
+            return { data: data[0] || null, error: null };
+          } catch (err) { return { data: null, error: err }; }
+        },
+      }),
+    }),
+    insert: (rows) => ({
+      select: () => ({
+        single: async () => {
+          try {
+            const token = localStorage.getItem('sb_access_token');
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}`, 'Prefer': 'return=representation' },
+              body: JSON.stringify(rows),
+            });
+            const data = await res.json();
+            if (!res.ok) return { data: null, error: { message: data.message || 'Insert failed' } };
+            return { data: Array.isArray(data) ? data[0] : data, error: null };
+          } catch (err) { return { data: null, error: err }; }
+        },
+      }),
+    }),
+    update: (updates) => ({
+      eq: (col, val) => ({
+        select: () => ({
+          single: async () => {
+            try {
+              const token = localStorage.getItem('sb_access_token');
+              const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${col}=eq.${val}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${token}`, 'Prefer': 'return=representation' },
+                body: JSON.stringify(updates),
+              });
+              const data = await res.json();
+              if (!res.ok) return { data: null, error: { message: data.message || 'Update failed' } };
+              return { data: Array.isArray(data) ? data[0] : data, error: null };
+            } catch (err) { return { data: null, error: err }; }
+          },
+        }),
+      }),
+    }),
+  }),
 };
 
-const priorities = [
-  { level: 1, label: 'Kritisch', color: colors.coral },
-  { level: 2, label: 'Hoch', color: colors.orange },
-  { level: 3, label: 'Mittel', color: colors.mint },
-  { level: 4, label: 'Niedrig', color: colors.purple },
-  { level: 5, label: 'Minimal', color: colors.skyBlue },
-];
+// ============================================================================
+// AUTH CONTEXT
+// ============================================================================
+const AuthContext = createContext(null);
+const useAuth = () => useContext(AuthContext);
 
-// No default categories - users create their own
-const categories: Category[] = [];
+const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-// SVG Icons - Original MindFlow Icons
-const Icons = {
-  email: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
-    </svg>
-  ),
-  chat: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <circle cx="9" cy="7" r="3" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 18c0-3 2.5-5 6-5s6 2 6 5" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M16 8h2m2 0h1M16 11h3m1 0h1" />
-    </svg>
-  ),
-  check: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" />
-    </svg>
-  ),
-  speaker: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-    </svg>
-  ),
-  speakerOff: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-    </svg>
-  ),
-  tasks: (
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-    </svg>
-  ),
-  mic: (
-    <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-    </svg>
-  ),
-  filter: (
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-    </svg>
-  ),
-  bolt: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
-    </svg>
-  ),
-  persons: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
-    </svg>
-  ),
-  calendar: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-    </svg>
-  ),
-  chevron: (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-    </svg>
-  ),
-  sun: (
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-    </svg>
-  ),
-  moon: (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1} opacity={0.6}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
-    </svg>
-  ),
-  search: (
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-    </svg>
-  ),
-};
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user || null);
+      setLoading(false);
+    });
+  }, []);
 
-// No onboarding todos - users create everything themselves
-const onboardingTodos: Todo[] = [];
+  const signUp = async (email, password) => {
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (data?.user) setUser(data.user);
+    return { data, error };
+  };
 
-// Liquid Glass Card Component
-interface GlassCardProps {
-  children: React.ReactNode;
-  color: string;
-  darkMode: boolean;
-  style?: React.CSSProperties;
-}
+  const signIn = async (email, password) => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (data?.user) setUser(data.user);
+    return { data, error };
+  };
 
-const GlassCard: React.FC<GlassCardProps> = ({ children, color, darkMode, style = {} }) => (
-  <div style={{
-    position: 'relative',
-    borderRadius: '16px',
-    overflow: 'visible',
-    background: darkMode 
-      ? 'linear-gradient(145deg, rgba(25, 28, 40, 0.8), rgba(25, 28, 40, 0.6))'
-      : 'rgba(255, 255, 255, 0.7)',
-    backdropFilter: 'blur(24px)',
-    WebkitBackdropFilter: 'blur(24px)',
-    border: `1px solid ${darkMode ? `${color}20` : 'rgba(255,255,255,0.6)'}`,
-    boxShadow: darkMode 
-      ? '0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05)'
-      : '0 4px 16px rgba(0,0,0,0.1)',
-    ...style,
-  }}>
-    {/* Background glow */}
-    {darkMode && (
-      <div style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: `radial-gradient(ellipse at 0% 50%, ${color}12 0%, transparent 50%)`,
-        pointerEvents: 'none',
-      }} />
-    )}
-    {/* Left accent line - show in both modes */}
-    <div style={{
-      position: 'absolute',
-      left: 0,
-      top: '16px',
-      bottom: '16px',
-      width: '3px',
-      background: `linear-gradient(180deg, ${color}${darkMode ? '90' : 'CC'} 0%, ${color}${darkMode ? '40' : '60'} 100%)`,
-      borderRadius: '0 3px 3px 0',
-      boxShadow: darkMode 
-        ? `0 0 15px ${color}60, 0 0 30px ${color}30`
-        : `0 0 8px ${color}40`,
-    }} />
-    <div style={{ position: 'relative', padding: '16px', paddingLeft: '20px' }}>
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+  };
+
+  const resetPassword = async (email) => {
+    return await supabase.auth.resetPasswordForEmail(email);
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, loading, signUp, signIn, signOut, resetPassword }}>
       {children}
+    </AuthContext.Provider>
+  );
+};
+
+// Formatierung
+const fmt = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v || 0);
+const fmtD = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 }).format(v || 0);
+const fmtP = (v) => new Intl.NumberFormat('de-DE', { style: 'percent', minimumFractionDigits: 2 }).format(v || 0);
+const fmtPlain = (v) => new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v || 0);
+
+// Jahres-Zinsen mit unterjähriger Tilgungsverrechnung (annähernd echte Jahr-1-Zinsen)
+// modus: 'monatlich' (12), 'quartalsweise' (4), 'jaehrlich' (1)
+// Verwendet Monatsrate falls vorhanden, sonst Annuität aus zinssatz+tilgung.
+const computeYearlyInterest = (d) => {
+  if (!d || !d.betrag || !d.zinssatz) return 0;
+  const start = d.restschuld > 0 ? d.restschuld : d.betrag;
+  const annualRate = (d.zinssatz || 0) / 100;
+  const modus = d.tilgungsrhythmus || 'monatlich';
+  const periods = modus === 'jaehrlich' ? 1 : (modus === 'quartalsweise' ? 4 : 12);
+  if (periods === 1) return start * annualRate;
+  const pRate = annualRate / periods;
+  // jährliche Zahlung in periodische umrechnen
+  let perPeriodPayment;
+  if (d.monatsrate > 0) {
+    perPeriodPayment = d.monatsrate * (12 / periods);
+  } else {
+    const annualPayment = start * (annualRate + ((d.tilgung || 0) / 100));
+    perPeriodPayment = annualPayment / periods;
+  }
+  let rs = start, interest = 0;
+  for (let i = 0; i < periods; i++) {
+    const z = rs * pRate;
+    const t = Math.min(perPeriodPayment - z, rs);
+    interest += z;
+    rs = Math.max(0, rs - t);
+    if (rs <= 0) break;
+  }
+  return interest;
+};
+
+
+
+// ============================================================================
+// Datei-Komprimierung für Upload (max 2MB)
+// ============================================================================
+const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
+
+// Bild komprimieren
+const compressImage = (file, maxSize = MAX_FILE_SIZE) => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    img.onload = () => {
+      let { width, height } = img;
+      let quality = 0.8;
+      
+      // Maximale Dimensionen
+      const maxDim = 1600;
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = (height / width) * maxDim;
+          width = maxDim;
+        } else {
+          width = (width / height) * maxDim;
+          height = maxDim;
+        }
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      // Qualität reduzieren bis unter maxSize
+      const tryCompress = (q) => {
+        const dataUrl = canvas.toDataURL('image/jpeg', q);
+        const base64 = dataUrl.split(',')[1];
+        const size = atob(base64).length;
+        
+        if (size > maxSize && q > 0.3) {
+          tryCompress(q - 0.1);
+        } else {
+          resolve({ base64, mimeType: 'image/jpeg', originalSize: file.size, compressedSize: size });
+        }
+      };
+      
+      tryCompress(quality);
+    };
+    
+    img.src = URL.createObjectURL(file);
+  });
+};
+
+// PDF: Nur Base64 zurückgeben (API limitiert auf erste Seiten)
+const processPDF = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(',')[1];
+      const size = atob(base64).length;
+      
+      if (size > MAX_FILE_SIZE * 2) {
+        // Warnung bei sehr großen PDFs
+        resolve({ 
+          base64, 
+          mimeType: 'application/pdf', 
+          originalSize: file.size, 
+          warning: 'PDF ist sehr groß. Bei Fehlern bitte nur die relevanten Seiten als separates PDF hochladen.'
+        });
+      } else {
+        resolve({ base64, mimeType: 'application/pdf', originalSize: file.size });
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
+// Hauptfunktion: Datei für Upload vorbereiten
+const prepareFileForUpload = async (file) => {
+  const isImage = file.type.startsWith('image/');
+  const isPDF = file.type === 'application/pdf';
+  
+  if (isImage) {
+    // Bilder immer komprimieren wenn > 500KB
+    if (file.size > 500 * 1024) {
+      return await compressImage(file);
+    } else {
+      // Kleine Bilder direkt verwenden
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          resolve({ base64: reader.result.split(',')[1], mimeType: file.type, originalSize: file.size });
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+  } else if (isPDF) {
+    return await processPDF(file);
+  } else {
+    // Andere Dateitypen: direkt als Base64
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve({ base64: reader.result.split(',')[1], mimeType: file.type, originalSize: file.size });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+};
+
+// Immobilien-Typ Farben
+const TYP_COLORS = {
+  etw: { bg: 'rgba(99, 102, 241, 0.15)', border: '#6366f1', text: '#818cf8' },   // Lila - ETW
+  efh: { bg: 'rgba(16, 185, 129, 0.15)', border: '#10b981', text: '#34d399' },   // Grün - EFH
+  mfh: { bg: 'rgba(245, 158, 11, 0.15)', border: '#f59e0b', text: '#fbbf24' },   // Orange - MFH
+  gewerbe: { bg: 'rgba(236, 72, 153, 0.15)', border: '#ec4899', text: '#f472b6' }, // Pink - Gewerbe
+  grundstueck: { bg: 'rgba(148, 163, 184, 0.15)', border: '#94a3b8', text: '#94a3b8' } // Silber/Grau - Grundstück
+};
+
+// Labels für Typ-Badges (kompakte Anzeige)
+const TYP_LABELS = {
+  etw: 'ETW',
+  efh: 'EFH',
+  mfh: 'MFH',
+  gewerbe: 'GEWERBE',
+  grundstueck: 'GRUNDST'
+};
+
+const getTypLabel = (typ) => TYP_LABELS[typ] || typ?.toUpperCase() || '';
+
+// Export Funktion - erstellt druckbare Ansicht in iframe
+const generateExport = (data, containerRef) => {
+  const { s, c, yr, yd, afaG, afaS, afaTot, wkTot, ein, erg, stEff, gwg, ga, BUNDESLAENDER } = data;
+  
+  // Formatierung
+  const f = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v || 0);
+  const f2 = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 }).format(v || 0);
+  const fp = (v) => new Intl.NumberFormat('de-DE', { style: 'percent', minimumFractionDigits: 2 }).format(v || 0);
+  
+  const html = `
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; font-size: 10px; line-height: 1.4; color: #1a1a1a; padding: 15px; background: #fff; }
+      .header { background: #6366f1; color: white; padding: 15px 20px; text-align: center; margin-bottom: 15px; }
+      .header h1 { font-size: 14px; margin-bottom: 3px; }
+      .header p { font-size: 10px; opacity: 0.9; }
+      .section { margin-bottom: 12px; }
+      .section h2 { font-size: 10px; color: #6366f1; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 2px solid #6366f1; font-weight: bold; }
+      table { width: 100%; border-collapse: collapse; font-size: 9px; }
+      th, td { padding: 4px 6px; text-align: left; border-bottom: 1px solid #e5e5e5; }
+      th { background: #f5f5f5; font-size: 8px; text-transform: uppercase; color: #666; }
+      .val { text-align: right; font-family: monospace; }
+      .note { font-size: 8px; color: #888; }
+      .hl td { background: #f0f0ff; font-weight: bold; }
+      .accent td { background: #6366f1; color: white; }
+      .neg { color: #dc2626; }
+      .summary { background: #fafafa; padding: 10px; margin-top: 10px; }
+      .cols { display: flex; gap: 10px; }
+      .col { flex: 1; background: white; border: 1px solid #e5e5e5; padding: 8px; }
+      .result-box { text-align: center; padding: 12px; margin-top: 10px; border-radius: 4px; }
+      .result-box.profit { background: #dcfce7; }
+      .result-box.loss { background: #fee2e2; }
+      .result-box .label { font-size: 9px; color: #666; }
+      .result-box .value { font-size: 18px; font-weight: bold; font-family: monospace; margin: 5px 0; }
+      .result-box.profit .value { color: #166534; }
+      .result-box.loss .value { color: #991b1b; }
+      .footer { text-align: center; padding: 15px 0 5px; color: #888; font-size: 8px; border-top: 1px solid #e5e5e5; margin-top: 15px; }
+    </style>
+  
+  <div class="header">
+    <h1>${s.typ.toUpperCase()}, ${s.adresse || 'Keine Adresse'}</h1>
+    <p>${s.name}${s.eigentuemer ? ` · Eigentümer: ${s.eigentuemer}` : ''}</p>
+  </div>
+  
+  <div class="section">
+    <h2>Grunddaten</h2>
+    <table>
+      <tr><td>Kaufpreis der Immobilie</td><td class="val">${f(s.kaufpreisImmobilie)}</td><td></td></tr>
+      ${s.bodenrichtwert > 0 ? `<tr><td>Bodenrichtwert pro qm Grundstück</td><td class="val">${f(s.bodenrichtwert)}</td><td class="note">Grundstückswert: ${f(gwg)}</td></tr>` : ''}
+      ${s.grundstueckGroesse > 0 ? `<tr><td>Grundstücksgröße</td><td class="val">${s.grundstueckGroesse} qm</td><td></td></tr>` : ''}
+      ${s.kaufpreisStellplatz > 0 ? `<tr><td>Kaufpreis Stellplatz</td><td class="val">${f(s.kaufpreisStellplatz)}</td><td></td></tr>` : ''}
+      <tr class="hl"><td><b>Kaufpreis Gesamt</b></td><td class="val"><b>${f(c.kp)}</b></td><td></td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>Mieteinnahmen</h2>
+    <table>
+      <tr><td>Wohnfläche</td><td class="val">${s.wohnflaeche} qm</td><td class="note">× ${f(s.mieteProQm)}/qm</td></tr>
+      ${s.anzahlStellplaetze > 0 ? `<tr><td>Stellplätze</td><td class="val">${s.anzahlStellplaetze} Stck.</td><td class="note">× ${f(s.mieteStellplatz)}/Monat</td></tr>` : ''}
+      <tr class="hl"><td><b>Miete pro Monat</b></td><td class="val"><b>${f(c.mm)}</b></td><td></td></tr>
+      <tr class="hl"><td><b>Jahres-Kaltmiete</b></td><td class="val"><b>${f(c.jm)}</b></td><td></td></tr>
+      <tr class="hl"><td><b>Bruttorendite</b></td><td class="val"><b>${fp(c.rendite)}</b></td><td></td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>Anschaffungskosten</h2>
+    <table>
+      <tr><td>+ Kaufpreis Immobilie</td><td class="val">${f(s.kaufpreisImmobilie)}</td><td></td></tr>
+      ${s.mehrkosten > 0 ? `<tr><td>+ Mehrkosten</td><td class="val">${f(s.mehrkosten)}</td><td></td></tr>` : ''}
+      ${s.kaufpreisStellplatz > 0 ? `<tr><td>+ Kaufpreis Stellplatz</td><td class="val">${f(s.kaufpreisStellplatz)}</td><td></td></tr>` : ''}
+      ${s.maklerProvision > 0 ? `<tr><td>+ Vermittlungsprovision (Makler)</td><td class="val">${f(s.maklerProvision)}</td><td></td></tr>` : ''}
+      <tr><td>+ Grunderwerbsteuer</td><td class="val">${f(s.grunderwerbsteuer)}</td><td class="note">${BUNDESLAENDER[s.bundesland]?.grest || 6}% vom KP</td></tr>
+      <tr><td>+ Notarkosten</td><td class="val">${f(s.notarkosten)}</td><td></td></tr>
+      <tr class="hl"><td><b>Anschaffungskosten Gesamt</b></td><td class="val"><b>${f(c.ak)}</b></td><td></td></tr>
+      <tr><td>./. Grundstücksanteil (Bodenwert)</td><td class="val neg">-${f(ga)}</td><td class="note">${s.teileigentumsanteil}/10.000stel von ${f(gwg)}</td></tr>
+      <tr class="hl"><td><b>Anschaffungskosten Gebäude</b></td><td class="val"><b>${f(c.afaBasis)}</b></td><td></td></tr>
+      <tr class="accent"><td><b>AfA linear ${s.afaSatz}%</b></td><td class="val"><b>${f(afaG)}</b></td><td></td></tr>
+    </table>
+  </div>
+
+  ${s.sonderausstattung?.length > 0 ? `<div class="section">
+    <h2>Sonderausstattung (AfA 10%)</h2>
+    <table>
+      ${s.sonderausstattung.map((sa, i) => `<tr><td>${sa.name || `Position ${i+1}`}</td><td class="val">${f(sa.betrag)}</td></tr>`).join('')}
+      <tr class="hl"><td><b>Summe Sonderausstattung</b></td><td class="val"><b>${f(c.saSumme)}</b></td></tr>
+      <tr class="accent"><td><b>AfA Sonderausstattung (10%) p.a.</b></td><td class="val"><b>${f(c.afaSA)}</b></td></tr>
+    </table>
+  </div>` : ''}
+
+  <div class="section">
+    <h2>Werbungskosten ${yr}</h2>
+    <table>
+      ${yd.wk.length > 0 ? yd.wk.map((w, i) => `<tr><td>${w.bez || `Position ${i+1}`}</td><td class="val">${f(w.betrag)}</td></tr>`).join('') : '<tr><td colspan="2" style="color:#888;font-style:italic;text-align:center;padding:10px">Keine Werbungskosten erfasst</td></tr>'}
+      <tr class="hl"><td><b>Werbungskosten Gesamt</b></td><td class="val"><b>${f(wkTot)}</b></td></tr>
+    </table>
+  </div>
+
+  <div class="section summary">
+    <h2>Zusammenfassung AfA + Werbungskosten ${yr}</h2>
+    <div class="cols">
+      <div class="col">
+        <table>
+          ${c.saSumme > 0 ? `<tr><td>AfA Sonderausstattung (10%) p.a.</td><td class="val">${f(afaS)}</td></tr>` : ''}
+          <tr><td>AfA Anschaffungskosten linear (${s.afaSatz}%)</td><td class="val">${f(afaG)}</td></tr>
+          <tr><td>Werbungskosten ${yr} Gesamt</td><td class="val">${f(wkTot)}</td></tr>
+          <tr class="hl"><td><b>AfA + Werbungskosten ${yr}</b></td><td class="val neg"><b>-${f(afaTot + wkTot)}</b></td></tr>
+        </table>
+      </div>
+      <div class="col">
+        <table>
+          <tr><td>Mieteinnahmen ${yr}</td><td class="val">${f(yd.miet)}</td></tr>
+          ${yd.nkVor > 0 ? `<tr><td>Einnahmen aus NK Vorauszahlung</td><td class="val">${f(yd.nkVor)}</td></tr>` : ''}
+          ${(yd.nkNach || 0) !== 0 ? `<tr><td>NK-Nachzahlungen VJ</td><td class="val">${f(yd.nkNach)}</td></tr>` : ''}
+          ${yd.nkAbr !== 0 ? `<tr><td>NK-Abrechnung ${yr}</td><td class="val">${f(yd.nkAbr)}</td></tr>` : ''}
+          <tr class="hl"><td><b>Einnahmen Gesamt</b></td><td class="val"><b>${f(ein)}</b></td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="result-box ${erg < 0 ? 'profit' : 'loss'}">
+      <div class="label">Steuerliches Ergebnis ${yr}</div>
+      <div class="value">${f2(erg)}</div>
+      <div class="label">${erg < 0 ? `→ Steuerersparnis ca. ${f(Math.abs(stEff))} bei ${s.steuersatz}% Steuersatz` : `→ Steuerlast ca. ${f(stEff)} bei ${s.steuersatz}% Steuersatz`}</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Erstellt mit ImmoHub · ${new Date().toLocaleDateString('de-DE')}
+  </div>`;
+
+  return html;
+};
+
+// Glasmorphism Icons als SVG-Komponenten
+const GlassIcon = ({ children, color, simple }) => (
+  <svg viewBox="0 0 40 40" fill="none">
+    {!simple && (
+      <>
+        <defs>
+          <linearGradient id={`grad-${color.replace('#','')}`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style={{ stopColor: color, stopOpacity: 0.9 }} />
+            <stop offset="100%" style={{ stopColor: color, stopOpacity: 0.5 }} />
+          </linearGradient>
+          <filter id={`glow-${color.replace('#','')}`}>
+            <feGaussianBlur stdDeviation="1" result="coloredBlur"/>
+            <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <rect x="2" y="2" width="36" height="36" rx="10" fill={`url(#grad-${color.replace('#','')})`} opacity="0.15" />
+        <rect x="2" y="2" width="36" height="36" rx="10" fill="none" stroke={color} strokeWidth="1.5" opacity="0.4" />
+      </>
+    )}
+    <g fill={color} opacity="0.9">
+      {children}
+    </g>
+  </svg>
+);
+
+// Objekt Icon - Haus/Pin
+const IconObjekt = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M20 8L8 18v14h8v-8h8v8h8V18L20 8z" />
+    <circle cx="20" cy="18" r="2" fill="rgba(0,0,0,0.3)" />
+  </GlassIcon>
+);
+
+// Kaufpreis Icon - Euro/Münzen
+const IconKaufpreis = ({ color }) => (
+  <GlassIcon color={color}>
+    <circle cx="20" cy="20" r="10" fill="none" stroke={color} strokeWidth="2.5" />
+    <path d="M17 16h6M17 20h6M17 24h4" stroke={color} strokeWidth="2" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Grundstück/AfA Icon - Gebäude mit Prozent
+const IconAfa = ({ color }) => (
+  <GlassIcon color={color}>
+    <rect x="10" y="14" width="20" height="18" rx="2" />
+    <rect x="14" y="18" width="4" height="4" fill="rgba(0,0,0,0.3)" />
+    <rect x="22" y="18" width="4" height="4" fill="rgba(0,0,0,0.3)" />
+    <rect x="14" y="24" width="4" height="4" fill="rgba(0,0,0,0.3)" />
+    <rect x="22" y="24" width="4" height="4" fill="rgba(0,0,0,0.3)" />
+    <path d="M10 14l10-6 10 6" fill="none" stroke={color} strokeWidth="2.5" />
+  </GlassIcon>
+);
+
+// Miete Icon - Schlüssel
+const IconMiete = ({ color }) => (
+  <GlassIcon color={color}>
+    <circle cx="15" cy="15" r="6" fill="none" stroke={color} strokeWidth="2.5" />
+    <path d="M19 19l12 12M27 27l4-4M30 30l4-4" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Finanzierung Icon - Bank/Säulen
+const IconFinanz = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M8 14h24l-12-6-12 6z" />
+    <rect x="10" y="16" width="3" height="10" rx="1" />
+    <rect x="18" y="16" width="3" height="10" rx="1" />
+    <rect x="26" y="16" width="3" height="10" rx="1" />
+    <rect x="8" y="27" width="24" height="3" rx="1" />
+  </GlassIcon>
+);
+
+// Sonderausstattung Icon - Küche/Besteck
+const IconSonder = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M12 10v10c0 2 1 3 3 3h1v7h2v-7h1c2 0 3-1 3-3V10" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M14 10v6M17 10v6M20 10v6" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    <path d="M26 10c0 4 2 6 2 10 0 2-1 3-2 3s-2-1-2-3c0-4 2-6 2-10" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M26 23v7" stroke={color} strokeWidth="2" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Rendite Icon - Chart aufwärts
+const IconRendite = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M8 28l8-8 6 4 10-12" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M26 12h6v6" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+  </GlassIcon>
+);
+
+// Steuer Icon - Dokument mit Haken
+const IconSteuer = ({ color }) => (
+  <GlassIcon color={color}>
+    <rect x="10" y="6" width="20" height="28" rx="2" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M14 12h12M14 17h12M14 22h8" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    <path d="M16 27l3 3 6-6" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </GlassIcon>
+);
+
+// Info Icon - Kreis mit i
+const IconInfo = ({ color }) => (
+  <svg viewBox="0 0 40 40" style={{ width: '100%', height: '100%' }}>
+    <circle cx="20" cy="20" r="12" fill="none" stroke={color} strokeWidth="2" />
+    <circle cx="20" cy="14" r="1.5" fill={color} />
+    <path d="M20 18v8" stroke={color} strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
+
+// Einnahmen Icon - Geldbündel
+const IconEinnahmen = ({ color }) => (
+  <GlassIcon color={color}>
+    <rect x="8" y="12" width="24" height="16" rx="2" />
+    <circle cx="20" cy="20" r="5" fill="rgba(0,0,0,0.3)" />
+    <circle cx="12" cy="20" r="1.5" fill="rgba(0,0,0,0.3)" />
+    <circle cx="28" cy="20" r="1.5" fill="rgba(0,0,0,0.3)" />
+  </GlassIcon>
+);
+
+// Werbungskosten Icon - Quittung
+const IconWerbung = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M10 8h20v24l-4-3-4 3-4-3-4 3-4-3V8z" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M14 14h12M14 19h12M14 24h8" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Dashboard Icon - Grid Overview
+const IconDashboard = ({ color }) => (
+  <GlassIcon color={color}>
+    <rect x="8" y="8" width="10" height="10" rx="2" />
+    <rect x="22" y="8" width="10" height="10" rx="2" />
+    <rect x="8" y="22" width="10" height="10" rx="2" />
+    <rect x="22" y="22" width="10" height="10" rx="2" />
+  </GlassIcon>
+);
+
+// Upload Icon - Dokument mit Pfeil
+const IconUpload = ({ color }) => (
+  <GlassIcon color={color}>
+    <rect x="10" y="6" width="20" height="28" rx="2" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M20 14v12M16 18l4-4 4 4" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </GlassIcon>
+);
+
+// Check/Review Icon - Lupe mit Fragezeichen
+const IconReview = ({ color }) => (
+  <GlassIcon color={color}>
+    <circle cx="18" cy="18" r="10" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M26 26l6 6" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+    <path d="M18 13v6M18 22v1" stroke={color} strokeWidth="2" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Speichern Icon - Diskette
+const IconSave = ({ color }) => (
+  <GlassIcon color={color}>
+    <rect x="8" y="8" width="24" height="24" rx="2" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M12 8v8h16V8" fill="none" stroke={color} strokeWidth="2" />
+    <rect x="12" y="20" width="16" height="8" rx="1" fill="none" stroke={color} strokeWidth="1.5" />
+    <rect x="22" y="10" width="4" height="4" fill={color} opacity="0.5" />
+  </GlassIcon>
+);
+
+// Löschen Icon - Mülleimer
+const IconTrash = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M12 14h16v16a2 2 0 01-2 2H14a2 2 0 01-2-2V14z" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M10 14h20M16 14v-2a2 2 0 012-2h4a2 2 0 012 2v2" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M16 18v10M20 18v10M24 18v10" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Baustelle Icon - Kran
+const IconConstruction = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M10 32h4V12h-4v20zM14 14h16M14 12l8-4v4" fill="none" stroke={color} strokeWidth="2" />
+    <rect x="26" y="14" width="6" height="8" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M29 22v6" stroke={color} strokeWidth="2" />
+  </GlassIcon>
+);
+
+// Chart/Statistik Icon
+const IconChart = ({ color }) => (
+  <GlassIcon color={color}>
+    <rect x="8" y="22" width="6" height="10" rx="1" />
+    <rect x="17" y="14" width="6" height="18" rx="1" />
+    <rect x="26" y="8" width="6" height="24" rx="1" />
+  </GlassIcon>
+);
+
+// Zahnrad/Einstellungen Icon
+const IconSettings = ({ color }) => (
+  <GlassIcon color={color}>
+    <circle cx="20" cy="20" r="6" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M20 8v4M20 28v4M8 20h4M28 20h4M11.5 11.5l2.8 2.8M25.7 25.7l2.8 2.8M11.5 28.5l2.8-2.8M25.7 14.3l2.8-2.8" stroke={color} strokeWidth="2" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Projektion/Trend Icon
+const IconTrend = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M8 28l8-10 6 6 10-14" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    <circle cx="8" cy="28" r="2" fill={color} />
+    <circle cx="16" cy="18" r="2" fill={color} />
+    <circle cx="22" cy="24" r="2" fill={color} />
+    <circle cx="32" cy="10" r="2" fill={color} />
+  </GlassIcon>
+);
+
+// Liquidität/Tropfen Icon
+const IconLiquidity = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M20 6c0 0-10 12-10 18a10 10 0 0020 0c0-6-10-18-10-18z" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M16 22c0 2.2 1.8 4 4 4" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Download Icon
+const IconDownload = ({ color }) => (
+  <GlassIcon color={color}>
+    <rect x="10" y="6" width="20" height="28" rx="2" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M20 26v-12M16 22l4 4 4-4" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </GlassIcon>
+);
+
+// Kopieren Icon
+const IconCopy = ({ color }) => (
+  <GlassIcon color={color}>
+    <rect x="14" y="10" width="18" height="22" rx="2" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M10 26V10a2 2 0 012-2h14" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M18 16h10M18 21h10M18 26h6" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Check/Häkchen Icon
+const IconCheck = ({ color }) => (
+  <GlassIcon color={color}>
+    <circle cx="20" cy="20" r="12" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M14 20l4 4 8-8" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+  </GlassIcon>
+);
+
+// Warnung Icon
+const IconWarning = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M20 6L6 32h28L20 6z" fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" />
+    <path d="M20 14v8M20 26v1" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Home Icon
+const IconHome = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M8 18l12-10 12 10" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M12 16v14h16V16" fill="none" stroke={color} strokeWidth="2" />
+    <rect x="17" y="22" width="6" height="8" fill="none" stroke={color} strokeWidth="1.5" />
+  </GlassIcon>
+);
+
+// Plus Icon
+const IconPlus = ({ color }) => (
+  <GlassIcon color={color}>
+    <circle cx="20" cy="20" r="12" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M20 14v12M14 20h12" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Close/X Icon
+const IconClose = ({ color }) => (
+  <GlassIcon color={color} simple>
+    <path d="M12 12l16 16M28 12l-16 16" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Lupe/Search Icon
+const IconSearch = ({ color }) => (
+  <GlassIcon color={color}>
+    <circle cx="18" cy="18" r="10" fill="none" stroke={color} strokeWidth="2.5" />
+    <path d="M26 26l8 8" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// AI/Robot Icon
+const IconAI = ({ color }) => (
+  <GlassIcon color={color}>
+    <rect x="10" y="12" width="20" height="16" rx="3" fill="none" stroke={color} strokeWidth="2" />
+    <circle cx="16" cy="20" r="2" fill={color} />
+    <circle cx="24" cy="20" r="2" fill={color} />
+    <path d="M16 25h8" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    <path d="M20 12v-4M14 8h12" stroke={color} strokeWidth="2" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Arrow Left Icon
+const IconArrowLeft = ({ color }) => (
+  <GlassIcon color={color} simple>
+    <path d="M24 8l-12 12 12 12" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+  </GlassIcon>
+);
+
+// Document/File Icon
+const IconDocument = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M12 6h10l8 8v18a2 2 0 01-2 2H12a2 2 0 01-2-2V8a2 2 0 012-2z" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M22 6v8h8" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M14 18h12M14 23h12M14 28h8" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Lightbulb/Idea Icon
+const IconIdea = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M20 6a10 10 0 00-6 18v4h12v-4a10 10 0 00-6-18z" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M16 32h8M17 28h6" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <path d="M20 12v4M14 14l2 2M26 14l-2 2" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Sun Icon (Light Mode)
+const IconSun = ({ color }) => (
+  <GlassIcon color={color} simple>
+    <circle cx="20" cy="20" r="6" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M20 8v4M20 28v4M8 20h4M28 20h4M11.5 11.5l2.8 2.8M25.7 25.7l2.8 2.8M11.5 28.5l2.8-2.8M25.7 14.3l2.8-2.8" stroke={color} strokeWidth="2" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Moon Icon (Dark Mode)
+const IconMoon = ({ color }) => (
+  <GlassIcon color={color} simple>
+    <path d="M26 20a10 10 0 01-10 10 10 10 0 01-10-10 10 10 0 0110-10 8 8 0 000 16 8 8 0 008-8 10 10 0 012 2z" fill="none" stroke={color} strokeWidth="2" />
+  </GlassIcon>
+);
+
+// Undo Icon
+const IconUndo = ({ color }) => (
+  <GlassIcon color={color} simple>
+    <path d="M14 16l-6-6 6-6" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M8 10h16a8 8 0 018 8 8 8 0 01-8 8H14" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Redo Icon
+const IconRedo = ({ color }) => (
+  <GlassIcon color={color} simple>
+    <path d="M26 16l6-6-6-6" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M32 10H16a8 8 0 00-8 8 8 8 0 008 8h10" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Notes/Notizen Icon
+const IconNotes = ({ color }) => (
+  <GlassIcon color={color}>
+    <rect x="8" y="6" width="24" height="28" rx="2" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M12 12h16M12 18h16M12 24h10" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    <circle cx="28" cy="28" r="6" fill={color} opacity="0.3" />
+    <path d="M26 28h4M28 26v4" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Dokumente/Fotos Icon
+const IconDocuments = ({ color }) => (
+  <GlassIcon color={color}>
+    <rect x="6" y="10" width="16" height="20" rx="2" fill="none" stroke={color} strokeWidth="2" />
+    <rect x="14" y="6" width="16" height="20" rx="2" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M18 13h8M18 18h8" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    <circle cx="22" cy="24" r="3" fill="none" stroke={color} strokeWidth="1.5" />
+  </GlassIcon>
+);
+
+// Darlehen/Bank Icon
+const IconBank = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M6 16h28M8 16v12M14 16v12M20 16v12M26 16v12M32 16v12" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <path d="M4 28h32" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <path d="M20 6l14 10H6L20 6z" fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" />
+  </GlassIcon>
+);
+
+// Historie/Verlauf Icon
+const IconHistory = ({ color }) => (
+  <GlassIcon color={color}>
+    <circle cx="20" cy="20" r="14" fill="none" stroke={color} strokeWidth="2" />
+    <path d="M20 10v10l6 6" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M8 8l-4 4M8 8l4 4" stroke={color} strokeWidth="2" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Erinnerung/Glocke Icon
+const IconBell = ({ color }) => (
+  <GlassIcon color={color}>
+    <path d="M20 6c-6 0-10 4-10 10v6l-2 4h24l-2-4v-6c0-6-4-10-10-10z" fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" />
+    <path d="M16 30c0 2.2 1.8 4 4 4s4-1.8 4-4" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    <circle cx="20" cy="6" r="2" fill={color} />
+  </GlassIcon>
+);
+
+// List/Auflistung Icon
+const IconList = ({ color }) => (
+  <GlassIcon color={color}>
+    <rect x="6" y="6" width="28" height="28" rx="3" fill="none" stroke={color} strokeWidth="2" />
+    <circle cx="12" cy="14" r="2" fill={color} />
+    <circle cx="12" cy="22" r="2" fill={color} />
+    <circle cx="12" cy="30" r="2" fill={color} />
+    <path d="M18 14h12M18 22h12M18 30h8" stroke={color} strokeWidth="2" strokeLinecap="round" />
+  </GlassIcon>
+);
+
+// Person Icon
+const IconPerson = ({ color }) => (
+  <svg viewBox="0 0 40 40" style={{ width: '100%', height: '100%' }}>
+    <defs>
+      <linearGradient id={`personGrad-${color?.replace('#','')}`} x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor={color} stopOpacity="0.2" />
+        <stop offset="100%" stopColor={color} stopOpacity="0.05" />
+      </linearGradient>
+    </defs>
+    <circle cx="20" cy="14" r="7" fill={`url(#personGrad-${color?.replace('#','')})`} stroke={color} strokeWidth="2" />
+    <path d="M8 34c0-6.627 5.373-12 12-12s12 5.373 12 12" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
+
+const BUNDESLAENDER = {
+  'bayern': { name: 'Bayern', grest: 3.5 },
+  'baden-wuerttemberg': { name: 'Baden-Württemberg', grest: 5.0 },
+  'hessen': { name: 'Hessen', grest: 6.0 },
+  'nrw': { name: 'Nordrhein-Westfalen', grest: 6.5 },
+  'berlin': { name: 'Berlin', grest: 6.0 },
+  'hamburg': { name: 'Hamburg', grest: 5.5 },
+  'niedersachsen': { name: 'Niedersachsen', grest: 5.0 },
+  'sachsen': { name: 'Sachsen', grest: 5.5 },
+  'thueringen': { name: 'Thüringen', grest: 5.0 },
+  'brandenburg': { name: 'Brandenburg', grest: 6.5 },
+};
+
+const createEmpty = () => ({
+  id: Date.now(),
+  saved: false,
+  importiert: false, // true wenn aus Dokument importiert
+  zuPruefen: [], // Liste der Felder die zu prüfen sind
+  notizen: '', // Freitext-Notizen
+  dokumente: [], // Array von { name, url, typ }
+  beteiligungen: [], // Array von { beteiligterID, anteil }
+  darlehen: [], // Array von { name, betrag, zinssatz, tilgung, abschluss, zinsbindungEnde, typ }
+  miethistorie: [], // Array von { datum, mieteAlt, mieteNeu, grund }
+  erinnerungen: [], // Array von { datum, titel, beschreibung, erledigt }
+  // === Hierarchie (Hybrid-Modell, eingeführt v7.7) ===
+  isContainer: false, // true = Gebäude (z.B. MFH) mit Einheiten darunter
+  parentId: null,     // null = eigenständig oder Container; sonst ID des übergeordneten Gebäudes
+  stammdaten: {
+    name: '', adresse: '', projekt: '', typ: 'etw', bundesland: 'hessen',
+    objektstatus: 'neubau',
+    nutzung: 'vermietet',
+    eigentuemer: '',
+    kaufdatum: new Date().toISOString().split('T')[0],
+    baujahr: 0,
+    wohnungsNr: '',
+    etage: '',
+    verkehrswert: 0,
+    verkehrswertDatum: '',
+    kaufpreisImmobilie: 0, kaufpreisStellplatz: 0,
+    grundstueckGroesse: 0, bodenrichtwert: 0, teileigentumsanteil: 0,
+    wohnflaeche: 0, mieteProQm: 0, mieteStellplatz: 0, anzahlStellplaetze: 1,
+    mieteSonderausstattung: 0, // Miete für Küche etc.
+    kaltmiete: 0, // Kaltmiete pro Monat
+    nebenkostenVorauszahlung: 0, // NK-Vorauszahlung pro Monat
+    mieterName: '', // Name des aktuellen Mieters
+    mietstatusAktiv: true, // true = vermietet, false = Leerstand
+    mietbeginn: '',
+    mietende: '', // Mietende (leer = unbefristet)
+    kaution: 0, // Kautionsbetrag
+    kautionErhalten: false, // Kaution wurde erhalten
+    kautionZurueckgezahlt: false, // Kaution wurde zurückgezahlt
+    maklerProvision: 0, notarkosten: 0, grunderwerbsteuer: 0, mehrkosten: 0,
+    afaSatz: 3, degressiveAfa: 0, baujahr: 2020,
+    // Eigenkapital-Details
+    eigenkapitalAnteil: 20, 
+    eigenkapitalBetrag: 0,
+    eigenkapitalHerkunft: 'ersparnis',
+    eigenleistung: 0,
+    // Förderungen
+    kfwZuschuss: 0,
+    kfwProgramm: '',
+    bafaFoerderung: 0,
+    landesFoerderung: 0,
+    // Darlehen (Legacy-Felder)
+    zinssatz: 3.5, tilgung: 2, laufzeit: 30,
+    darlehenAbschluss: new Date().toISOString().split('T')[0],
+    tilgungsbeginn: new Date().toISOString().split('T')[0],
+    sonderausstattung: [], steuersatz: 42,
+    // === Eigentumsart (v7.7) ===
+    eigentumsart: 'weg', // 'weg' = WEG-Teileigentum (aufgeteilt), 'gesamt' = Gesamteigentum (MFH nicht aufgeteilt)
+    // === Erbbaurecht (v7.7) ===
+    erbbaurecht: false,        // true = Grundstück im Erbbaurecht (gehört nicht dem Käufer)
+    erbbauzins: 0,             // jährlicher Erbbauzins in € (steuerlich Werbungskosten)
+    erbbauLaufzeitEnde: '',    // Datum/Jahr, bis wann der Erbbaurechtsvertrag läuft
+    // === Energieausweis (v7.7) ===
+    energietraeger: '',        // gas | oel | fernwaerme | waermepumpe | strom | pellets | holz | sonstige
+    energieausweisArt: '',     // bedarf | verbrauch
+    energiekennwert: 0,        // kWh/(m²·a)
+    energieeffizienzklasse: '',// A+ ... H
+    energieausweisGueltigBis: '',
+    // === Ausbaureserve / Entwicklungspotenzial (v7.7) ===
+    ausbaureserveFlaeche: 0,   // qm zusätzliche Potenzialfläche (z.B. DG-Ausbau)
+    ausbaureserveBeschreibung: '',
+    // === Personenzahl (relevant für Einheiten/NK-Abrechnung, v7.7) ===
+    personenzahl: 0,
+  },
+  rendite: { mietanpassung: 2, kostenProzent: 6, instandhaltung: 12, mietausfall: 4 },
+  steuerJahre: {},
+});
+
+const STORAGE_KEY = 'immocalc_v4';
+const load = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; } };
+const save = (d) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch {} };
+
+const useCalc = (s) => useMemo(() => {
+  if (!s) return {};
+  const kp = (s.kaufpreisImmobilie || 0) + (s.mehrkosten || 0) + (s.kaufpreisStellplatz || 0);
+  const nk = (s.maklerProvision || 0) + (s.grunderwerbsteuer || 0) + (s.notarkosten || 0);
+  const ak = kp + nk;
+  const gwg = (s.grundstueckGroesse || 0) * (s.bodenrichtwert || 0);
+  const ga = s.erbbaurecht ? 0 : (s.eigentumsart === 'gesamt' ? gwg : (s.teileigentumsanteil > 0 ? (s.teileigentumsanteil / 10000) * gwg : 0));
+  const afaBasis = ak - ga;
+  const afaGeb = afaBasis * ((s.afaSatz || 3) / 100);
+  const saSumme = s.sonderausstattung?.reduce((a, i) => a + (i.betrag || 0), 0) || 0;
+  const afaSA = s.sonderausstattung?.reduce((a, i) => a + ((i.betrag || 0) * 0.1), 0) || 0;
+  // Jahres-Kaltmiete: Kaltmiete + Stellplatz + Sonderausstattung (ohne NK-Vorauszahlung)
+  const jm = ((s.kaltmiete || 0) + (s.mieteStellplatz || 0) + (s.mieteSonderausstattung || 0)) * 12;
+  // Kaufpreisfaktor (Vervielfältiger) = Kaufpreis / Jahresnettokaltmiete; Erbbauzins als Werbungskosten
+  const kaufpreisfaktor = jm > 0 ? kp / jm : 0;
+  const erbbauzinsWK = s.erbbaurecht ? (s.erbbauzins || 0) : 0;
+  return { kp, nk, ak, gwg, ga, afaBasis, afaGeb, saSumme, afaSA, afaGes: afaGeb + afaSA, jm, mm: jm / 12, rendite: kp > 0 ? jm / kp : 0, kaufpreisfaktor, erbbauzinsWK };
+}, [s]);
+
+// Formatierte Zahl mit Tausender-Trennzeichen
+const formatNumber = (num) => {
+  if (num === '' || num === null || num === undefined) return '';
+  const n = typeof num === 'string' ? parseFloat(num.replace(/\./g, '').replace(',', '.')) : num;
+  if (isNaN(n)) return '';
+  return n.toLocaleString('de-DE', { maximumFractionDigits: 2 });
+};
+
+// Parse formatierte Zahl zurück
+const parseNumber = (str) => {
+  if (!str || str === '') return 0;
+  // Entferne Tausender-Punkte, ersetze Komma durch Punkt
+  const cleaned = str.toString().replace(/\./g, '').replace(',', '.');
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? 0 : num;
+};
+
+// Datum formatieren: YYYY-MM-DD zu TT.MM.JJJJ
+const formatDateDE = (isoDate) => {
+  if (!isoDate) return '';
+  const parts = isoDate.split('-');
+  if (parts.length !== 3) return isoDate;
+  return `${parts[2]}.${parts[1]}.${parts[0]}`;
+};
+
+// Datum parsen: TT.MM.JJJJ zu YYYY-MM-DD
+const parseDateDE = (deDate) => {
+  if (!deDate) return '';
+  // Erlaube auch Eingabe mit / oder -
+  const cleaned = deDate.replace(/[\/\-]/g, '.');
+  const parts = cleaned.split('.');
+  if (parts.length !== 3) return '';
+  const [day, month, year] = parts;
+  // Validierung
+  const d = parseInt(day, 10);
+  const m = parseInt(month, 10);
+  let y = parseInt(year, 10);
+  if (isNaN(d) || isNaN(m) || isNaN(y)) return '';
+  // 2-stelliges Jahr zu 4-stellig konvertieren
+  if (y < 100) y = y > 50 ? 1900 + y : 2000 + y;
+  if (d < 1 || d > 31 || m < 1 || m > 12) return '';
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+};
+
+// DateInput Komponente mit deutschem Format und Kalender
+const DateInput = ({ value, onChange, placeholder }) => {
+  const [displayValue, setDisplayValue] = useState(formatDateDE(value));
+  const [isFocused, setIsFocused] = useState(false);
+  const hiddenDateRef = React.useRef(null);
+  
+  React.useEffect(() => {
+    if (!isFocused) {
+      setDisplayValue(formatDateDE(value));
+    }
+  }, [value, isFocused]);
+  
+  const handleChange = (e) => {
+    const inputVal = e.target.value;
+    // Erlaube nur Zahlen und Trennzeichen
+    const sanitized = inputVal.replace(/[^0-9.\/\-]/g, '');
+    setDisplayValue(sanitized);
+  };
+  
+  const handleBlur = () => {
+    setIsFocused(false);
+    const parsed = parseDateDE(displayValue);
+    if (parsed) {
+      onChange(parsed);
+      setDisplayValue(formatDateDE(parsed));
+    } else if (displayValue === '') {
+      onChange('');
+    } else {
+      // Ungültiges Datum - zurücksetzen
+      setDisplayValue(formatDateDE(value));
+    }
+  };
+  
+  const handleFocus = () => {
+    setIsFocused(true);
+  };
+  
+  const openCalendar = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (hiddenDateRef.current) {
+      // Verschiedene Methoden probieren für Browser-Kompatibilität
+      try {
+        hiddenDateRef.current.showPicker();
+      } catch {
+        // Fallback: Focus und Click simulieren
+        hiddenDateRef.current.focus();
+        hiddenDateRef.current.click();
+      }
+    }
+  };
+  
+  const handleCalendarChange = (e) => {
+    const newValue = e.target.value;
+    onChange(newValue);
+    setDisplayValue(formatDateDE(newValue));
+  };
+  
+  const handleCalendarClick = () => {
+    if (hiddenDateRef.current) {
+      hiddenDateRef.current.showPicker?.();
+    }
+  };
+  
+  return (
+    <div className="date-input-wrapper">
+      <input 
+        type="text" 
+        inputMode="numeric"
+        value={displayValue} 
+        onChange={handleChange}
+        onBlur={handleBlur}
+        onFocus={handleFocus}
+        placeholder={placeholder || "TT.MM.JJJJ"}
+        className="date-input-text"
+      />
+      <div className="date-calendar-btn" onClick={handleCalendarClick} title="Kalender öffnen">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+          <line x1="16" y1="2" x2="16" y2="6"/>
+          <line x1="8" y1="2" x2="8" y2="6"/>
+          <line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        <input 
+          type="date" 
+          ref={hiddenDateRef}
+          value={value || ''} 
+          onChange={handleCalendarChange}
+          className="date-input-native"
+          tabIndex={-1}
+        />
+      </div>
+    </div>
+  );
+};
+
+const Input = ({ label, value, onChange, suffix, step = 1, type = 'number', ph, error, className }) => {
+  const isDate = type === 'date';
+  const isYear = type === 'year';
+  const isNumber = type === 'number';
+  const [displayValue, setDisplayValue] = useState(
+    isNumber && value ? formatNumber(value) : 
+    isYear && value ? String(value) : 
+    (value || '')
+  );
+  const [isFocused, setIsFocused] = useState(false);
+  
+  // Sync display value when external value changes (but not during focus)
+  React.useEffect(() => {
+    if (!isFocused) {
+      if (isNumber) {
+        setDisplayValue(value ? formatNumber(value) : '');
+      } else if (isYear) {
+        setDisplayValue(value ? String(value) : '');
+      } else {
+        setDisplayValue(value || '');
+      }
+    }
+  }, [value, isFocused, isNumber, isYear]);
+  
+  const handleChange = (e) => {
+    const inputVal = e.target.value;
+    if (isNumber) {
+      // Erlaube nur Zahlen, Punkte und Kommas während der Eingabe
+      const sanitized = inputVal.replace(/[^0-9.,\-]/g, '');
+      setDisplayValue(sanitized);
+      onChange(parseNumber(sanitized));
+    } else if (isYear) {
+      // Nur Zahlen für Jahr, keine Formatierung
+      const sanitized = inputVal.replace(/[^0-9]/g, '');
+      setDisplayValue(sanitized);
+      onChange(parseInt(sanitized) || 0);
+    } else {
+      setDisplayValue(inputVal);
+      onChange(inputVal);
+    }
+  };
+  
+  const handleBlur = () => {
+    setIsFocused(false);
+    if (isNumber) {
+      // Beim Verlassen formatieren
+      const num = parseNumber(displayValue);
+      setDisplayValue(num ? formatNumber(num) : '');
+    }
+    // Jahr wird nicht formatiert
+  };
+  
+  const handleFocus = () => {
+    setIsFocused(true);
+    if (isNumber && displayValue) {
+      // Beim Fokus die Rohzahl zeigen (ohne Tausender-Trennung, aber mit Komma als Dezimal)
+      const num = parseNumber(displayValue);
+      setDisplayValue(num ? num.toString().replace('.', ',') : '');
+    }
+    // Jahr bleibt unverändert
+  };
+  
+  return (
+    <div className={`irow ${className || ''}`}>
+      <label>{label}</label>
+      <div className="ifld-wrap">
+        <div className={`ifld ${error ? 'input-error' : ''}`}>
+          {isDate ? (
+            <DateInput value={value} onChange={onChange} placeholder={ph} />
+          ) : (
+            <input 
+              type="text" 
+              inputMode={(isNumber || isYear) ? 'numeric' : 'text'}
+              value={displayValue} 
+              onChange={handleChange}
+              onBlur={handleBlur}
+              onFocus={handleFocus}
+              placeholder={ph} 
+            />
+          )}
+          {suffix && <span className="suf">{suffix}</span>}
+        </div>
+        {error && <div className="validation-error">{error}</div>}
+      </div>
+    </div>
+  );
+};
+
+// Einfaches formatiertes Zahlen-Input ohne Label-Wrapper
+const NumInput = ({ value, onChange, placeholder, className }) => {
+  const [displayValue, setDisplayValue] = useState(value ? formatNumber(value) : '');
+  const [isFocused, setIsFocused] = useState(false);
+  
+  React.useEffect(() => {
+    if (!isFocused) {
+      setDisplayValue(value ? formatNumber(value) : '');
+    }
+  }, [value, isFocused]);
+  
+  const handleChange = (e) => {
+    const sanitized = e.target.value.replace(/[^0-9.,\-]/g, '');
+    setDisplayValue(sanitized);
+    onChange(parseNumber(sanitized));
+  };
+  
+  const handleBlur = () => {
+    setIsFocused(false);
+    const num = parseNumber(displayValue);
+    setDisplayValue(num ? formatNumber(num) : '');
+  };
+  
+  const handleFocus = () => {
+    setIsFocused(true);
+    if (displayValue) {
+      const num = parseNumber(displayValue);
+      setDisplayValue(num ? num.toString().replace('.', ',') : '');
+    }
+  };
+  
+  return (
+    <input 
+      type="text" 
+      inputMode="decimal"
+      value={displayValue} 
+      onChange={handleChange}
+      onBlur={handleBlur}
+      onFocus={handleFocus}
+      placeholder={placeholder}
+      className={className}
+    />
+  );
+};
+
+const Select = ({ label, value, onChange, options }) => (
+  <div className="irow">
+    <label>{label}</label>
+    <div className="ifld">
+      <select value={value} onChange={e => onChange(e.target.value)}>
+        {options.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+      </select>
     </div>
   </div>
 );
 
-// Stat Card Component
-interface StatCardProps {
-  value: number;
-  label: string;
-  color: string;
-  darkMode: boolean;
-  active?: boolean;
-  onClick?: () => void;
-  hasUnread?: boolean;
-  onLongPress?: () => void;
-  showDropdown?: boolean;
-  dropdownOptions?: string[];
-  onSelectOption?: (option: string) => void;
-}
-
-const StatCard: React.FC<StatCardProps> = ({ value, label, color, darkMode, active, onClick, hasUnread, onLongPress, showDropdown, dropdownOptions, onSelectOption }) => {
-  let pressTimer: NodeJS.Timeout | null = null;
-
-  const handleMouseDown = () => {
-    if (onLongPress) {
-      pressTimer = setTimeout(() => {
-        onLongPress();
-      }, 500);
-    }
-  };
-
-  const handleMouseUp = () => {
-    if (pressTimer) clearTimeout(pressTimer);
-  };
-
-  return (
-    <div style={{ position: 'relative', zIndex: showDropdown ? 1000 : 1 }}>
-      <button
-        onClick={onClick}
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onTouchStart={handleMouseDown}
-        onTouchEnd={handleMouseUp}
-        style={{
-          position: 'relative',
-          overflow: 'hidden',
-          borderRadius: '16px',
-          padding: '12px',
-          textAlign: 'center',
-          transition: 'transform 0.2s',
-          cursor: 'pointer',
-          border: `1px solid ${darkMode ? `${color}15` : 'rgba(255,255,255,0.6)'}`,
-          background: darkMode 
-            ? 'linear-gradient(145deg, rgba(25, 28, 40, 0.8), rgba(25, 28, 40, 0.6))'
-            : 'rgba(255, 255, 255, 0.5)',
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
-          boxShadow: active 
-            ? `0 0 0 2px ${color}, 0 8px 32px rgba(0,0,0,0.3)`
-            : darkMode ? '0 8px 32px rgba(0,0,0,0.3)' : '0 4px 16px rgba(0,0,0,0.1)',
-          width: '100%',
-        }}
-      >
-        {/* Unread indicator - show in both modes */}
-        {hasUnread && (
-          <div style={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: color,
-            boxShadow: darkMode 
-              ? `0 0 10px ${color}, 0 0 20px ${color}50`
-              : `0 0 6px ${color}80`,
-          }} />
-        )}
-        <p style={{ fontSize: '20px', fontWeight: 'bold', color, margin: 0 }}>{value}</p>
-        <p style={{ fontSize: '11px', marginTop: '4px', color: darkMode ? '#6B7280' : '#9ca3af' }}>{label}</p>
-      </button>
-      
-      {/* Dropdown */}
-      {showDropdown && dropdownOptions && (
-        <div style={{
-          position: 'absolute',
-          top: '100%',
-          left: '0',
-          marginTop: '8px',
-          background: darkMode ? 'rgba(25, 28, 40, 0.98)' : 'white',
-          borderRadius: '12px',
-          border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-          boxShadow: '0 10px 40px rgba(0,0,0,0.4)',
-          overflow: 'hidden',
-          zIndex: 1000,
-          minWidth: '140px',
-        }}>
-          {dropdownOptions.map(option => (
-            <button
-              key={option}
-              onClick={() => onSelectOption(option)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                width: '100%',
-                padding: '10px 14px',
-                border: 'none',
-                background: label === option ? (darkMode ? 'rgba(255,255,255,0.1)' : '#f3f4f6') : 'transparent',
-                color: darkMode ? '#d1d5db' : '#6b7280',
-                cursor: 'pointer',
-                fontSize: '13px',
-                textAlign: 'left',
-              }}
-            >
-              {option}
-              {label === option && <span style={{ color: colors.mint }}>✓</span>}
-            </button>
-          ))}
-        </div>
+const Acc = ({ icon, title, sum, badge, open, toggle, color = '#3b82f6', disabled = false, onImport, children }) => (
+  <div className={`acc ${open ? 'open' : ''} ${disabled ? 'disabled' : ''}`} style={{ '--c': color }}>
+    <div className="acc-h" onClick={disabled ? undefined : toggle}>
+      <div className="acc-i">{icon}</div>
+      <div className="acc-info"><div className="acc-t">{title}{badge && <span style={{marginLeft:'8px',fontSize:'10px',fontWeight:600,padding:'2px 7px',borderRadius:'10px',background:'rgba(99,102,241,0.15)',color:'#818cf8',whiteSpace:'nowrap'}}>🏢 {badge}</span>}</div><div className="acc-s">{sum}</div></div>
+      {onImport && open && (
+        <button 
+          className="acc-import-btn" 
+          onClick={(e) => { e.stopPropagation(); onImport(); }}
+          title="Aus Dokument importieren"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <span>Importieren</span>
+        </button>
       )}
+      {!disabled && <div className="acc-tog">{open ? '−' : '+'}</div>}
     </div>
-  );
-};
-
-// Filter Button Component
-interface FilterButtonProps {
-  icon: React.ReactNode;
-  label: string;
-  darkMode: boolean;
-  expanded: boolean;
-  onClick: () => void;
-}
-
-const FilterButton: React.FC<FilterButtonProps> = ({ icon, label, darkMode, expanded, onClick }) => (
-  <button
-    onClick={onClick}
-    style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '6px',
-      padding: '10px 12px',
-      borderRadius: '16px',
-      fontSize: '14px',
-      fontWeight: '500',
-      cursor: 'pointer',
-      transition: 'all 0.2s',
-      border: expanded ? '2px solid' : '1px solid',
-      borderColor: expanded 
-        ? (darkMode ? colors.mint : '#a5b4fc')
-        : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)'),
-      background: expanded 
-        ? (darkMode ? 'rgba(70, 240, 210, 0.15)' : 'rgba(199, 210, 254, 0.5)')
-        : (darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255, 255, 255, 0.5)'),
-      color: expanded 
-        ? (darkMode ? colors.mint : '#4f46e5')
-        : (darkMode ? '#d1d5db' : '#6b7280'),
-      backdropFilter: 'blur(24px)',
-      WebkitBackdropFilter: 'blur(24px)',
-    }}
-  >
-    {icon}
-    <span>{label}</span>
-    <svg 
-      className="w-3 h-3" 
-      style={{ 
-        transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-        transition: 'transform 0.2s',
-      }}
-      fill="none" viewBox="0 0 24 24" stroke="currentColor"
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-    </svg>
-  </button>
+    {open && !disabled && <div className="acc-body">{children}</div>}
+  </div>
 );
 
-// Task Card Component
-interface TaskCardProps {
-  todo: Todo;
-  displayNumber: number;
-  darkMode: boolean;
-  expanded: boolean;
-  onToggleExpand: () => void;
-  onCalendarClick: (todo: Todo) => void;
-  onStatusChange: (todoId: string, status: string) => void;
-  onPriorityChange: (todoId: string, priority: number) => void;
-  onActionTypeChange: (todoId: string, actionType: string) => void;
-  allActions: string[];
-  onDateChange: (todoId: string, date: string) => void;
-  onToggleComplete: (todoId: string) => void;
-  onCategoryChange: (todoId: string, category: string) => void;
-  allCategories: Category[];
-  onDescriptionChange?: (todoId: string, description: string) => void;
-  onTitleChange?: (todoId: string, title: string) => void;
-  onDelete?: (todoId: string) => void;
-}
-
-const TaskCard: React.FC<TaskCardProps> = ({ todo, displayNumber, darkMode, expanded, onToggleExpand, onCalendarClick, onStatusChange, onPriorityChange, onActionTypeChange, onDateChange, onToggleComplete, onCategoryChange, allCategories, allActions, onDescriptionChange = () => {}, onTitleChange = () => {}, onDelete }) => {
-  const priority = priorities.find(p => p.level === todo.priority);
-  // FIX: Use allCategories prop instead of empty global categories array!
-  const category = allCategories.find(c => c.id === todo.category);
-  const actionIconMap: Record<string, React.ReactNode> = { 'E-Mail': Icons.email, 'Gespräch': Icons.chat, 'Prüfen': Icons.check, 'Anruf': Icons.email, 'Dokument': Icons.email, 'Recherche': Icons.search };
-  const getActionIcon = (action: string) => actionIconMap[action] || <span style={{ fontSize: '14px' }}>⚡</span>;
-  const [showStatusDropdown, setShowStatusDropdown] = useState(false);
-  const [showPriorityDropdown, setShowPriorityDropdown] = useState(false);
-  const [showActionDropdown, setShowActionDropdown] = useState(false);
-  const [showDateDropdown, setShowDateDropdown] = useState(false);
-  const [showCalendarPicker, setShowCalendarPicker] = useState(false);
-  const [calendarMonth, setCalendarMonth] = useState(new Date());
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
-  const [showActionTypeDropdown, setShowActionTypeDropdown] = useState(false);
-  const [isEditingDescription, setIsEditingDescription] = useState(false);
-  const [editedDescription, setEditedDescription] = useState(todo.description || '');
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [editedTitle, setEditedTitle] = useState(todo.title || '');
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+// Modal
+const Modal = ({ items, onSelect, onNew, onClose, onDel, onOpenImport, onDuplicate }) => {
+  const [showDataModal, setShowDataModal] = useState(false);
   
-  // Close all dropdowns helper
-  const closeAllDropdowns = () => {
-    setShowStatusDropdown(false);
-    setShowPriorityDropdown(false);
-    setShowActionDropdown(false);
-    setShowActionTypeDropdown(false);
-    setShowDateDropdown(false);
-    setShowCategoryDropdown(false);
-    setShowCalendarPicker(false);
-  };
-  
-  const anyDropdownOpen = showStatusDropdown || showPriorityDropdown || showActionDropdown || showActionTypeDropdown || showDateDropdown || showCategoryDropdown;
-  
-  // Close dropdowns on scroll or click outside
-  React.useEffect(() => {
-    if (!anyDropdownOpen) return;
-    
-    const handleScroll = () => closeAllDropdowns();
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('[data-task-dropdown]')) {
-        closeAllDropdowns();
-      }
-    };
-    
-    window.addEventListener('scroll', handleScroll, true);
-    document.addEventListener('click', handleClickOutside);
-    return () => {
-      window.removeEventListener('scroll', handleScroll, true);
-      document.removeEventListener('click', handleClickOutside);
-    };
-  }, [anyDropdownOpen]);
-  
-  // Long press handlers
-  let categoryPressTimer: NodeJS.Timeout | null = null;
-  let actionPressTimer: NodeJS.Timeout | null = null;
-  let cardPressTimer: NodeJS.Timeout | null = null;
-
-  const handleCardMouseDown = () => {
-    cardPressTimer = setTimeout(() => {
-      setShowDeleteConfirm(true);
-    }, 600);
-  };
-
-  const handleCardMouseUp = () => {
-    if (cardPressTimer) clearTimeout(cardPressTimer);
-  };
-
-  const handleCategoryMouseDown = () => {
-    categoryPressTimer = setTimeout(() => {
-      setShowCategoryDropdown(true);
-      setShowActionTypeDropdown(false);
-    }, 500);
-  };
-
-  const handleCategoryMouseUp = () => {
-    if (categoryPressTimer) clearTimeout(categoryPressTimer);
-  };
-
-  const handleActionMouseDown = () => {
-    actionPressTimer = setTimeout(() => {
-      setShowActionTypeDropdown(true);
-      setShowCategoryDropdown(false);
-    }, 500);
-  };
-
-  const handleActionMouseUp = () => {
-    if (actionPressTimer) clearTimeout(actionPressTimer);
-  };
-
-  // Speech synthesis toggle
-  const toggleSpeech = () => {
-    if (isSpeaking) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-    } else {
-      const text = `${todo.title}. ${todo.description || ''}`;
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'de-DE';
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
-      window.speechSynthesis.speak(utterance);
-      setIsSpeaking(true);
-    }
-  };
-
-  const statusOptions = [
-    { id: 'Offen', color: colors.purple },
-    { id: 'In Bearbeitung', color: colors.orange },
-    { id: 'Auf Rückmeldung', color: colors.skyBlue },
-    { id: 'Erledigt', color: colors.mint },
-  ];
-
-  const actionOptions = allActions.map(a => ({ id: a, label: a, icon: getActionIcon(a) }));
-
-  const dateOptions = [
-    'Heute', 'Morgen', 'Diese Woche', 'Nächste Woche', 'Diesen Monat', 'Kein Datum'
-  ];
-
-  const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
-  const [customDate, setCustomDate] = useState('');
-
-  const currentStatus = statusOptions.find(s => s.id === todo.status) || statusOptions[0];
-  const currentAction = actionOptions.find(a => a.id === todo.actionType) || actionOptions[0];
-
-  // Calendar helper functions
-  const getDaysInMonth = (date) => {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const daysInMonth = lastDay.getDate();
-    const startingDay = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1; // Monday = 0
-    return { daysInMonth, startingDay };
-  };
-
-  const monthNames = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
-  const dayNames = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
-
-  const handleDateSelect = (day) => {
-    const selectedDate = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day);
-    const formatted = selectedDate.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
-    onDateChange(todo.id, formatted);
-    setShowCalendarPicker(false);
-    setShowDateDropdown(false);
-  };
-
-  const hasOpenDropdown = showCategoryDropdown || showActionTypeDropdown || showStatusDropdown || showPriorityDropdown || showActionDropdown || showDateDropdown;
-
   return (
-    <div style={{ position: 'relative', zIndex: hasOpenDropdown || showDeleteConfirm ? 9999 : 1 }}>
-    {/* Delete Confirmation Dialog - Compact & Subtle */}
-    {showDeleteConfirm && (
-      <div style={{
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        background: darkMode ? 'rgba(30, 33, 45, 0.95)' : 'rgba(255, 255, 255, 0.95)',
-        borderRadius: '12px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        zIndex: 100,
-        padding: '10px 14px',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-        border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
-        backdropFilter: 'blur(10px)',
-      }}>
-        <span style={{ 
-          color: darkMode ? '#fff' : '#1f2937', 
-          fontSize: '13px',
-          whiteSpace: 'nowrap',
-        }}>
-          Löschen?
-        </span>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button
-            onClick={() => setShowDeleteConfirm(false)}
-            style={{
-              padding: '6px 12px',
-              borderRadius: '6px',
-              border: `1px solid ${darkMode ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'}`,
-              background: 'transparent',
-              color: darkMode ? '#9ca3af' : '#6b7280',
-              cursor: 'pointer',
-              fontSize: '12px',
-            }}
-          >Nein</button>
-          <button
-            onClick={() => {
-              if (onDelete) onDelete(todo.id);
-              setShowDeleteConfirm(false);
-            }}
-            style={{
-              padding: '6px 12px',
-              borderRadius: '6px',
-              border: 'none',
-              background: 'rgba(239, 68, 68, 0.15)',
-              color: '#ef4444',
-              cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: '500',
-            }}
-          >Ja</button>
-        </div>
-      </div>
-    )}
-    <GlassCard color={priority.color} darkMode={darkMode}>
-      <div 
-        style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}
-        onMouseDown={handleCardMouseDown}
-        onMouseUp={handleCardMouseUp}
-        onMouseLeave={handleCardMouseUp}
-        onTouchStart={handleCardMouseDown}
-        onTouchEnd={handleCardMouseUp}
-      >
-        {/* Checkbox */}
-        <button 
-          onClick={() => onToggleComplete(todo.id)}
-          style={{
-            marginTop: '4px',
-            width: '24px',
-            height: '24px',
-            borderRadius: '50%',
-            border: `2px solid ${todo.completed ? colors.mint : (darkMode ? '#4b5563' : '#D1D5DB')}`,
-            background: todo.completed ? colors.mint : 'transparent',
-            cursor: 'pointer',
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'all 0.2s',
-          }}
-        >
-          {todo.completed && (
-            <svg style={{ width: '14px', height: '14px', color: '#1f2937' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          )}
-        </button>
-
-        {/* Content */}
-        <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-          {/* Top row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap', position: 'relative' }}>
-            {/* Category Badge with Long Press */}
-            <div data-task-dropdown style={{ position: 'relative' }}>
-              <button
-                onMouseDown={handleCategoryMouseDown}
-                onMouseUp={handleCategoryMouseUp}
-                onMouseLeave={handleCategoryMouseUp}
-                onTouchStart={handleCategoryMouseDown}
-                onTouchEnd={handleCategoryMouseUp}
-                style={{
-                  padding: '4px 10px',
-                  borderRadius: '9999px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  background: darkMode ? `${category?.color || colors.mint}20` : `${category?.color || colors.mint}25`,
-                  color: category?.color || colors.mint,
-                  border: darkMode ? `1px solid ${category?.color || colors.mint}30` : 'none',
-                  cursor: 'pointer',
-                }}
-              >
-                {category?.label || 'Sonstiges'}
-              </button>
-              {showCategoryDropdown && (
-                <div style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  marginTop: '4px',
-                  background: darkMode ? 'rgba(25, 28, 40, 0.98)' : 'white',
-                  borderRadius: '12px',
-                  border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-                  boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
-                  overflow: 'hidden',
-                  zIndex: 9999,
-                  minWidth: '120px',
-                }}>
-                  {allCategories.map(cat => (
-                    <button
-                      key={cat.id}
-                      onClick={() => { onCategoryChange(todo.id, cat.id); setShowCategoryDropdown(false); }}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        width: '100%',
-                        padding: '10px 12px',
-                        border: 'none',
-                        background: todo.category === cat.id ? (darkMode ? 'rgba(255,255,255,0.1)' : '#f3f4f6') : 'transparent',
-                        color: cat.color,
-                        cursor: 'pointer',
-                        fontSize: '13px',
-                        fontWeight: '500',
-                        textAlign: 'left',
-                      }}
-                    >
-                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: cat.color }} />
-                      {cat.label}
-                      {todo.category === cat.id && <span style={{ marginLeft: 'auto', color: colors.mint }}>✓</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Action Type Badge with Long Press */}
-            <div data-task-dropdown style={{ position: 'relative' }}>
-              <button
-                onMouseDown={handleActionMouseDown}
-                onMouseUp={handleActionMouseUp}
-                onMouseLeave={handleActionMouseUp}
-                onTouchStart={handleActionMouseDown}
-                onTouchEnd={handleActionMouseUp}
-                style={{
-                  padding: '4px 8px',
-                  borderRadius: '9999px',
-                  fontSize: '12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  background: darkMode ? 'rgba(60,60,90,0.5)' : 'rgba(0,0,0,0.05)',
-                  color: darkMode ? '#d1d5db' : '#6b7280',
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
-              >
-                {getActionIcon(todo.actionType)}
-                {todo.actionType || 'Prüfen'}
-              </button>
-              {showActionTypeDropdown && (
-                <div style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  marginTop: '4px',
-                  background: darkMode ? 'rgba(25, 28, 40, 0.98)' : 'white',
-                  borderRadius: '12px',
-                  border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-                  boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
-                  overflow: 'hidden',
-                  zIndex: 9999,
-                  minWidth: '130px',
-                }}>
-                  {actionOptions.map(action => (
-                    <button
-                      key={action.id}
-                      onClick={() => { onActionTypeChange(todo.id, action.id); setShowActionTypeDropdown(false); }}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        width: '100%',
-                        padding: '10px 12px',
-                        border: 'none',
-                        background: todo.actionType === action.id ? (darkMode ? 'rgba(255,255,255,0.1)' : '#f3f4f6') : 'transparent',
-                        color: darkMode ? '#d1d5db' : '#6b7280',
-                        cursor: 'pointer',
-                        fontSize: '13px',
-                        textAlign: 'left',
-                      }}
-                    >
-                      {action.icon}
-                      {action.label}
-                      {todo.actionType === action.id && <span style={{ marginLeft: 'auto', color: colors.mint }}>✓</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Title */}
-          {expanded && isEditingTitle ? (
-            <input
-              type="text"
-              value={editedTitle}
-              onChange={(e) => setEditedTitle(e.target.value)}
-              onBlur={() => {
-                if (editedTitle.trim()) {
-                  onTitleChange(todo.id, editedTitle);
-                } else {
-                  setEditedTitle(todo.title);
-                }
-                setIsEditingTitle(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  if (editedTitle.trim()) {
-                    onTitleChange(todo.id, editedTitle);
-                  } else {
-                    setEditedTitle(todo.title);
-                  }
-                  setIsEditingTitle(false);
-                } else if (e.key === 'Escape') {
-                  setEditedTitle(todo.title);
-                  setIsEditingTitle(false);
-                }
-              }}
-              autoFocus
-              style={{
-                fontSize: '15px',
-                fontWeight: '600',
-                color: darkMode ? '#f3f4f6' : '#1f2937',
-                margin: 0,
-                lineHeight: 1.4,
-                background: darkMode ? 'rgba(60,60,90,0.5)' : 'rgba(255,255,255,0.8)',
-                border: `2px solid ${colors.mint}`,
-                borderRadius: '8px',
-                padding: '4px 8px',
-                width: '100%',
-                outline: 'none',
-                fontFamily: 'inherit',
-              }}
-            />
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-h"><h2><span className="modal-icon"><IconObjekt color="#6366f1" /></span>Immobilie wählen</h2><button onClick={onClose}>×</button></div>
+        <div className="modal-b">
+          {items.length === 0 ? (
+            <div className="empty"><span className="empty-icon"><IconConstruction color="#6366f1" /></span><p>Noch keine Immobilien gespeichert</p></div>
           ) : (
-            <h3 
-              onClick={() => {
-                if (expanded) {
-                  setEditedTitle(todo.title);
-                  setIsEditingTitle(true);
-                }
-              }}
-              style={{
-                fontSize: '15px',
-                fontWeight: '600',
-                color: darkMode ? '#f3f4f6' : '#1f2937',
-                margin: 0,
-                lineHeight: 1.4,
-                cursor: expanded ? 'pointer' : 'default',
-              }}>
-              {todo.title}
-            </h3>
-          )}
-
-          {/* Task number badge */}
-          {displayNumber > 0 && (
-          <span style={{
-            position: 'absolute',
-            top: '8px',
-            right: '10px',
-            fontSize: '11px',
-            fontWeight: '600',
-            color: darkMode ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.18)',
-            fontFamily: 'monospace',
-          }}>
-            #{displayNumber}
-          </span>
-          )}
-
-          {/* Meta row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '8px', flexWrap: 'wrap' }}>
-            {(() => {
-              const statusColors = {
-                'Offen': { bg: 'rgba(107, 114, 128, 0.2)', color: '#9ca3af', border: 'rgba(107, 114, 128, 0.3)' },
-                'In Bearbeitung': { bg: 'rgba(255, 171, 94, 0.2)', color: colors.orange, border: 'rgba(255, 171, 94, 0.3)' },
-                'Auf Rückmeldung': { bg: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24', border: 'rgba(251, 191, 36, 0.3)' },
-                'Erledigt': { bg: 'rgba(70, 240, 210, 0.2)', color: colors.mint, border: 'rgba(70, 240, 210, 0.3)' },
-              };
-              const statusStyle = statusColors[todo.status] || statusColors['Offen'];
-              return (
-                <span style={{
-                  padding: '1px 5px',
-                  borderRadius: '5px',
-                  fontSize: '10px',
-                  fontWeight: '500',
-                  background: statusStyle.bg,
-                  color: statusStyle.color,
-                  border: darkMode ? `1px solid ${statusStyle.border}` : 'none',
-                }}>
-                  {todo.status}
-                </span>
-              );
-            })()}
-            <span style={{ 
-              fontSize: '10px', 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '3px',
-              color: darkMode ? '#6B7280' : '#9ca3af',
-            }}>
-              {Icons.calendar}
-              {todo.date}
-            </span>
-            {todo.persons?.map((person, i) => (
-              <span key={i} style={{
-                padding: '1px 5px',
-                borderRadius: '5px',
-                fontSize: '10px',
-                background: darkMode ? 'rgba(167, 139, 250, 0.15)' : '#f3e8ff',
-                color: darkMode ? '#c4b5fd' : '#7c3aed',
-                border: darkMode ? '1px solid rgba(167, 139, 250, 0.25)' : 'none',
-              }}>
-                {person}
-              </span>
-            ))}
-            {todo.meetings?.map((meeting, i) => (
-              <span key={i} style={{
-                padding: '1px 5px',
-                borderRadius: '5px',
-                fontSize: '10px',
-                background: darkMode ? 'rgba(91, 192, 235, 0.15)' : '#dbeafe',
-                color: darkMode ? '#7dd3fc' : '#2563eb',
-                border: darkMode ? '1px solid rgba(91, 192, 235, 0.25)' : 'none',
-              }}>
-                {meeting}
-              </span>
-            ))}
-          </div>
-
-          {/* Expanded Details */}
-          {expanded && (
-            <div style={{
-              marginTop: '16px',
-              paddingTop: '16px',
-              borderTop: `1px solid ${darkMode ? 'rgba(60,60,90,0.5)' : 'rgba(209,213,219,0.5)'}`,
-            }}>
-              {(todo.description || expanded) && (
-                <div style={{ marginBottom: '16px' }}>
-                  <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>Beschreibung</span>
-                  {isEditingDescription ? (
-                    <textarea
-                      value={editedDescription}
-                      onChange={(e) => setEditedDescription(e.target.value)}
-                      onBlur={() => {
-                        onDescriptionChange(todo.id, editedDescription);
-                        setIsEditingDescription(false);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape') {
-                          setEditedDescription(todo.description || '');
-                          setIsEditingDescription(false);
-                        }
-                      }}
-                      autoFocus
-                      style={{
-                        width: '100%',
-                        fontSize: '14px',
-                        marginTop: '4px',
-                        padding: '12px',
-                        borderRadius: '12px',
-                        background: darkMode ? 'rgba(60,60,90,0.5)' : 'rgba(255,255,255,0.8)',
-                        color: darkMode ? '#f3f4f6' : '#1f2937',
-                        border: `2px solid ${colors.mint}`,
-                        lineHeight: 1.5,
-                        minHeight: '80px',
-                        resize: 'vertical',
-                        outline: 'none',
-                        fontFamily: 'inherit',
-                      }}
-                      placeholder="Beschreibung hinzufügen..."
-                    />
-                  ) : (
-                    <p 
-                      onClick={() => {
-                        setEditedDescription(todo.description || '');
-                        setIsEditingDescription(true);
-                      }}
-                      style={{
-                        fontSize: '14px',
-                        marginTop: '4px',
-                        padding: '12px',
-                        borderRadius: '12px',
-                        background: darkMode ? 'rgba(60,60,90,0.3)' : 'rgba(255,255,255,0.5)',
-                        color: todo.description ? (darkMode ? '#d1d5db' : '#6b7280') : (darkMode ? '#6B7280' : '#9ca3af'),
-                        lineHeight: 1.5,
-                        cursor: 'pointer',
-                        minHeight: '20px',
-                      }}>
-                      {todo.description || 'Klicken um Beschreibung hinzuzufügen...'}
-                    </p>
-                  )}
-                </div>
-              )}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '14px' }}>
-                {/* Row 1: Priorität + Aktionstyp */}
-                <div data-task-dropdown style={{ position: 'relative' }}>
-                  <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>Priorität</span>
-                  <button
-                    onClick={() => { closeAllDropdowns(); setShowPriorityDropdown(!showPriorityDropdown); }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      margin: '4px 0 0',
-                      padding: '6px 10px',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: `${priority.color}25`,
-                      color: priority.color,
-                      fontWeight: '500',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                    }}
-                  >
-                    P{priority.level} - {priority.label}
-                    <svg style={{ width: '12px', height: '12px', transform: showPriorityDropdown ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                  {showPriorityDropdown && (
-                    <div style={{
-                      position: 'absolute',
-                      bottom: '100%',
-                      left: 0,
-                      marginBottom: '4px',
-                      background: darkMode ? 'rgba(25, 28, 40, 0.98)' : 'white',
-                      borderRadius: '12px',
-                      border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-                      boxShadow: '0 -10px 40px rgba(0,0,0,0.3)',
-                      overflow: 'hidden',
-                      zIndex: 100,
-                      minWidth: '140px',
-                    }}>
-                      {priorities.map(p => (
-                        <button
-                          key={p.level}
-                          onClick={() => { onPriorityChange(todo.id, p.level); setShowPriorityDropdown(false); }}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '10px',
-                            width: '100%',
-                            padding: '12px 14px',
-                            border: 'none',
-                            background: todo.priority === p.level ? (darkMode ? 'rgba(255,255,255,0.1)' : '#f3f4f6') : 'transparent',
-                            color: p.color,
-                            cursor: 'pointer',
-                            fontSize: '14px',
-                            fontWeight: '500',
-                            textAlign: 'left',
-                          }}
-                        >
-                          P{p.level} - {p.label}
-                          {todo.priority === p.level && <span style={{ marginLeft: 'auto', color: colors.mint }}>✓</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div data-task-dropdown style={{ position: 'relative' }}>
-                  <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>Aktionstyp</span>
-                  <button
-                    onClick={() => { closeAllDropdowns(); setShowActionDropdown(!showActionDropdown); }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      margin: '4px 0 0',
-                      padding: '6px 10px',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: darkMode ? 'rgba(60,60,90,0.5)' : 'rgba(0,0,0,0.05)',
-                      color: darkMode ? '#d1d5db' : '#6b7280',
-                      fontWeight: '500',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                    }}
-                  >
-                    {currentAction.icon}
-                    {currentAction.label}
-                    <svg style={{ width: '12px', height: '12px', transform: showActionDropdown ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                  {showActionDropdown && (
-                    <div style={{
-                      position: 'absolute',
-                      bottom: '100%',
-                      left: 0,
-                      marginBottom: '4px',
-                      background: darkMode ? 'rgba(25, 28, 40, 0.98)' : 'white',
-                      borderRadius: '12px',
-                      border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-                      boxShadow: '0 -10px 40px rgba(0,0,0,0.3)',
-                      overflow: 'hidden',
-                      zIndex: 100,
-                      minWidth: '140px',
-                    }}>
-                      {actionOptions.map(action => (
-                        <button
-                          key={action.id}
-                          onClick={() => { onActionTypeChange(todo.id, action.id); setShowActionDropdown(false); }}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '10px',
-                            width: '100%',
-                            padding: '12px 14px',
-                            border: 'none',
-                            background: todo.actionType === action.id ? (darkMode ? 'rgba(255,255,255,0.1)' : '#f3f4f6') : 'transparent',
-                            color: darkMode ? '#d1d5db' : '#6b7280',
-                            cursor: 'pointer',
-                            fontSize: '14px',
-                            textAlign: 'left',
-                          }}
-                        >
-                          {action.icon}
-                          {action.label}
-                          {todo.actionType === action.id && <span style={{ marginLeft: 'auto', color: colors.mint }}>✓</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Row 2: Status + Fällig */}
-                <div data-task-dropdown style={{ position: 'relative' }}>
-                  <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>Status</span>
-                  <button
-                    onClick={() => { closeAllDropdowns(); setShowStatusDropdown(!showStatusDropdown); }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      margin: '4px 0 0',
-                      padding: '6px 10px',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: `${currentStatus.color}25`,
-                      color: currentStatus.color,
-                      fontWeight: '500',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                    }}
-                  >
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: currentStatus.color }} />
-                    {todo.status}
-                    <svg style={{ width: '12px', height: '12px', transform: showStatusDropdown ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                  {showStatusDropdown && (
-                    <div style={{
-                      position: 'absolute',
-                      bottom: '100%',
-                      left: 0,
-                      marginBottom: '4px',
-                      background: darkMode ? 'rgba(25, 28, 40, 0.98)' : 'white',
-                      borderRadius: '12px',
-                      border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-                      boxShadow: '0 -10px 40px rgba(0,0,0,0.3)',
-                      overflow: 'hidden',
-                      zIndex: 100,
-                      minWidth: '160px',
-                    }}>
-                      {statusOptions.map(status => (
-                        <button
-                          key={status.id}
-                          onClick={() => { onStatusChange(todo.id, status.id); setShowStatusDropdown(false); }}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '10px',
-                            width: '100%',
-                            padding: '12px 14px',
-                            border: 'none',
-                            background: todo.status === status.id ? (darkMode ? 'rgba(255,255,255,0.1)' : '#f3f4f6') : 'transparent',
-                            color: darkMode ? '#f3f4f6' : '#1f2937',
-                            cursor: 'pointer',
-                            fontSize: '14px',
-                            textAlign: 'left',
-                          }}
-                        >
-                          <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: status.color, boxShadow: `0 0 6px ${status.color}60` }} />
-                          {status.id}
-                          {todo.status === status.id && <span style={{ marginLeft: 'auto', color: colors.mint }}>✓</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div data-task-dropdown style={{ position: 'relative' }}>
-                  <span style={{ fontSize: '11px', textTransform: 'uppercase', color: darkMode ? '#6B7280' : '#9ca3af' }}>Fällig</span>
-                  <button
-                    onClick={() => { closeAllDropdowns(); setShowDateDropdown(!showDateDropdown); }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      margin: '4px 0 0',
-                      padding: '6px 10px',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: darkMode ? 'rgba(60,60,90,0.5)' : 'rgba(0,0,0,0.05)',
-                      color: darkMode ? '#d1d5db' : '#6b7280',
-                      fontWeight: '500',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                    }}
-                  >
-                    {Icons.calendar}
-                    {todo.date || 'Kein Datum'}
-                    <svg style={{ width: '12px', height: '12px', transform: showDateDropdown ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                  {showDateDropdown && (
-                    <div style={{
-                      position: 'absolute',
-                      bottom: '100%',
-                      left: 0,
-                      marginBottom: '4px',
-                      background: darkMode ? 'rgba(25, 28, 40, 0.98)' : 'white',
-                      borderRadius: '12px',
-                      border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-                      boxShadow: '0 -10px 40px rgba(0,0,0,0.3)',
-                      overflow: 'hidden',
-                      zIndex: 100,
-                      minWidth: '180px',
-                    }}>
-                      {dateOptions.map(date => (
-                        <button
-                          key={date}
-                          onClick={() => { onDateChange(todo.id, date); setShowDateDropdown(false); }}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '10px',
-                            width: '100%',
-                            padding: '12px 14px',
-                            border: 'none',
-                            background: todo.date === date ? (darkMode ? 'rgba(255,255,255,0.1)' : '#f3f4f6') : 'transparent',
-                            color: darkMode ? '#d1d5db' : '#6b7280',
-                            cursor: 'pointer',
-                            fontSize: '14px',
-                            textAlign: 'left',
-                          }}
-                        >
-                          {date}
-                          {todo.date === date && <span style={{ marginLeft: 'auto', color: colors.mint }}>✓</span>}
-                        </button>
-                      ))}
-                      {/* Divider */}
-                      <div style={{ 
-                        height: '1px', 
-                        background: darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb',
-                        margin: '4px 0',
-                      }} />
-                      {/* Custom date picker trigger */}
-                      <button
-                        onClick={() => setShowCalendarPicker(!showCalendarPicker)}
-                        style={{ 
-                          padding: '12px 14px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '10px',
-                          cursor: 'pointer',
-                          width: '100%',
-                          border: 'none',
-                          background: 'transparent',
-                          textAlign: 'left',
-                        }}
-                      >
-                        <span style={{ color: colors.mint }}>{Icons.calendar}</span>
-                        <span style={{ color: darkMode ? '#d1d5db' : '#6b7280', fontSize: '14px' }}>Datum wählen</span>
-                      </button>
-
-                      {/* Calendar Picker */}
-                      {showCalendarPicker && (
-                        <div style={{
-                          padding: '12px',
-                          borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-                        }}>
-                          {/* Month Navigation */}
-                          <div style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            marginBottom: '12px',
-                          }}>
-                            <button
-                              onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1))}
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                color: colors.mint,
-                                cursor: 'pointer',
-                                fontSize: '18px',
-                                padding: '4px 8px',
-                              }}
-                            >
-                              ‹
-                            </button>
-                            <span style={{ 
-                              color: darkMode ? '#f3f4f6' : '#1f2937', 
-                              fontWeight: '600',
-                              fontSize: '14px',
-                            }}>
-                              {monthNames[calendarMonth.getMonth()]} {calendarMonth.getFullYear()}
-                            </span>
-                            <button
-                              onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1))}
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                color: colors.mint,
-                                cursor: 'pointer',
-                                fontSize: '18px',
-                                padding: '4px 8px',
-                              }}
-                            >
-                              ›
-                            </button>
-                          </div>
-
-                          {/* Day Names */}
-                          <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(7, 1fr)',
-                            gap: '2px',
-                            marginBottom: '8px',
-                          }}>
-                            {dayNames.map(day => (
-                              <div key={day} style={{
-                                textAlign: 'center',
-                                fontSize: '11px',
-                                color: darkMode ? '#6B7280' : '#9ca3af',
-                                padding: '4px',
-                              }}>
-                                {day}
-                              </div>
-                            ))}
-                          </div>
-
-                          {/* Days Grid */}
-                          <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(7, 1fr)',
-                            gap: '2px',
-                          }}>
-                            {/* Empty cells for days before month starts */}
-                            {Array.from({ length: getDaysInMonth(calendarMonth).startingDay }).map((_, i) => (
-                              <div key={`empty-${i}`} style={{ padding: '8px' }} />
-                            ))}
-                            {/* Day buttons */}
-                            {Array.from({ length: getDaysInMonth(calendarMonth).daysInMonth }).map((_, i) => {
-                              const day = i + 1;
-                              const isToday = new Date().toDateString() === new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day).toDateString();
-                              return (
-                                <button
-                                  key={day}
-                                  onClick={() => handleDateSelect(day)}
-                                  style={{
-                                    padding: '8px',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    background: isToday ? colors.mint : 'transparent',
-                                    color: isToday ? '#1f2937' : (darkMode ? '#d1d5db' : '#6b7280'),
-                                    cursor: 'pointer',
-                                    fontSize: '13px',
-                                    fontWeight: isToday ? '600' : '400',
-                                  }}
-                                >
-                                  {day}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
+            <div className="immo-list">
+              {items.filter(i => !i.parentId).map(i => (
+                <div key={i.id} className="immo-card" onClick={() => onSelect(i)} style={{ borderLeftColor: i.isContainer ? '#6366f1' : TYP_COLORS[i.stammdaten.typ]?.border, borderLeftWidth: i.isContainer ? '5px' : '3px' }}>
+                  <div className="immo-info">
+                    <div className="immo-name">
+                      {i.isContainer ? (
+                        <span className="immo-typ-tag" style={{ background: 'rgba(99,102,241,0.18)', borderColor: '#6366f1', color: '#818cf8', marginRight: '8px' }}>🏢 GEBÄUDE</span>
+                      ) : (
+                        <span className="immo-typ-tag" style={{ background: TYP_COLORS[i.stammdaten.typ]?.bg, borderColor: TYP_COLORS[i.stammdaten.typ]?.border, color: TYP_COLORS[i.stammdaten.typ]?.text }}>{getTypLabel(i.stammdaten.typ)}</span>
                       )}
+                      {i.stammdaten.name}
+                      {i.importiert && i.zuPruefen?.length > 0 && <span className="review-badge"><span className="review-badge-icon"><IconWarning color="#f59e0b" /></span>{i.zuPruefen.length} zu prüfen</span>}
                     </div>
-                  )}
+                    <div className="immo-addr">{i.stammdaten.adresse || 'Keine Adresse'}</div>
+                    <div className="immo-meta">
+                      {i.isContainer
+                        ? `${(items.filter(x => x.parentId === i.id).length)} Einheit(en) · ${fmt(i.stammdaten.kaufpreisImmobilie)}`
+                        : `${i.stammdaten.wohnflaeche} qm · ${fmt(i.stammdaten.kaufpreisImmobilie)}`}
+                    </div>
+                  </div>
+                  <div className="immo-actions">
+                    <button className="dup-sm" onClick={e => { e.stopPropagation(); onDuplicate(i); }} title="Duplizieren"><IconCopy color="#6366f1" /></button>
+                    <button className="del-sm" onClick={e => { e.stopPropagation(); onDel(i.id); }} title="Löschen"><IconTrash color="#ef4444" /></button>
+                  </div>
                 </div>
-              </div>
-              {todo.date && (
-                <button 
-                  onClick={() => onCalendarClick(todo)}
-                  style={{
-                    marginTop: '16px',
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    padding: '10px 16px',
-                    borderRadius: '12px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    background: darkMode ? 'rgba(59,130,246,0.2)' : 'rgba(59,130,246,0.1)',
-                    color: '#3b82f6',
-                    border: 'none',
-                    cursor: 'pointer',
-                  }}>
-                  {Icons.calendar}
-                  In Kalender eintragen
-                </button>
-              )}
+              ))}
             </div>
           )}
         </div>
-
-        {/* Right side */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-          {/* Unread indicator - only show if unread */}
-          {todo.unread && (
-            <div style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              background: priority.color,
-              boxShadow: darkMode ? `0 0 8px ${priority.color}, 0 0 16px ${priority.color}50` : `0 0 6px ${priority.color}`,
-              
-            }} />
-          )}
-          <button 
-            onClick={toggleSpeech}
-            style={{
-              padding: '6px',
-              borderRadius: '9999px',
-              background: isSpeaking 
-                ? (darkMode ? 'rgba(107, 114, 128, 0.5)' : 'rgba(107, 114, 128, 0.3)')
-                : 'transparent',
-              color: darkMode ? '#6B7280' : '#9ca3af',
-              border: isSpeaking ? `2px solid #6B7280` : 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.2s',
-            }}>
-            {isSpeaking ? Icons.speakerOff : Icons.speaker}
-          </button>
-          <button 
-            onClick={onToggleExpand}
-            style={{
-              padding: '4px',
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              color: darkMode ? '#6B7280' : '#9ca3af',
-              transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
-              transition: 'transform 0.2s',
-            }}
-          >
-            {Icons.chevron}
-          </button>
+        <div className="modal-f">
+          <button className="btn-pri" onClick={onNew}>+ Neue Immobilie</button>
+          <button className="btn-import" onClick={onOpenImport}><span className="btn-import-icon"><IconUpload color="#6366f1" /></span>Aus Dokument importieren</button>
+        </div>
+        <div className="modal-f2">
+          <button className="btn-data" onClick={() => setShowDataModal(true)}><span className="btn-data-icon"><IconSave color="#6366f1" /></span>Daten verwalten</button>
         </div>
       </div>
-    </GlassCard>
+      {showDataModal && <DataModal items={items} onClose={() => setShowDataModal(false)} />}
     </div>
   );
 };
 
-// Main App Component
-export default function MindFlowApp() {
-  const [darkMode, setDarkMode] = useState<boolean>(true);
-  const [expandedFilter, setExpandedFilter] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string>('tasks');
-  const [showAllCategories, setShowAllCategories] = useState<boolean>(false);
-  const [expandedTask, setExpandedTask] = useState<string | null>(null);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]); // For FILTERING displayed tasks
-  const [createCategoryId, setCreateCategoryId] = useState<string | null>(null); // For NEW task creation
-  const [isScrolled, setIsScrolled] = useState<boolean>(false);
-  const [customCategories, setCustomCategories] = useState<Category[]>([]);
-  const [hiddenCategories, setHiddenCategories] = useState<string[]>([]);
-  const [hiddenPersons, setHiddenPersons] = useState<string[]>([]);
-  const [hiddenMeetings, setHiddenMeetings] = useState<string[]>([]);
-  const [hiddenActions, setHiddenActions] = useState<string[]>([]);
+// Daten Export/Import Modal
+// Beteiligte Modal
+const BeteiligteModal = ({ beteiligte, onClose, onAdd, onDelete, onToggle, aktiveBeteiligte }) => {
+  const [newName, setNewName] = useState('');
+  const alleAktiv = aktiveBeteiligte.length === 0;
   
-  // Refs to track current values for async functions (avoid stale closure)
-  const selectedCategoriesRef = React.useRef<string[]>([]);
-  const customCategoriesRef = React.useRef<Category[]>([]);
-  const createCategoryIdRef = React.useRef<string | null>(null);
-  const lastLoadedUserId = React.useRef<string | null>(null);
-
-  // Session state for auth flow
-  const [session, setSession] = useState<any>(null);
-
-  // Update refs whenever state changes (inline, no useEffect needed)
-  selectedCategoriesRef.current = selectedCategories;
-  customCategoriesRef.current = customCategories;
-  createCategoryIdRef.current = createCategoryId;
-  
-  const [addingCategory, setAddingCategory] = useState<boolean>(false);
-  const [newCategoryName, setNewCategoryName] = useState<string>('');
-  const [newCategoryColor, setNewCategoryColor] = useState<string>(colors.mint);
-  const [showColorPicker, setShowColorPicker] = useState<boolean>(false);
-  const [todos, setTodos] = useState<Todo[]>([]); // Empty until user logs in
-  const [calendarModal, setCalendarModal] = useState<CalendarModalState>({ show: false, todo: null });
-  const [dateFilterDropdown, setDateFilterDropdown] = useState<boolean>(false);
-  const [selectedDateFilter, setSelectedDateFilter] = useState<string>('Heute');
-  const [statusFilterDropdown, setStatusFilterDropdown] = useState<boolean>(false);
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('Rückmeldung');
-  const [activeStatFilter, setActiveStatFilter] = useState<string | null>(null);
-  const [showSearch, setShowSearch] = useState<boolean>(false);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  
-  // User/Auth States
-  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
-  const [showProfileDropdown, setShowProfileDropdown] = useState<boolean>(false);
-  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot'>('login');
-  const [authEmail, setAuthEmail] = useState<string>('');
-  const [authPassword, setAuthPassword] = useState<string>('');
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authLoading, setAuthLoading] = useState<boolean>(false);
-  const [dataLoading, setDataLoading] = useState<boolean>(false);
-  const [mounted, setMounted] = useState<boolean>(false);
-
-  // Voice Control States
-  const [isListening, setIsListening] = useState<boolean>(false);
-  const [voiceTranscript, setVoiceTranscript] = useState<string>('');
-  const [voiceInterim, setVoiceInterim] = useState<string>('');
-  const [showVoiceModal, setShowVoiceModal] = useState<boolean>(false);
-  const [voiceError, setVoiceError] = useState<string | null>(null);
-  const [voiceFeedback, setVoiceFeedback] = useState<string | null>(null);
-  const [personFilter, setPersonFilter] = useState<string | null>(null);
-  const [meetingFilter, setMeetingFilter] = useState<string | null>(null);
-
-  // Custom Items States (Aktionen, Personen, Meetings)
-  const [customActions, setCustomActions] = useState<string[]>([]);
-  const [customPersons, setCustomPersons] = useState<string[]>([]);
-  const [customMeetings, setCustomMeetings] = useState<string[]>([]);
-  const [addingAction, setAddingAction] = useState<boolean>(false);
-  const [addingPerson, setAddingPerson] = useState<boolean>(false);
-  const [addingMeeting, setAddingMeeting] = useState<boolean>(false);
-  const [newActionName, setNewActionName] = useState<string>('');
-  const [newPersonName, setNewPersonName] = useState<string>('');
-  const [newMeetingName, setNewMeetingName] = useState<string>('');
-  
-  // Delete confirmation states
-  const [deleteConfirm, setDeleteConfirm] = useState<{type: string; id: string; label: string; usageCount: number} | null>(null);
-
-  const dateFilterOptions: string[] = ['Heute', 'Diese Woche', 'Nächste Woche', 'Diesen Monat', 'Alle'];
-  const statusFilterOptions: string[] = ['Rückmeldung', 'Offen', 'In Bearbeitung', 'Alle Status'];
-
-  // No default items - users create everything themselves
-  const defaultActions: string[] = ['E-Mail', 'Gespräch', 'Prüfen', 'Anruf', 'Dokument', 'Recherche'];
-  const defaultPersons: string[] = [];
-  const defaultMeetings: string[] = [];
-
-  // Combined items (only custom items now, since defaults are empty)
-  const allActions = [...defaultActions.filter(a => !hiddenActions.includes(a)), ...customActions];
-  const allPersons = [...defaultPersons.filter(p => !hiddenPersons.includes(p)), ...customPersons];
-  const allMeetings = [...defaultMeetings.filter(m => !hiddenMeetings.includes(m)), ...customMeetings];
-
-  // Calculate task counts based on date filter
-  const getTaskCountForDateFilter = (filter: string): number => {
-    return todos.filter(t => {
-      if (t.completed) return false;
-      // Only count tasks in selected categories
-      if (!selectedCategories.includes(t.category)) return false;
-      if (filter === 'Alle') return true;
-      if (filter === 'Heute') return t.date === 'Heute';
-      if (filter === 'Diese Woche') return ['Heute', 'Morgen', 'Diese Woche'].includes(t.date);
-      if (filter === 'Nächste Woche') return t.date === 'Nächste Woche';
-      if (filter === 'Diesen Monat') return ['Heute', 'Morgen', 'Diese Woche', 'Nächste Woche', 'Diesen Monat'].includes(t.date);
-      return false;
-    }).length;
-  };
-
-  // Calculate task counts based on status filter
-  const getTaskCountForStatusFilter = (filter: string): number => {
-    return todos.filter(t => {
-      if (t.completed) return false;
-      // Only count tasks in selected categories
-      if (!selectedCategories.includes(t.category)) return false;
-      if (filter === 'Alle Status') return true;
-      if (filter === 'Rückmeldung') return t.status === 'Auf Rückmeldung';
-      if (filter === 'Offen') return t.status === 'Offen';
-      if (filter === 'In Bearbeitung') return t.status === 'In Bearbeitung';
-      return false;
-    }).length;
-  };
-  
-  // Calculate task counts for priority (filtered by selected categories)
-  const getTaskCountForPriority = (priority: number): number => {
-    return todos.filter(t => {
-      if (t.completed) return false;
-      // Only count tasks in selected categories
-      if (!selectedCategories.includes(t.category)) return false;
-      return t.priority === priority;
-    }).length;
-  };
-
-  // ============ SUPABASE DATA FUNCTIONS ============
-  
-  // Load all user data from Supabase
-  const loadUserDataFromSupabase = async (userId: string) => {
-    console.log('=== Loading user data from Supabase ===', userId);
-    setDataLoading(true);
-    
-    try {
-      // Load todos
-      const { data: todosData, error: todosError } = await supabase
-        .from('mindflow_todos')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-      
-      if (todosError) throw todosError;
-      
-      // Load user settings
-      const { data: settingsData, error: settingsError } = await supabase
-        .from('mindflow_user_settings')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
-      
-      // Load custom categories
-      const { data: categoriesData, error: categoriesError } = await supabase
-        .from('mindflow_custom_categories')
-        .select('*')
-        .eq('user_id', userId);
-      
-      if (categoriesError) throw categoriesError;
-      
-      // Migration map: old actionType IDs → new labels
-      const actionTypeMigration: Record<string, string> = {
-        'email': 'E-Mail', 'chat': 'Gespräch', 'check': 'Prüfen',
-        'call': 'Anruf', 'document': 'Dokument', 'research': 'Recherche',
-      };
-      
-      // Transform todos from database format
-      const transformedTodos: Todo[] = (todosData || []).map(t => ({
-        id: t.id,
-        title: t.title,
-        description: t.description || '',
-        category: t.category,
-        actionType: actionTypeMigration[t.action_type] || t.action_type || 'Prüfen',
-        priority: t.priority,
-        status: t.status,
-        date: t.date,
-        persons: t.persons || [],
-        meetings: t.meetings || [],
-        unread: t.unread,
-        completed: t.completed,
-      }));
-      
-      console.log('Loaded todos:', transformedTodos.length);
-      setTodos(transformedTodos);
-      
-      // Apply custom categories FIRST (before settings that depend on them)
-      let loadedCategories: Category[] = [];
-      if (categoriesData && categoriesData.length > 0) {
-        loadedCategories = categoriesData.map(c => ({
-          id: c.category_id,
-          label: c.label,
-          color: c.color,
-        }));
-        setCustomCategories(loadedCategories);
-        
-        // UPDATE GLOBAL VARIABLE
-        GLOBAL_ALL_CATEGORIES = loadedCategories;
-        console.log('GLOBAL: Set all categories:', GLOBAL_ALL_CATEGORIES.map(c => c.id));
-      }
-      
-      // Apply settings if they exist
-      if (settingsData) {
-        console.log('Loaded settings:', settingsData);
-        
-        // If selected_categories is empty or missing, auto-select all available categories
-        let categoriesToSelect = settingsData.selected_categories || [];
-        if (categoriesToSelect.length === 0 && loadedCategories.length > 0) {
-          categoriesToSelect = loadedCategories.map(c => c.id);
-          console.log('Auto-selecting all categories:', categoriesToSelect);
-        }
-        setSelectedCategories(categoriesToSelect);
-
-        // SET CREATE CATEGORY FROM SAVED DEFAULT
-        if (
-          createCategoryId === null &&
-          settingsData?.default_create_category_id &&
-          loadedCategories.some(c => c.id === settingsData.default_create_category_id)
-        ) {
-          setCreateCategoryId(settingsData.default_create_category_id);
-        }
-
-        setHiddenCategories(settingsData.hidden_categories || []);
-        setHiddenPersons(settingsData.hidden_persons || []);
-        setHiddenMeetings(settingsData.hidden_meetings || []);
-        setHiddenActions(settingsData.hidden_actions || []);
-        setCustomPersons(settingsData.custom_persons || []);
-        setCustomMeetings(settingsData.custom_meetings || []);
-        setCustomActions(settingsData.custom_actions || []);
-        setDarkMode(settingsData.dark_mode ?? true);
-        // Load filter settings
-        setSelectedDateFilter(settingsData.selected_date_filter || 'Heute');
-        setSelectedStatusFilter(settingsData.selected_status_filter || 'Rückmeldung');
-        setActiveStatFilter(settingsData.active_stat_filter || null);
-      } else {
-        // Create default settings for new user
-        await createDefaultSettings(userId);
-        // Auto-select all loaded categories
-        if (loadedCategories.length > 0) {
-          setSelectedCategories(loadedCategories.map(c => c.id));
-        }
-      }
-      
-    } catch (error) {
-      console.error('Error loading data from Supabase:', error);
-    } finally {
-      setDataLoading(false);
-    }
-  };
-  
-  // Create default settings for new user - start with empty arrays
-  const createDefaultSettings = async (userId: string) => {
-    const { error } = await supabase
-      .from('mindflow_user_settings')
-      .insert({
-        user_id: userId,
-        selected_categories: [], // Empty - user creates their own
-        hidden_categories: [],
-        hidden_persons: [],
-        hidden_meetings: [],
-        hidden_actions: [],
-        custom_persons: [],
-        custom_meetings: [],
-        custom_actions: [],
-        dark_mode: true,
-        selected_date_filter: 'Heute',
-        selected_status_filter: 'Rückmeldung',
-        active_stat_filter: null,
+  const handleAdd = () => {
+    if (newName.trim()) {
+      onAdd({
+        id: 'bet_' + Date.now(),
+        name: newName.trim(),
+        farbe: ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#8b5cf6'][beteiligte.length % 6]
       });
-    
-    if (error) console.error('Error creating default settings:', error);
+      setNewName('');
+    }
   };
   
-  // Save user settings to Supabase
-  const saveSettingsToSupabase = async () => {
-    if (!user) return;
-    
-    const { error } = await supabase
-      .from('mindflow_user_settings')
-      .upsert({
-        user_id: user.id,
-        selected_categories: selectedCategories,
-        hidden_categories: hiddenCategories,
-        hidden_persons: hiddenPersons,
-        hidden_meetings: hiddenMeetings,
-        hidden_actions: hiddenActions,
-        custom_persons: customPersons,
-        custom_meetings: customMeetings,
-        custom_actions: customActions,
-        dark_mode: darkMode,
-        selected_date_filter: selectedDateFilter,
-        selected_status_filter: selectedStatusFilter,
-        active_stat_filter: activeStatFilter,
-      }, { onConflict: 'user_id' });
-    
-    if (error) console.error('Error saving settings:', error);
-  };
-  
-  // Save a todo to Supabase
-  const saveTodoToSupabase = async (todo: Todo) => {
-    if (!user) return;
-    
-    const { error } = await supabase
-      .from('mindflow_todos')
-      .upsert({
-        id: todo.id,
-        user_id: user.id,
-        title: todo.title,
-        description: todo.description || '',
-        category: todo.category,
-        priority: todo.priority,
-        status: todo.status,
-        date: todo.date,
-        action_type: todo.actionType,
-        completed: todo.completed,
-        unread: todo.unread,
-        persons: todo.persons || [],
-        meetings: todo.meetings || [],
-      });
-    
-    if (error) console.error('Error saving todo:', error);
-  };
-  
-  // Delete a todo from Supabase
-  const deleteTodoFromSupabase = async (todoId: string) => {
-    const { error } = await supabase
-      .from('mindflow_todos')
-      .delete()
-      .eq('id', todoId);
-    
-    if (error) console.error('Error deleting todo:', error);
-  };
-  
-  // Save custom category to Supabase
-  const saveCustomCategoryToSupabase = async (category: Category) => {
-    if (!user) return;
-    
-    const { error } = await supabase
-      .from('mindflow_custom_categories')
-      .insert({
-        user_id: user.id,
-        category_id: category.id,
-        label: category.label,
-        color: category.color,
-      });
-    
-    if (error) console.error('Error saving category:', error);
-  };
-  
-  // Delete custom category from Supabase
-  const deleteCustomCategoryFromSupabase = async (categoryId: string) => {
-    if (!user) return;
-    
-    const { error } = await supabase
-      .from('mindflow_custom_categories')
-      .delete()
-      .eq('user_id', user.id)
-      .eq('category_id', categoryId);
-    
-    if (error) console.error('Error deleting category:', error);
-  };
-
-  // ============ AUTH HANDLERS ============
-  
-  const handleLogin = async () => {
-    if (!authEmail || !authPassword) {
-      setAuthError('Bitte E-Mail und Passwort eingeben');
-      return;
-    }
-    setAuthLoading(true);
-    setAuthError(null);
-    
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: authEmail,
-        password: authPassword,
-      });
-      
-      if (error) {
-        if (error.message.includes('Invalid login credentials')) {
-          setAuthError('E-Mail oder Passwort falsch');
-        } else if (error.message.includes('Email not confirmed')) {
-          setAuthError('Bitte bestätige zuerst deine E-Mail');
-        } else {
-          setAuthError(error.message);
-        }
-        return;
-      }
-      
-      if (data.user) {
-        // Don't call setUser/loadUserDataFromSupabase here!
-        // The onAuthStateChange handler will do it when SIGNED_IN fires
-        setShowAuthModal(false);
-        setAuthEmail('');
-        setAuthPassword('');
-      }
-    } catch (error) {
-      console.error('Login error:', error);
-      setAuthError('Ein Fehler ist aufgetreten');
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const handleRegister = async () => {
-    if (!authEmail || !authPassword) {
-      setAuthError('Bitte E-Mail und Passwort eingeben');
-      return;
-    }
-    if (authPassword.length < 6) {
-      setAuthError('Passwort muss mindestens 6 Zeichen haben');
-      return;
-    }
-    setAuthLoading(true);
-    setAuthError(null);
-    
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email: authEmail,
-        password: authPassword,
-      });
-      
-      if (error) {
-        if (error.message.includes('already registered')) {
-          setAuthError('Diese E-Mail ist bereits registriert');
-        } else {
-          setAuthError(error.message);
-        }
-        return;
-      }
-      
-      if (data.user) {
-        // Check if email confirmation is required
-        if (data.user.identities && data.user.identities.length === 0) {
-          setAuthError('Diese E-Mail ist bereits registriert');
-          return;
-        }
-        
-        // Auto-login after registration (if no email confirmation required)
-        if (data.session) {
-          // Don't call setUser here - onAuthStateChange will handle it
-          // But we need to create default settings for new users
-          await createDefaultSettings(data.user.id);
-
-          setShowAuthModal(false);
-          setAuthEmail('');
-          setAuthPassword('');
-        } else {
-          // Email confirmation required
-          setAuthError('Bitte bestätige deine E-Mail-Adresse. Wir haben dir einen Link geschickt.');
-        }
-      }
-    } catch (error) {
-      console.error('Registration error:', error);
-      setAuthError('Ein Fehler ist aufgetreten');
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    if (!authEmail) {
-      setAuthError('Bitte gib deine E-Mail-Adresse ein');
-      return;
-    }
-    setAuthLoading(true);
-    setAuthError(null);
-    
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(authEmail, {
-        redirectTo: window.location.origin,
-      });
-      
-      if (error) {
-        setAuthError(error.message);
-        return;
-      }
-      
-      // Success - show confirmation
-      setAuthError(null);
-      setAuthMode('login');
-      setAuthEmail('');
-      alert('✅ E-Mail gesendet!\n\nWir haben dir einen Link zum Zurücksetzen deines Passworts geschickt. Bitte prüfe dein Postfach.');
-      
-    } catch (error) {
-      console.error('Password reset error:', error);
-      setAuthError('Ein Fehler ist aufgetreten');
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    // Save current settings before logout
-    await saveSettingsToSupabase();
-
-    // Sign out from Supabase
-    await supabase.auth.signOut();
-
-    // Clear user and reset to guest state
-    setUser(null);
-    setShowProfileDropdown(false);
-
-    // Reset to empty/guest state
-    setTodos([]);
-    setSelectedCategories([]);
-    setCustomCategories([]);
-    setHiddenCategories([]);
-    setHiddenPersons([]);
-    setHiddenMeetings([]);
-    setHiddenActions([]);
-    setCustomPersons([]);
-    setCustomMeetings([]);
-    setCustomActions([]);
-    setActiveStatFilter(null);
-    setSearchQuery('');
-    setShowSearch(false);
-
-    // Show login modal after logout
-    setShowAuthModal(true);
-  };
-
-  // Set mounted to true after hydration
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // 1. Auth-Listener: NUR Session spiegeln (idempotent)
-  useEffect(() => {
-    // Initial session holen
-    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
-      setSession(initialSession);
-    });
-
-    // Listener für Änderungen
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      console.log('Auth state changed:', _event);
-      // Nur updaten wenn sich wirklich was geändert hat
-      setSession(prev => {
-        if (prev?.access_token === newSession?.access_token) return prev;
-        return newSession;
-      });
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  // 2. User-State abgeleitet aus Session
-  useEffect(() => {
-    if (!session?.user) {
-      setUser(null);
-      return;
-    }
-
-    // Nur updaten wenn sich User-ID geändert hat
-    setUser(prev => {
-      if (prev?.id === session.user.id) return prev;
-      return { id: session.user.id, email: session.user.email || '' };
-    });
-  }, [session?.user?.id]);
-
-  // 3. Daten laden NUR bei User-ID-Wechsel
-  useEffect(() => {
-    if (!user?.id) {
-      // Kein User = zurücksetzen
-      setTodos([]);
-      setCustomCategories([]);
-      setSelectedCategories([]);
-      setCreateCategoryId(null);
-      lastLoadedUserId.current = null;
-      GLOBAL_ALL_CATEGORIES = [];
-      return;
-    }
-
-    // Nur laden wenn sich die User-ID geändert hat
-    if (lastLoadedUserId.current === user.id) return;
-
-    lastLoadedUserId.current = user.id;
-    loadUserDataFromSupabase(user.id);
-  }, [user?.id]);
-
-  // Auto-save settings to Supabase when they change
-  useEffect(() => {
-    if (user && !dataLoading) {
-      const saveTimeout = setTimeout(() => {
-        saveSettingsToSupabase();
-      }, 1000); // Debounce saves
-      
-      return () => clearTimeout(saveTimeout);
-    }
-  }, [user, selectedCategories, hiddenCategories, hiddenPersons, hiddenMeetings, hiddenActions, customPersons, customMeetings, customActions, darkMode, selectedDateFilter, selectedStatusFilter, activeStatFilter]);
-
-  // Reset to home view - all filters cleared, sorted by priority then date
-  // Note: Categories (Arbeit, Privat, etc.) are kept as selected
-  const resetToHome = () => {
-    setActiveStatFilter(null);
-    // Keep selectedCategories as they are - don't reset
-    setPersonFilter(null);
-    setMeetingFilter(null);
-    setSearchQuery('');
-    setShowSearch(false);
-    setExpandedFilter(null);
-    setActiveTab('tasks');
-    // Scroll to top
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  // Filter tasks based on active stat filter and search
-  const getFilteredTasks = (): Todo[] => {
-    let filtered = todos.filter(t => !t.completed);
-    
-    // Apply search filter
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(t => 
-        t.title.toLowerCase().includes(query) ||
-        (t.description && t.description.toLowerCase().includes(query)) ||
-        (t.persons && t.persons.some(p => p.toLowerCase().includes(query))) ||
-        (t.meetings && t.meetings.some(m => m.toLowerCase().includes(query)))
-      );
-    }
-    
-    // Apply category filter (immer anwenden wenn Kategorien ausgew�hlt)
-    if (selectedCategories.length > 0) {
-      filtered = filtered.filter(t => selectedCategories.includes(t.category));
-    }
-    
-    // Apply person filter (from voice command or filter modal)
-    if (personFilter) {
-      filtered = filtered.filter(t => 
-        t.persons && t.persons.some(p => p.toLowerCase().includes(personFilter.toLowerCase()))
-      );
-    }
-    
-    // Apply meeting filter (from voice command or filter modal)
-    if (meetingFilter) {
-      filtered = filtered.filter(t => 
-        t.meetings && t.meetings.some(m => m.toLowerCase().includes(meetingFilter.toLowerCase()))
-      );
-    }
-    
-    // Apply stat filter ONLY when a stat card is clicked
-    if (activeStatFilter === 'today') {
-      filtered = filtered.filter(t => t.date === 'Heute');
-    } else if (activeStatFilter === 'critical') {
-      filtered = filtered.filter(t => t.priority === 1);
-    } else if (activeStatFilter === 'high') {
-      filtered = filtered.filter(t => t.priority === 2);
-    } else if (activeStatFilter === 'status') {
-      if (selectedStatusFilter === 'Rückmeldung') filtered = filtered.filter(t => t.status === 'Auf Rückmeldung');
-      else if (selectedStatusFilter === 'Offen') filtered = filtered.filter(t => t.status === 'Offen');
-      else if (selectedStatusFilter === 'In Bearbeitung') filtered = filtered.filter(t => t.status === 'In Bearbeitung');
-      else if (selectedStatusFilter === 'Erledigt') filtered = filtered.filter(t => t.status === 'Erledigt');
-    } else if (activeStatFilter?.startsWith('prio-')) {
-      const prioLevel = parseInt(activeStatFilter.replace('prio-', ''));
-      filtered = filtered.filter(t => t.priority === prioLevel);
-    }
-    
-    // Sort by priority (1 = highest priority first), then by date within same priority
-    const dateOrder: Record<string, number> = {
-      'Heute': 1,
-      'Morgen': 2,
-      'Diese Woche': 3,
-      'Nächste Woche': 4,
-      'Diesen Monat': 5,
-    };
-    
-    filtered.sort((a, b) => {
-      // First sort by priority
-      if (a.priority !== b.priority) {
-        return a.priority - b.priority;
-      }
-      // Then sort by date within same priority (Heute first)
-      const dateA = dateOrder[a.date] || 99;
-      const dateB = dateOrder[b.date] || 99;
-      return dateA - dateB;
-    });
-    
-    return filtered;
-  };
-
-  // Count unread tasks per priority for stat cards (filtered by selected categories)
-  const unreadCounts = {
-    today: todos.filter(t => t.date === 'Heute' && t.unread && selectedCategories.includes(t.category)).length,
-    critical: todos.filter(t => t.priority === 1 && t.unread && selectedCategories.includes(t.category)).length,
-    high: todos.filter(t => t.priority === 2 && t.unread && selectedCategories.includes(t.category)).length,
-    waiting: todos.filter(t => t.status === 'Auf Rückmeldung' && t.unread && selectedCategories.includes(t.category)).length,
-  };
-
-  // Mark task as read when expanded
-  const handleToggleExpand = (todoId: string) => {
-    if (expandedTask === todoId) {
-      setExpandedTask(null);
-    } else {
-      setExpandedTask(todoId);
-      // Mark as read
-      const updatedTodos = todos.map(t => {
-        if (t.id === todoId && t.unread) {
-          const updated = { ...t, unread: false };
-          saveTodoToSupabase(updated);
-          return updated;
-        }
-        return t;
-      });
-      setTodos(updatedTodos);
-    }
-  };
-
-  // Mark all in category as read when stat card clicked
-  const handleStatCardClick = (type: string) => {
-    let filter: (t: Todo) => boolean;
-    if (type === 'today') filter = t => t.date === 'Heute';
-    else if (type === 'critical') filter = t => t.priority === 1;
-    else if (type === 'high') filter = t => t.priority === 2;
-    else if (type === 'waiting') filter = t => t.status === 'Auf Rückmeldung';
-    
-    // Don't mark as read immediately, just for demo show the filter would work
-  };
-
-  // Calendar functions
-  const formatDateForCalendar = (dateStr: string): Date => {
-    const today = new Date();
-    if (dateStr === 'Heute') return today;
-    if (dateStr === 'Morgen') {
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      return tomorrow;
-    }
-    // Parse "30. Jan." format
-    const months: Record<string, number> = { 'Jan': 0, 'Feb': 1, 'März': 2, 'Apr': 3, 'Mai': 4, 'Jun': 5, 'Jul': 6, 'Aug': 7, 'Sep': 8, 'Okt': 9, 'Nov': 10, 'Dez': 11 };
-    const match = dateStr.match(/(\d+)\.\s*(\w+)/);
-    if (match) {
-      const day = parseInt(match[1]);
-      const month = months[match[2]] || 0;
-      return new Date(today.getFullYear(), month, day);
-    }
-    return today;
-  };
-
-  const formatICSDate = (date: Date): string => {
-    return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-  };
-
-  const openAppleCalendar = (todo: Todo) => {
-    const date = formatDateForCalendar(todo.date);
-    const endDate = new Date(date.getTime() + 60 * 60 * 1000); // 1 hour later
-    
-    // Create ICS content
-    const icsContent = `BEGIN:VCALENDAR
-VERSION:2.0
-BEGIN:VEVENT
-DTSTART:${formatICSDate(date)}
-DTEND:${formatICSDate(endDate)}
-SUMMARY:${todo.title}
-DESCRIPTION:${todo.description || ''}
-END:VEVENT
-END:VCALENDAR`;
-
-    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${todo.title.substring(0, 20)}.ics`;
-    link.click();
-    URL.revokeObjectURL(url);
-    setCalendarModal({ show: false, todo: null });
-  };
-
-  const openGoogleCalendar = (todo: Todo) => {
-    const date = formatDateForCalendar(todo.date);
-    const endDate = new Date(date.getTime() + 60 * 60 * 1000);
-    
-    const formatGoogleDate = (d: Date): string => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-    
-    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(todo.title)}&dates=${formatGoogleDate(date)}/${formatGoogleDate(endDate)}&details=${encodeURIComponent(todo.description || '')}`;
-    
-    window.open(url, '_blank');
-    setCalendarModal({ show: false, todo: null });
-  };
-
-  const downloadICS = (todo: Todo) => {
-    openAppleCalendar(todo); // Same function, downloads .ics file
-  };
-
-  // Handle status change
-  const handleStatusChange = (todoId: string, newStatus: string) => {
-    const updatedTodos = todos.map(t => {
-      if (t.id === todoId) {
-        const updated = { 
-          ...t, 
-          status: newStatus,
-          completed: newStatus === 'Erledigt'
-        };
-        saveTodoToSupabase(updated);
-        return updated;
-      }
-      return t;
-    });
-    setTodos(updatedTodos);
-  };
-
-  // Handle checkbox toggle
-  const handleToggleComplete = (todoId: string) => {
-    const updatedTodos = todos.map(t => {
-      if (t.id === todoId) {
-        const newCompleted = !t.completed;
-        const updated = {
-          ...t,
-          completed: newCompleted,
-          status: newCompleted ? 'Erledigt' : 'Offen'
-        };
-        saveTodoToSupabase(updated);
-        return updated;
-      }
-      return t;
-    });
-    setTodos(updatedTodos);
-  };
-
-  // Handle priority change
-  const handlePriorityChange = (todoId: string, newPriority: number) => {
-    const updatedTodos = todos.map(t => {
-      if (t.id === todoId) {
-        const updated = { ...t, priority: newPriority };
-        saveTodoToSupabase(updated);
-        return updated;
-      }
-      return t;
-    });
-    setTodos(updatedTodos);
-  };
-
-  // Handle action type change
-  const handleActionTypeChange = (todoId: string, newActionType: string) => {
-    const updatedTodos = todos.map(t => {
-      if (t.id === todoId) {
-        const updated = { ...t, actionType: newActionType };
-        saveTodoToSupabase(updated);
-        return updated;
-      }
-      return t;
-    });
-    setTodos(updatedTodos);
-  };
-
-  // Handle date change
-  const handleDateChange = (todoId: string, newDate: string) => {
-    const updatedTodos = todos.map(t => {
-      if (t.id === todoId) {
-        const updated = { ...t, date: newDate };
-        saveTodoToSupabase(updated);
-        return updated;
-      }
-      return t;
-    });
-    setTodos(updatedTodos);
-  };
-
-  // Handle category change
-  const handleCategoryChange = (todoId: string, newCategory: string) => {
-    const updatedTodos = todos.map(t => {
-      if (t.id === todoId) {
-        const updated = { ...t, category: newCategory };
-        saveTodoToSupabase(updated);
-        return updated;
-      }
-      return t;
-    });
-    setTodos(updatedTodos);
-  };
-
-  // Handle description change
-  const handleDescriptionChange = (todoId: string, newDescription: string) => {
-    const updatedTodos = todos.map(t => {
-      if (t.id === todoId) {
-        const updated = { ...t, description: newDescription };
-        saveTodoToSupabase(updated);
-        return updated;
-      }
-      return t;
-    });
-    setTodos(updatedTodos);
-  };
-
-  // Handle title change
-  const handleTitleChange = (todoId: string, newTitle: string) => {
-    const updatedTodos = todos.map(t => {
-      if (t.id === todoId) {
-        const updated = { ...t, title: newTitle };
-        saveTodoToSupabase(updated);
-        return updated;
-      }
-      return t;
-    });
-    setTodos(updatedTodos);
-  };
-
-  // Handle delete task
-  const handleDeleteTask = (todoId: string) => {
-    deleteTodoFromSupabase(todoId);
-    setTodos(todos.filter(t => t.id !== todoId));
-  };
-
-  // Scroll detection
-  React.useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 100);
-      if (window.scrollY > 100 && showAllCategories) {
-        setShowAllCategories(false);
-      }
-      // Close profile dropdown on scroll
-      if (showProfileDropdown) {
-        setShowProfileDropdown(false);
-      }
-      // Close filter panels on scroll
-      if (expandedFilter) {
-        setExpandedFilter(null);
-      }
-    };
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [showAllCategories, showProfileDropdown, expandedFilter]);
-
-  // Close profile dropdown when clicking outside
-  React.useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (showProfileDropdown) {
-        const target = e.target as HTMLElement;
-        if (!target.closest('[data-profile-dropdown]')) {
-          setShowProfileDropdown(false);
-        }
-      }
-    };
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
-  }, [showProfileDropdown]);
-
-  // Close categories panel when clicking outside
-  React.useEffect(() => {
-    const handleClickOutsideCategories = (e: MouseEvent) => {
-      if (showAllCategories) {
-        const target = e.target as HTMLElement;
-        // Check if click is outside the categories area
-        if (!target.closest('[data-categories-panel]')) {
-          setShowAllCategories(false);
-        }
-      }
-    };
-    document.addEventListener('click', handleClickOutsideCategories);
-    return () => document.removeEventListener('click', handleClickOutsideCategories);
-  }, [showAllCategories]);
-
-  // Close filter panels (Aktion/Personen/Meetings) when clicking outside
-  React.useEffect(() => {
-    const handleClickOutsideFilters = (e: MouseEvent) => {
-      if (expandedFilter) {
-        const target = e.target as HTMLElement;
-        if (!target.closest('[data-filter-panel]')) {
-          setExpandedFilter(null);
-        }
-      }
-    };
-    document.addEventListener('click', handleClickOutsideFilters);
-    return () => document.removeEventListener('click', handleClickOutsideFilters);
-  }, [expandedFilter]);
-
-  const allCategories = [...categories.filter(c => !hiddenCategories.includes(c.id)), ...customCategories];
-  
-  // Check if items are in use by any todo
-  const isCategoryInUse = (catId: string): number => {
-    return todos.filter(t => t.category === catId).length;
-  };
-  
-  const isPersonInUse = (person: string): number => {
-    return todos.filter(t => t.persons && t.persons.includes(person)).length;
-  };
-  
-  const isMeetingInUse = (meeting: string): number => {
-    return todos.filter(t => t.meetings && t.meetings.includes(meeting)).length;
-  };
-  
-  const isActionInUse = (action: string): number => {
-    return todos.filter(t => t.actionType === action).length;
-  };
-  
-  const selectCreateCategory = (catId: string) => {
-    setCreateCategoryId(catId);
-
-    if (!user?.id) return;
-
-    supabase
-      .from('mindflow_user_settings')
-      .upsert(
-        {
-          user_id: user.id,
-          default_create_category_id: catId
-        },
-        { onConflict: 'user_id' }
-      )
-      .catch(err =>
-        console.error('Failed to persist default create category', err)
-      );
-  };
-
-  const toggleFilterCategory = (catId: string) => {
-    setSelectedCategories(prev =>
-      prev.includes(catId)
-        ? prev.filter(id => id !== catId)
-        : [...prev, catId]
-    );
-  };
-
-  const deleteCategory = (catId: string, catLabel: string) => {
-    const usageCount = isCategoryInUse(catId);
-    setDeleteConfirm({ type: 'category', id: catId, label: catLabel, usageCount });
-  };
-  
-  const confirmDelete = () => {
-    if (!deleteConfirm) return;
-    
-    const { type, id } = deleteConfirm;
-    
-    if (type === 'category') {
-      if (customCategories.find(c => c.id === id)) {
-        deleteCustomCategoryFromSupabase(id);
-        setCustomCategories(customCategories.filter(c => c.id !== id));
-      } else {
-        setHiddenCategories([...hiddenCategories, id]);
-      }
-      setSelectedCategories(selectedCategories.filter(c => c !== id));
-    } else if (type === 'action') {
-      if (customActions.includes(id)) {
-        setCustomActions(customActions.filter(a => a !== id));
-      } else {
-        setHiddenActions([...hiddenActions, id]);
-      }
-    } else if (type === 'person') {
-      if (customPersons.includes(id)) {
-        setCustomPersons(customPersons.filter(p => p !== id));
-      } else {
-        setHiddenPersons([...hiddenPersons, id]);
-      }
-    } else if (type === 'meeting') {
-      if (customMeetings.includes(id)) {
-        setCustomMeetings(customMeetings.filter(m => m !== id));
-      } else {
-        setHiddenMeetings([...hiddenMeetings, id]);
-      }
-    }
-    
-    setDeleteConfirm(null);
-  };
-
-  const addCategory = () => {
-    if (newCategoryName.trim()) {
-      const newCat: Category = {
-        id: newCategoryName.toLowerCase().replace(/\s/g, '-'),
-        label: newCategoryName,
-        color: newCategoryColor,
-      };
-      saveCustomCategoryToSupabase(newCat);
-      setCustomCategories([...customCategories, newCat]);
-      setSelectedCategories([...selectedCategories, newCat.id]);
-      setNewCategoryName('');
-      setAddingCategory(false);
-      setShowColorPicker(false);
-    }
-  };
-
-  const colorOptions: string[] = [
-    colors.mint, colors.coral, colors.orange, colors.purple, 
-    colors.skyBlue, colors.peach, '#4ADE80', '#F472B6'
-  ];
-
-  // ============================================
-  // VOICE CONTROL IMPLEMENTATION
-  // ============================================
-  
-  // Speech Recognition Reference
-  const recognitionRef = React.useRef<any>(null);
-  const transcriptRef = React.useRef<string>('');
-  const handleVoiceCommandRef = React.useRef<(text: string) => Promise<void>>();
-  
-  // Initialize Speech Recognition
-  useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.lang = 'de-DE';
-      recognition.continuous = true;  // Keep listening
-      recognition.interimResults = true;
-      recognition.maxAlternatives = 1;
-      
-      recognition.onstart = () => {
-        setIsListening(true);
-        setVoiceError(null);
-        setVoiceFeedback(null);
-        transcriptRef.current = '';
-      };
-      
-      // Silence timeout - stop after 4 seconds of no speech
-      let silenceTimer: NodeJS.Timeout | null = null;
-      const SILENCE_TIMEOUT = 4000; // 4 seconds
-      
-      const resetSilenceTimer = () => {
-        if (silenceTimer) clearTimeout(silenceTimer);
-        silenceTimer = setTimeout(() => {
-          if (recognitionRef.current) {
-            recognitionRef.current.stop();
-          }
-        }, SILENCE_TIMEOUT);
-      };
-      
-      recognition.onend = () => {
-        if (silenceTimer) clearTimeout(silenceTimer);
-        setIsListening(false);
-        // Process the accumulated transcript when recognition ends
-        const finalText = transcriptRef.current.trim();
-        if (finalText && handleVoiceCommandRef.current) {
-          handleVoiceCommandRef.current(finalText);
-        }
-      };
-      
-      recognition.onresult = (event: any) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
-        
-        // Reset silence timer on any speech
-        resetSilenceTimer();
-        
-        for (let i = 0; i < event.results.length; i++) {
-          const result = event.results[i];
-          if (result.isFinal) {
-            finalTranscript += result[0].transcript + ' ';
-          } else {
-            interimTranscript += result[0].transcript;
-          }
-        }
-        
-        setVoiceInterim(interimTranscript);
-        
-        // Store complete transcript
-        if (finalTranscript.trim()) {
-          transcriptRef.current = finalTranscript.trim();
-          setVoiceTranscript(finalTranscript.trim());
-        }
-      };
-      
-      recognition.onerror = (event: any) => {
-        if (silenceTimer) clearTimeout(silenceTimer);
-        setIsListening(false);
-        let errorMsg = 'Spracherkennung fehlgeschlagen';
-        
-        switch (event.error) {
-          case 'no-speech':
-            errorMsg = 'Keine Sprache erkannt. Bitte erneut versuchen.';
-            break;
-          case 'audio-capture':
-            errorMsg = 'Kein Mikrofon gefunden.';
-            break;
-          case 'not-allowed':
-            errorMsg = 'Mikrofon-Zugriff verweigert.';
-            break;
-          case 'network':
-            errorMsg = 'Netzwerkfehler.';
-            break;
-        }
-        
-        setVoiceError(errorMsg);
-      };
-      
-      recognitionRef.current = recognition;
-    }
-    
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.abort();
-      }
-    };
-  }, []);
-
-  // Toggle Voice Recognition
-  const toggleVoiceRecognition = () => {
-    if (!recognitionRef.current) {
-      setVoiceError('Spracherkennung wird nicht unterstützt');
-      return;
-    }
-    
-    if (isListening) {
-      recognitionRef.current.stop();
-    } else {
-      // Check if user has at least one category
-      if (allCategories.length === 0) {
-        setVoiceFeedback('❌ Bitte erstelle zuerst eine Kategorie');
-        setShowVoiceModal(true);
-        setTimeout(() => {
-          setShowVoiceModal(false);
-          setVoiceFeedback(null);
-          setShowAllCategories(true);
-          setAddingCategory(true);
-        }, 2000);
-        return;
-      }
-      
-      setVoiceTranscript('');
-      setVoiceInterim('');
-      setShowVoiceModal(true);
-      
-      try {
-        recognitionRef.current.start();
-      } catch (error) {
-        console.error('Failed to start recognition:', error);
-      }
-    }
-  };
-
-  // Voice Command Parser Helpers
-  const parsePriority = (text: string): number | undefined => {
-    const lower = text.toLowerCase();
-    if (lower.includes('kritisch') || lower.includes('p1') || lower.includes('dringend')) return 1;
-    if (lower.includes('hoch') || lower.includes('p2') || lower.includes('wichtig')) return 2;
-    if (lower.includes('mittel') || lower.includes('p3')) return 3;
-    if (lower.includes('niedrig') || lower.includes('p4')) return 4;
-    if (lower.includes('minimal') || lower.includes('p5')) return 5;
-    return undefined;
-  };
-
-  const parseStatus = (text: string): string | undefined => {
-    const lower = text.toLowerCase();
-    if (lower.includes('offen') || lower.includes('neu')) return 'Offen';
-    if (lower.includes('bearbeitung') || lower.includes('starte') || lower.includes('beginne')) return 'In Bearbeitung';
-    if (lower.includes('rückmeldung') || lower.includes('warte')) return 'Auf Rückmeldung';
-    if (lower.includes('erledigt') || lower.includes('fertig') || lower.includes('done')) return 'Erledigt';
-    return undefined;
-  };
-
-  // Check if a category ID exists in available categories
-  const isValidCategory = (categoryId: string): boolean => {
-    return allCategories.some(cat => cat.id === categoryId);
-  };
-
-  const parseDate = (text: string): string => {
-    const lower = text.toLowerCase();
-    if (lower.includes('heute')) return 'Heute';
-    if (lower.includes('morgen')) return 'Morgen';
-    if (lower.includes('übermorgen')) return 'Übermorgen';
-    if (lower.includes('diese woche')) return 'Diese Woche';
-    if (lower.includes('nächste woche')) return 'Nächste Woche';
-    return 'Heute';
-  };
-
-  const parseActionType = (text: string): string => {
-    const lower = text.toLowerCase();
-    if (lower.includes('email') || lower.includes('mail') || lower.includes('schreiben')) return 'E-Mail';
-    if (lower.includes('anruf') || lower.includes('telefo')) return 'Anruf';
-    if (lower.includes('gespräch') || lower.includes('meeting') || lower.includes('besprechen')) return 'Gespräch';
-    if (lower.includes('prüfen') || lower.includes('check')) return 'Prüfen';
-    if (lower.includes('dokument')) return 'Dokument';
-    if (lower.includes('recherche') || lower.includes('suchen')) return 'Recherche';
-    // Check custom actions
-    const allActionsList = [...defaultActions, ...customActions];
-    const matchedAction = allActionsList.find(a => lower.includes(a.toLowerCase()));
-    if (matchedAction) return matchedAction;
-    return 'Prüfen';
-  };
-
-  // Find todo by search text (fuzzy matching)
-  const findTodoByText = (searchText: string): Todo | undefined => {
-    const lower = searchText.toLowerCase().trim();
-    
-    // Check if it's a number reference (#3, Nummer 3, Aufgabe 3, Todo 3)
-    const numMatch = lower.match(/^#?(\d+)$/);
-    if (numMatch) {
-      return findTodoByNumber(parseInt(numMatch[1]));
-    }
-    const keywordNumMatch = lower.match(/^(?:aufgabe|todo|nummer|task)\s+(\d+)$/);
-    if (keywordNumMatch) {
-      return findTodoByNumber(parseInt(keywordNumMatch[1]));
-    }
-    
-    // Exact match first
-    let found = todos.find(t => t.title.toLowerCase() === lower);
-    if (found) return found;
-    
-    // Partial match
-    found = todos.find(t => t.title.toLowerCase().includes(lower));
-    if (found) return found;
-    
-    // Word matching
-    const words = lower.split(' ').filter(w => w.length > 2);
-    found = todos.find(t => {
-      const titleLower = t.title.toLowerCase();
-      return words.some(word => titleLower.includes(word));
-    });
-    
-    return found;
-  };
-
-  // Find todo by display number (1-based index in filtered list)
-  const findTodoByNumber = (num: number): Todo | undefined => {
-    const filtered = getFilteredTasks();
-    if (num >= 1 && num <= filtered.length) {
-      return filtered[num - 1];
-    }
-    return undefined;
-  };
-
-  // Extract task number from voice text (e.g., "Aufgabe 3", "Nummer 5", "#2")
-  const extractTaskNumber = (text: string): { num: number | null; rest: string } => {
-    const lower = text.toLowerCase();
-    
-    // Pattern: "aufgabe 3 ...", "nummer 3 ...", "#3 ...", "task 3 ..."
-    const match = lower.match(/^(?:aufgabe|nummer|task|todo|#)\s*(\d+)\s*(.*)/i);
-    if (match) {
-      return { num: parseInt(match[1]), rest: match[2].trim() };
-    }
-    
-    // Pattern: "... aufgabe 3", "... nummer 3" at end
-    const endMatch = lower.match(/(.*?)\s*(?:aufgabe|nummer|task|todo|#)\s*(\d+)\s*$/i);
-    if (endMatch) {
-      return { num: parseInt(endMatch[2]), rest: endMatch[1].trim() };
-    }
-    
-    // Pattern: just a number at the start "3 erledigt"
-    const numStart = lower.match(/^(\d+)\s+(.+)/);
-    if (numStart) {
-      return { num: parseInt(numStart[1]), rest: numStart[2].trim() };
-    }
-    
-    return { num: null, rest: text };
-  };
-
-  // Check if command is complex (should use AI)
-  const isComplexCommand = (text: string): boolean => {
-    const wordCount = text.split(' ').length;
-    const lower = text.toLowerCase();
-    
-    // Simple command patterns (should NOT use AI) - check these FIRST
-    const simplePatterns = [
-      /^(erledigt|fertig|done|abhaken)/i,
-      /^(lösche|entferne|delete)/i,
-      /^(zeige|filter|nur)\s*(aufgaben|todos)?\s*(@|#|offen|kritisch)/i,
-      /^(alle aufgaben|alle todos|alles anzeigen|filter zurück)/i,
-      /^(suche|such|finde)/i,
-      /^@\w+/i,
-      /^#\w+/i,
-      /priorität\s*(kritisch|hoch|mittel|niedrig)/i,
-      /status\s*(offen|bearbeitung|rückmeldung|erledigt)/i,
-      /auf\s*(heute|morgen|diese woche|nächste woche)$/i,
-      // Voice reading commands - should NOT use AI
-      /(lies|lese|vorlesen|sag|nenn|zeig)\s*(mir)?\s*(bitte)?\s*(mal)?\s*(die|alle|meine)?\s*(aufgaben|todos|to-dos|tasks)/i,
-      /(was|welche)\s*(sind|habe ich|gibt es)\s*(für)?\s*(aufgaben|todos)/i,
-      /(aufgaben|todos).*(vorlesen|lesen|ansagen)/i,
-      /(lies|lese|vorlesen).*(heute|hoch|kritisch|priorität|person)/i,
-      // Add person/meeting/action to list commands - should NOT use AI
-      /(füge|add|neue).*(person|kontakt|meeting|termin|aktion)\s*(hinzu)?/i,
-      /(person|kontakt)\s+\w+/i,
-      /(meeting|termin)\s+\w+/i,
-      /neue\s*(person|kontakt|meeting|termin|aktion)/i,
-      // Task modification by number or name - should NOT use AI
-      /^(?:bei\s+|in\s+|an\s+|für\s+)?(?:aufgabe|todo|nummer|task|#)\s+\S+\s+(beschreibung|notiz|datum|fällig|aktionstyp|aktion|priorität|prio|status|person|meeting|titel|umbenennen|erledigt|fertig|löschen|kritisch|hoch|mittel|niedrig)/i,
-    ];
-    
-    // Check if any available category is mentioned - this is also simple
-    const mentionsCategoryName = allCategories.some(cat => 
-      lower.includes(cat.label.toLowerCase()) || lower.includes(cat.id.toLowerCase())
-    );
-    
-    const isSimple = simplePatterns.some(pattern => pattern.test(lower)) || mentionsCategoryName;
-    
-    // If it's a simple command, return false immediately
-    if (isSimple) {
-      return false;
-    }
-    
-    // Complex indicators (only check if not already identified as simple)
-    const hasDescription = lower.includes('beschreibung') || lower.includes('details') || lower.includes('hinzufügen dass');
-    const hasMultipleClauses = lower.includes(' und ') || lower.includes(' weil ') || lower.includes(' damit ') || lower.includes(' dass ');
-    const isLongText = wordCount > 12;
-    
-    return hasDescription || hasMultipleClauses || isLongText;
-  };
-
-  // Get the currently selected category for new tasks
-  // Uses refs to avoid stale closure problem in async functions
-  const getCurrentCategory = (): string => {
-    // Get current values from refs (always up-to-date)
-    const currentSelectedCategories = selectedCategoriesRef.current;
-    const currentCustomCategories = customCategoriesRef.current;
-    
-    console.log('=== getCurrentCategory CALLED (using refs) ===');
-    console.log('currentSelectedCategories:', JSON.stringify(currentSelectedCategories));
-    console.log('currentCustomCategories:', JSON.stringify(currentCustomCategories.map(c => c.id)));
-    
-    // Use the LAST selected category (most recently clicked/added)
-    // Iterate backwards to get the most recent selection
-    for (let i = currentSelectedCategories.length - 1; i >= 0; i--) {
-      const catId = currentSelectedCategories[i];
-      const exists = currentCustomCategories.some(cat => cat.id === catId);
-      console.log(`Checking catId "${catId}": exists in customCategories = ${exists}`);
-      if (exists) {
-        console.log(`RETURNING: ${catId}`);
-        return catId;
-      }
-    }
-    
-    // If no selected category is valid, use first available custom category
-    if (currentCustomCategories.length > 0) {
-      console.log(`No valid selection, using first custom category: ${currentCustomCategories[0].id}`);
-      return currentCustomCategories[0].id;
-    }
-    
-    // This should not happen if UI enforces category creation first
-    console.error('ERROR: No categories available!');
-    return 'keine-kategorie';
-  };
-
-  // Parse complex command with AI (Haiku)
-  const parseWithAI = async (text: string): Promise<void> => {
-    // Use refs to avoid stale closure (voice recognition useEffect captures initial state)
-    const effectiveCategoryId = createCategoryIdRef.current || getCurrentCategory();
-    
-    if (!effectiveCategoryId || effectiveCategoryId === 'keine-kategorie') {
-      setVoiceFeedback('⚠️ Bitte erstelle zuerst eine Kategorie');
-      setTimeout(() => setVoiceFeedback(null), 2000);
-      return;
-    }
-
-    // Persist for future use if not yet set
-    if (!createCategoryIdRef.current) {
-      selectCreateCategory(effectiveCategoryId);
-    }
-
-    setVoiceFeedback('🤖 Analysiere...');
-
-    try {
-      const response = await fetch('/api/parse-voice', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-
-      if (!response.ok) {
-        throw new Error('API Fehler');
-      }
-
-      const data = await response.json();
-
-      const validPersons = data.persons?.length > 0
-        ? data.persons
-            .map((p: string) => p.replace('@', ''))
-            .filter((p: string) => allPersons.some(existing =>
-              existing.toLowerCase() === p.toLowerCase()
-            ))
-            .map((p: string) => `@${p}`)
-        : undefined;
-
-      const validMeetings = data.meetings?.length > 0
-        ? data.meetings
-            .map((m: string) => m.replace('#', ''))
-            .filter((m: string) => allMeetings.some(existing =>
-              existing.toLowerCase() === m.toLowerCase()
-            ))
-            .map((m: string) => `#${m}`)
-        : undefined;
-
-      // Migrate AI-returned actionType (API might still return old IDs)
-      const aiActionTypeMigration: Record<string, string> = {
-        'email': 'E-Mail', 'chat': 'Gespräch', 'check': 'Prüfen',
-        'call': 'Anruf', 'document': 'Dokument', 'research': 'Recherche',
-      };
-
-      const newTodo: Todo = {
-        id: crypto.randomUUID(),
-        title: data.title,
-        description: data.description || undefined,
-        category: effectiveCategoryId,
-        actionType: aiActionTypeMigration[data.actionType] || data.actionType || 'Prüfen',
-        priority: data.priority || 3,
-        status: 'Offen',
-        date: data.date || 'Heute',
-        persons: validPersons?.length > 0 ? validPersons : undefined,
-        meetings: validMeetings?.length > 0 ? validMeetings : undefined,
-        unread: true,
-        completed: false,
-      };
-
-      saveTodoToSupabase(newTodo);
-      setTodos(prev => [newTodo, ...prev]);
-
-      let feedback = `✓ "${newTodo.title}"`;
-      if (newTodo.description) feedback += ` mit Beschreibung`;
-      if (newTodo.persons?.length) feedback += ` für ${newTodo.persons.join(', ')}`;
-
-      setVoiceFeedback(feedback);
-
-      setTimeout(() => {
-        setShowVoiceModal(false);
-        setVoiceFeedback(null);
-      }, 2500);
-
-    } catch (error) {
-      console.error('AI parsing error:', error);
-
-      const newTodo: Todo = {
-        id: crypto.randomUUID(),
-        title: text.substring(0, 60),
-        category: effectiveCategoryId,
-        actionType: 'Prüfen',
-        priority: 3,
-        status: 'Offen',
-        date: 'Heute',
-        unread: true,
-        completed: false,
-      };
-
-      saveTodoToSupabase(newTodo);
-      setTodos(prev => [newTodo, ...prev]);
-      setVoiceFeedback(`✓ Aufgabe erstellt: "${newTodo.title}"`);
-
-      setTimeout(() => {
-        setShowVoiceModal(false);
-        setVoiceFeedback(null);
-      }, 2000);
-    }
-  };
-
-  // Main Voice Command Handler
-  const handleVoiceCommand = async (text: string) => {
-    // German number words → digits mapping
-    const numberWords: Record<string, string> = {
-      'null': '0', 'eins': '1', 'zwei': '2', 'zwo': '2', 'drei': '3',
-      'vier': '4', 'fünf': '5', 'sechs': '6', 'sieben': '7', 'acht': '8', 'neun': '9', 'zehn': '10',
-      'elf': '11', 'zwölf': '12', 'dreizehn': '13', 'vierzehn': '14', 'fünfzehn': '15',
-      'sechzehn': '16', 'siebzehn': '17', 'achtzehn': '18', 'neunzehn': '19', 'zwanzig': '20',
-      'einundzwanzig': '21', 'zweiundzwanzig': '22', 'dreiundzwanzig': '23', 'vierundzwanzig': '24',
-      'fünfundzwanzig': '25', 'dreißig': '30', 'vierzig': '40', 'fünfzig': '50',
-    };
-    const numWordPattern = Object.keys(numberWords).join('|');
-    
-    // Step 1: Normalize "to do" / "to-do" → "todo"
-    let normalizedText = text.replace(/\bto[\s-]do\b/gi, 'todo');
-    
-    // Step 2: Convert ALL standalone German number words to digits
-    // (excludes "ein/eine/einen" which are articles — only "eins" is a number)
-    normalizedText = normalizedText.replace(
-      new RegExp(`\\b(${numWordPattern})\\b`, 'gi'),
-      (match) => numberWords[match.toLowerCase()] || match
-    );
-    
-    const lower = normalizedText.toLowerCase().trim();
-    
-    console.log('=== Voice Command Debug ===');
-    console.log('Original text:', text);
-    console.log('Normalized text:', normalizedText);
-    console.log('Lowercase:', lower);
-    
-    // ============ ABSOLUTE PRIORITY: PERSON/MEETING/AKTION HINZUFÜGEN ============
-    // These MUST be processed FIRST - no exceptions!
-    
-    // Check for PERSON command - "füge Person Mia hinzu", "füge Mia hinzu bei Personen", etc.
-    const hasPersonKeyword = lower.includes('person');
-    console.log('Has person keyword:', hasPersonKeyword);
-    
-    // Only treat as list-add if the sentence is short (≤8 words) and looks like a simple command
-    const wordCountForListCheck = lower.split(/\s+/).length;
-    const hasComplexIndicators = /[,.]/.test(lower) || /(dass|weil|damit|möchte|soll|bitte besprechen|folgendes)/.test(lower);
-    const isSimpleListCommand = wordCountForListCheck <= 8 && !hasComplexIndicators;
-    
-    if (hasPersonKeyword && isSimpleListCommand) {
-      console.log('>>> Processing PERSON command');
-      
-      const words = lower.split(/\s+/);
-      console.log('Words:', words);
-      
-      // Find "person" or "personen" in words
-      const personIndex = words.findIndex(w => w === 'person' || w === 'personen' || w === 'kontakt' || w === 'kontakte');
-      console.log('Person keyword index:', personIndex);
-      
-      let personName = '';
-      
-      // Strategy 1: Name is AFTER "person" (e.g., "füge Person Mia hinzu")
-      if (personIndex !== -1 && personIndex < words.length - 1) {
-        const nextWord = words[personIndex + 1];
-        const skipWords = ['hinzu', 'hinzufügen', 'bitte', 'eine', 'einen', 'zur', 'liste', 'erstellen', 'anlegen', 'neue', 'neuen', 'die', 'der', 'das', 'namens', 'mit', 'dem', 'namen', 'an', 'bei'];
-        if (!skipWords.includes(nextWord)) {
-          personName = nextWord;
-          console.log('Strategy 1 - Name after keyword:', personName);
-        }
-      }
-      
-      // Strategy 2: Name is BEFORE "person/personen" (e.g., "füge Mia hinzu bei Personen")
-      if (!personName) {
-        // Look for pattern: "füge X hinzu" where X is the name
-        const fügeIndex = words.findIndex(w => w === 'füge' || w === 'add' || w === 'neue' || w === 'neuen');
-        if (fügeIndex !== -1 && fügeIndex < words.length - 1) {
-          const potentialName = words[fügeIndex + 1];
-          const skipWords = ['hinzu', 'hinzufügen', 'bitte', 'eine', 'einen', 'person', 'personen', 'kontakt', 'meeting', 'meetings', 'termin', 'aktion'];
-          if (!skipWords.includes(potentialName)) {
-            personName = potentialName;
-            console.log('Strategy 2 - Name after füge:', personName);
-          }
-        }
-      }
-      
-      // Clean up the name - only allow single word (with underscores)
-      if (personName) {
-        personName = personName.replace(/[^a-zäöüßA-ZÄÖÜ_]/gi, '');
-        console.log('Cleaned person name:', personName);
-        
-        // Must be a single word (no spaces) and at least 2 chars
-        if (personName && personName.length > 1 && /^[a-zäöüßA-ZÄÖÜ_]+$/i.test(personName)) {
-          const capitalizedName = personName.charAt(0).toUpperCase() + personName.slice(1).toLowerCase();
-          const allPersonsList = [...defaultPersons, ...customPersons];
-          
-          console.log('All persons:', allPersonsList);
-          console.log('Adding:', capitalizedName);
-          
-          if (!allPersonsList.some(p => p.toLowerCase() === personName.toLowerCase())) {
-            setCustomPersons(prev => [...prev, capitalizedName]);
-            setVoiceFeedback(`✓ @${capitalizedName} zur Personenliste hinzugefügt`);
-            console.log('SUCCESS: Person added:', capitalizedName);
-            console.log('SUCCESS: Person added:', capitalizedName);
-          } else {
-            setVoiceFeedback(`ℹ️ @${capitalizedName} existiert bereits`);
-            console.log('INFO: Person already exists');
-          }
-          setTimeout(() => setShowVoiceModal(false), 2000);
-          return; // STOP HERE - don't continue to AI
-        }
-      }
-    }
-    
-    // Check for MEETING command - "füge Meeting Standup hinzu", "füge Standup hinzu bei Meetings", etc.
-    const hasMeetingKeyword = lower.includes('meeting') || lower.includes('termin');
-    console.log('Has meeting keyword:', hasMeetingKeyword);
-    
-    if (hasMeetingKeyword && isSimpleListCommand) {
-      console.log('>>> Processing MEETING command');
-      
-      const words = lower.split(/\s+/);
-      const meetingIndex = words.findIndex(w => w === 'meeting' || w === 'meetings' || w === 'termin' || w === 'termine');
-      console.log('Meeting keyword index:', meetingIndex);
-      
-      let meetingName = '';
-      const stopWords = ['hinzu', 'hinzufügen', 'bitte', 'erstellen', 'anlegen', 'bei', 'an', 'zu'];
-      const skipWords = ['ein', 'eine', 'einen', 'neues', 'neuen', 'zur', 'liste', 'meeting', 'meetings', 'termin', 'termine'];
-      
-      // Strategy 1: Name is AFTER "meeting" — only take ONE word
-      if (meetingIndex !== -1 && meetingIndex < words.length - 1) {
-        const nextWord = words[meetingIndex + 1].replace(/[^a-zäöüßA-ZÄÖÜ_]/gi, '');
-        if (nextWord && !stopWords.includes(nextWord.toLowerCase()) && !skipWords.includes(nextWord.toLowerCase())) {
-          meetingName = nextWord;
-          console.log('Strategy 1 - Single word after meeting:', meetingName);
-        }
-      }
-      
-      // Strategy 2: Name is BEFORE "meeting/meetings" — only take ONE word
-      if (!meetingName) {
-        const fügeIndex = words.findIndex(w => w === 'füge' || w === 'add' || w === 'neues' || w === 'neuen');
-        if (fügeIndex !== -1 && fügeIndex < words.length - 1) {
-          const potentialName = words[fügeIndex + 1].replace(/[^a-zäöüßA-ZÄÖÜ_]/gi, '');
-          if (potentialName && !stopWords.includes(potentialName.toLowerCase()) && !skipWords.includes(potentialName.toLowerCase())) {
-            meetingName = potentialName;
-            console.log('Strategy 2 - Single word after füge:', meetingName);
-          }
-        }
-      }
-      
-      // Must be a single word (with underscores) and at least 2 chars
-      if (meetingName && meetingName.length > 1 && /^[a-zäöüßA-ZÄÖÜ_]+$/i.test(meetingName)) {
-        const capitalizedName = meetingName.charAt(0).toUpperCase() + meetingName.slice(1).toLowerCase();
-        const allMeetingsList = [...defaultMeetings, ...customMeetings];
-        
-        console.log('Adding meeting:', capitalizedName);
-        
-        if (!allMeetingsList.some(m => m.toLowerCase() === meetingName.toLowerCase())) {
-          setCustomMeetings(prev => [...prev, capitalizedName]);
-          setVoiceFeedback(`✓ #${capitalizedName} zur Meetingliste hinzugefügt`);
-          console.log('SUCCESS: Meeting added:', capitalizedName);
-        } else {
-          setVoiceFeedback(`ℹ️ #${capitalizedName} existiert bereits`);
-        }
-        setTimeout(() => setShowVoiceModal(false), 2000);
-        return; // STOP HERE
-      }
-    }
-    
-    // Check for AKTION command - "füge Aktion Review hinzu", etc.
-    // Check for AKTION command - "füge Aktion Review hinzu", "füge Review hinzu bei Aktionen", etc.
-    const hasAktionKeyword = lower.includes('aktion');
-    console.log('Has aktion keyword:', hasAktionKeyword);
-    
-    if (hasAktionKeyword && isSimpleListCommand) {
-      console.log('>>> Processing AKTION command');
-      
-      const words = lower.split(/\s+/);
-      const actionIndex = words.findIndex(w => w === 'aktion' || w === 'aktionen');
-      console.log('Action keyword index:', actionIndex);
-      
-      let actionName = '';
-      const skipWords = ['hinzu', 'hinzufügen', 'bitte', 'eine', 'einen', 'zur', 'liste', 'erstellen', 'anlegen', 'neue', 'neuen', 'bei', 'an', 'zu', 'aktion', 'aktionen'];
-      
-      // Strategy 1: Name is AFTER "aktion" (e.g., "füge Aktion Review hinzu")
-      if (actionIndex !== -1 && actionIndex < words.length - 1) {
-        const nextWord = words[actionIndex + 1].replace(/[^a-zäöüßA-ZÄÖÜ_]/gi, '');
-        if (nextWord && !skipWords.includes(nextWord.toLowerCase())) {
-          actionName = nextWord;
-          console.log('Strategy 1 - Name after aktion:', actionName);
-        }
-      }
-      
-      // Strategy 2: Name is BEFORE "aktion/aktionen" (e.g., "füge Review hinzu bei Aktionen")
-      if (!actionName) {
-        const fügeIndex = words.findIndex(w => w === 'füge' || w === 'add' || w === 'neue' || w === 'neuen');
-        if (fügeIndex !== -1 && fügeIndex < words.length - 1) {
-          const potentialName = words[fügeIndex + 1].replace(/[^a-zäöüßA-ZÄÖÜ_]/gi, '');
-          if (potentialName && !skipWords.includes(potentialName.toLowerCase())) {
-            actionName = potentialName;
-            console.log('Strategy 2 - Name after füge:', actionName);
-          }
-        }
-      }
-      
-      // Must be a single word (with underscores) and at least 2 chars
-      if (actionName && actionName.length > 1 && /^[a-zäöüßA-ZÄÖÜ_]+$/i.test(actionName)) {
-        const capitalizedName = actionName.charAt(0).toUpperCase() + actionName.slice(1).toLowerCase();
-        const allActionsList = [...defaultActions, ...customActions];
-        
-        if (!allActionsList.some(a => a.toLowerCase() === actionName.toLowerCase())) {
-          setCustomActions(prev => [...prev, capitalizedName]);
-          setVoiceFeedback(`✓ "${capitalizedName}" zur Aktionsliste hinzugefügt`);
-          console.log('SUCCESS: Action added:', capitalizedName);
-        } else {
-          setVoiceFeedback(`ℹ️ "${capitalizedName}" existiert bereits`);
-        }
-        setTimeout(() => setShowVoiceModal(false), 2000);
-        return; // STOP HERE
-      }
-    }
-    
-    console.log('>>> No person/meeting/action detected, continuing...');
-    
-    // ============ CHECK IF COMPLEX → USE AI ============
-    if (isComplexCommand(text)) {
-      console.log('=== COMPLEX COMMAND DETECTED ===');
-      await parseWithAI(text);
-      return;
-    }
-    
-    // ============ SIMPLE COMMANDS (LOCAL) ============
-    
-    // ============ NEUE AUFGABE ERSTELLEN (einfach) ============
-    if (lower.match(/^(neue aufgabe|neues todo|erstelle|erstell)\s*[:\s]?\s*\w/i)) {
-      const title = text
-        .replace(/^(neue aufgabe|neues todo|erstelle|erstell|hinzufügen)\s*[:\s]?\s*/i, '')
-        .replace(/\s*(bitte|mal|doch)\s*/gi, ' ')
-        .trim();
-      
-      if (title.length > 2 && title.split(' ').length <= 10) {
-        // Use refs to avoid stale closure
-        const effectiveCatId = createCategoryIdRef.current || getCurrentCategory();
-        
-        if (!effectiveCatId || effectiveCatId === 'keine-kategorie') {
-          setVoiceFeedback('⚠️ Bitte erstelle zuerst eine Kategorie');
-          setTimeout(() => setVoiceFeedback(null), 2000);
-          return;
-        }
-        
-        if (!createCategoryIdRef.current) {
-          selectCreateCategory(effectiveCatId);
-        }
-
-        const newTodo: Todo = {
-          id: crypto.randomUUID(),
-          title: title.charAt(0).toUpperCase() + title.slice(1),
-          category: effectiveCatId,
-          actionType: parseActionType(lower),
-          priority: parsePriority(lower) || 3,
-          status: 'Offen',
-          date: parseDate(lower),
-          unread: true,
-          completed: false,
-        };
-
-        saveTodoToSupabase(newTodo);
-        setTodos(prev => [newTodo, ...prev]);
-        setVoiceFeedback(`✓ Neue Aufgabe erstellt: "${newTodo.title}"`);
-
-        setTimeout(() => {
-          setShowVoiceModal(false);
-          setVoiceFeedback(null);
-        }, 2000);
-
-        return;
-      } else {
-        // Too long for simple parsing, use AI
-        await parseWithAI(text);
-        return;
-      }
-    }
-    
-    // ============ AUFGABE ERLEDIGEN ============
-    if (lower.match(/^(erledigt|fertig|done|abhaken|check)\s*/i) || lower.match(/ist\s*(erledigt|fertig|done)$/i) ||
-        lower.match(/^(aufgabe|todo|nummer|task|#)\s*\d+\s*(erledigt|fertig|done|abhaken)/i)) {
-      const searchText = text
-        .replace(/^(erledigt|fertig|done|abhaken|check)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo)?\s*[:\s]?\s*/i, '')
-        .replace(/\s*(ist\s*)?(erledigt|fertig|done)$/i, '')
-        .replace(/\s*(bitte|mal|doch)\s*/gi, ' ')
-        .trim();
-      
-      if (searchText) {
-        const { num } = extractTaskNumber(searchText);
-        const found = num ? findTodoByNumber(num) : findTodoByText(searchText);
-        if (found) {
-          handleToggleComplete(found.id);
-          setVoiceFeedback(`✓ #${num || '?'} "${found.title}" als erledigt markiert`);
-        } else {
-          setVoiceFeedback(`✗ Aufgabe "${searchText}" nicht gefunden`);
-        }
-      } else {
-        const openTodo = todos.find(t => !t.completed);
-        if (openTodo) {
-          handleToggleComplete(openTodo.id);
-          setVoiceFeedback(`✓ "${openTodo.title}" als erledigt markiert`);
-        }
-      }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
-    }
-    
-    // ============ STATUS ÄNDERN ============
-    if (lower.match(/(status|setze|ändere).*(auf|zu)\s*(offen|bearbeitung|rückmeldung|erledigt)/i) ||
-        lower.match(/(starte|beginne|warte auf)/i) ||
-        lower.match(/^(aufgabe|todo|nummer|task|#)\s*\d+\s*(status|auf|offen|bearbeitung|rückmeldung|erledigt)/i)) {
-      const newStatus = parseStatus(lower);
-      const { num } = extractTaskNumber(lower);
-      
-      if (newStatus) {
-        let found: Todo | undefined;
-        if (num) {
-          found = findTodoByNumber(num);
-        } else {
-          const words = lower.split(' ').filter(w => w.length > 3 && 
-            !['status', 'setze', 'ändere', 'bitte', 'auf', 'offen', 'bearbeitung', 'rückmeldung', 'erledigt', 'starte', 'beginne', 'warte'].includes(w));
-          found = words.length > 0 ? findTodoByText(words.join(' ')) : todos.find(t => !t.completed && t.status !== newStatus);
-        }
-        
-        if (found) {
-          handleStatusChange(found.id, newStatus);
-          setVoiceFeedback(`✓ "${found.title}" → ${newStatus}`);
-        } else {
-          setVoiceFeedback(`✗ Aufgabe nicht gefunden`);
-        }
-      }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
-    }
-    
-    // ============ PRIORITÄT ÄNDERN ============
-    if (lower.match(/(priorität|prio).*(auf|zu|ist)?\s*(kritisch|hoch|mittel|niedrig|minimal|p[1-5])/i) ||
-        lower.match(/^(kritisch|hoch|dringend|wichtig)\s*[:\s]/i) ||
-        lower.match(/^(aufgabe|todo|nummer|task|#)\s*\d+\s*(priorität|prio|kritisch|hoch|mittel|niedrig|minimal)/i)) {
-      const newPriority = parsePriority(lower);
-      const { num } = extractTaskNumber(lower);
-      
-      if (newPriority) {
-        let found: Todo | undefined;
-        if (num) {
-          found = findTodoByNumber(num);
-        } else {
-          const words = lower.split(' ').filter(w => w.length > 3 &&
-            !['priorität', 'prio', 'bitte', 'auf', 'zu', 'ist', 'kritisch', 'hoch', 'mittel', 'niedrig', 'minimal', 'dringend', 'wichtig'].includes(w));
-          found = words.length > 0 ? findTodoByText(words.join(' ')) : undefined;
-        }
-        
-        if (found) {
-          handlePriorityChange(found.id, newPriority);
-          setVoiceFeedback(`✓ "${found.title}" → Priorität ${newPriority}`);
-        } else {
-          setVoiceFeedback(`✗ Aufgabe nicht gefunden`);
-        }
-      }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
-    }
-    
-    // ============ PERSON ZUWEISEN ============
-    if (lower.match(/@(\w+)\s*(zu|hinzufügen|bei)/i) || lower.match(/(zu|bei|hinzufügen).*@(\w+)/i)) {
-      const personMatch = lower.match(/@(\w+)/i);
-      const person = personMatch ? personMatch[1] : null;
-      
-      if (person) {
-        const words = lower.split(' ').filter(w => w.length > 3 && !w.startsWith('@') &&
-          !['bitte', 'hinzufügen', 'zu', 'bei'].includes(w));
-        
-        if (words.length > 0) {
-          const found = findTodoByText(words.join(' '));
-          if (found) {
-            const updatedTodo = {
-              ...found,
-              persons: [...(found.persons || []), `@${person}`]
-            };
-            setTodos(prev => prev.map(t => t.id === found.id ? updatedTodo : t));
-            setVoiceFeedback(`✓ @${person} zu "${found.title}" hinzugefügt`);
-          }
-        }
-      }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
-    }
-    
-    // ============ NACH PERSON FILTERN ============
-    if (lower.match(/(zeige|filter|nur).*(von|für|mit|@)\s*(\w+)/i) || lower.match(/^@\w+$/i)) {
-      const personMatch = lower.match(/@(\w+)/i) || lower.match(/(von|für|mit)\s+(\w+)/i);
-      if (personMatch) {
-        const person = '@' + (personMatch[1] || personMatch[2]);
-        setPersonFilter(person);
-        setMeetingFilter(null);
-        setSearchQuery(person);
-        setShowSearch(true);
-        setVoiceFeedback(`🔍 Filter: Aufgaben mit ${person}`);
-      }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
-    }
-    
-    // ============ NACH MEETING FILTERN ============
-    if (lower.match(/(zeige|filter).*(meeting|#)\s*(\w+)/i) || lower.match(/^#[\w\s]+$/i)) {
-      const meetingMatch = lower.match(/#([\w\s]+)/i) || lower.match(/meeting\s+(\w+)/i);
-      if (meetingMatch) {
-        const meeting = '#' + meetingMatch[1].trim();
-        setMeetingFilter(meeting);
-        setPersonFilter(null);
-        setSearchQuery(meeting);
-        setShowSearch(true);
-        setVoiceFeedback(`🔍 Filter: Aufgaben für ${meeting}`);
-      }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
-    }
-    
-    // ============ NACH KATEGORIE FILTERN ============
-    // Check if any available category name is mentioned in the command
-    const mentionedCategory = allCategories.find(cat => 
-      lower.includes(cat.label.toLowerCase()) || lower.includes(cat.id.toLowerCase())
-    );
-    
-    if (mentionedCategory && lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die)?\s*(aufgaben|todos)?/i)) {
-      setSelectedCategories([mentionedCategory.id]);
-      setVoiceFeedback(`🔍 Filter: Kategorie "${mentionedCategory.label}"`);
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
-    }
-    
-    // ============ NACH STATUS FILTERN ============
-    if (lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die|mir|alle)?\s*(aufgaben|todos)?\s*(die)?\s*(offen|bearbeitung|rückmeldung|erledigt)/i) ||
-        lower.match(/^(offene|erledigte|wartende)\s*(aufgaben|todos)?$/i)) {
-      const status = parseStatus(lower);
-      if (status) {
-        if (status === 'Auf Rückmeldung') {
-          setSelectedStatusFilter('Rückmeldung');
-        } else if (status === 'In Bearbeitung') {
-          setSelectedStatusFilter('In Bearbeitung');
-        } else if (status === 'Offen') {
-          setSelectedStatusFilter('Offen');
-        }
-        setActiveStatFilter('status');
-        setVoiceFeedback(`🔍 Filter: Status "${status}"`);
-      }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
-    }
-    
-    // ============ NACH PRIORITÄT FILTERN ============
-    if (lower.match(/(zeige|filter|nur)\s*(bitte)?\s*(die|mir|alle)?\s*(aufgaben|todos)?\s*(mit)?\s*(kritisch|hoch|wichtig|dringend)/i) ||
-        lower.match(/^(kritische|wichtige|dringende)\s*(aufgaben|todos)?$/i)) {
-      const priority = parsePriority(lower);
-      if (priority === 1) {
-        setActiveStatFilter('critical');
-        setVoiceFeedback(`🔍 Filter: Kritische Aufgaben`);
-      } else if (priority === 2) {
-        setActiveStatFilter('high');
-        setVoiceFeedback(`🔍 Filter: Hohe Priorität`);
-      }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
-    }
-    
-    // ============ SUCHE ============
-    if (lower.match(/^(suche|such|finde|find|wo ist|wo sind)\s*(bitte)?\s*(nach)?\s*/i)) {
-      const query = text
-        .replace(/^(suche|such|finde|find|wo ist|wo sind)\s*(bitte)?\s*(nach)?\s*/i, '')
-        .trim();
-      if (query) {
-        setSearchQuery(query);
-        setShowSearch(true);
-        setVoiceFeedback(`🔍 Suche: "${query}"`);
-      }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
-    }
-    
-    // ============ FILTER ZURÜCKSETZEN ============
-    if (lower.match(/(alle aufgaben|alle todos|alles anzeigen|zeige alle|reset|zurücksetzen|filter löschen|filter zurück)/i)) {
-      setActiveStatFilter(null);
-      setPersonFilter(null);
-      setMeetingFilter(null);
-      setSearchQuery('');
-      setShowSearch(false);
-      // Select all available categories
-      setSelectedCategories(allCategories.map(c => c.id));
-      setVoiceFeedback(`✓ Alle Filter zurückgesetzt`);
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
-    }
-    
-    // ============ AUFGABE LÖSCHEN ============
-    if (lower.match(/^(lösche|entferne|delete|remove)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo|nummer|#)?\s*/i)) {
-      const searchText = text
-        .replace(/^(lösche|entferne|delete|remove)\s*(bitte)?\s*(die|das|den)?\s*(aufgabe|todo|nummer|#)?\s*/i, '')
-        .trim();
-      
-      if (searchText) {
-        const { num } = extractTaskNumber(searchText);
-        const found = num ? findTodoByNumber(num) : findTodoByText(searchText);
-        if (found) {
-          setTodos(prev => prev.filter(t => t.id !== found.id));
-          deleteTodoFromSupabase(found.id);
-          setVoiceFeedback(`✓ "${found.title}" gelöscht`);
-        } else {
-          setVoiceFeedback(`✗ Aufgabe "${searchText}" nicht gefunden`);
-        }
-      }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
-    }
-    
-    // ============ AUFGABEN VORLESEN ============
-    if (lower.match(/(lies|lese|vorlesen|sag|nenn|zeig)\s*(mir)?\s*(bitte)?\s*(mal)?\s*(die|alle|meine)?\s*(aufgaben|todos|to-dos|tasks)/i) ||
-        lower.match(/(was|welche)\s*(sind|habe ich|gibt es)\s*(für)?\s*(aufgaben|todos|to-dos)/i) ||
-        lower.match(/(lies|lese|vorlesen).*?(heute|hoch|kritisch|priorität|person|michael|sarah|lisa|thomas|anna)/i) ||
-        lower.match(/(aufgaben|todos).*(vorlesen|lesen|ansagen)/i)) {
-      
-      let tasksToRead = todos.filter(t => !t.completed);
-      let filterDescription = 'alle offenen Aufgaben';
-      
-      // Check for person filter in command
-      const personMatch = lower.match(/(von|für|zu|bei|mit)\s+@?(\w+)/i) || lower.match(/@(\w+)/i);
-      if (personMatch) {
-        const personName = personMatch[2] || personMatch[1];
-        tasksToRead = tasksToRead.filter(t => 
-          t.persons && t.persons.some(p => p.toLowerCase().includes(personName.toLowerCase()))
-        );
-        filterDescription = `Aufgaben für ${personName}`;
-      }
-      // Check for priority filter in command
-      else if (lower.includes('kritisch')) {
-        tasksToRead = tasksToRead.filter(t => t.priority === 1);
-        filterDescription = 'kritische Aufgaben';
-      } else if (lower.includes('hoch') || lower.includes('wichtig') || lower.includes('dringend') || lower.match(/priorität\s*hoch/i)) {
-        tasksToRead = tasksToRead.filter(t => t.priority === 2);
-        filterDescription = 'Aufgaben mit hoher Priorität';
-      } else if (lower.includes('heute')) {
-        tasksToRead = tasksToRead.filter(t => t.date === 'Heute');
-        filterDescription = 'heutige Aufgaben';
-      } else if (lower.includes('morgen')) {
-        tasksToRead = tasksToRead.filter(t => t.date === 'Morgen');
-        filterDescription = 'morgige Aufgaben';
-      } else if (lower.includes('diese woche') || lower.includes('woche')) {
-        tasksToRead = tasksToRead.filter(t => ['Heute', 'Morgen', 'Diese Woche'].includes(t.date));
-        filterDescription = 'Aufgaben dieser Woche';
-      } else if (lower.includes('offen')) {
-        tasksToRead = tasksToRead.filter(t => t.status === 'Offen');
-        filterDescription = 'offene Aufgaben';
-      } else if (lower.includes('rückmeldung') || lower.includes('wartend')) {
-        tasksToRead = tasksToRead.filter(t => t.status === 'Auf Rückmeldung');
-        filterDescription = 'Aufgaben auf Rückmeldung';
-      } else if (lower.includes('bearbeitung')) {
-        tasksToRead = tasksToRead.filter(t => t.status === 'In Bearbeitung');
-        filterDescription = 'Aufgaben in Bearbeitung';
-      }
-      
-      // Check for meeting filter
-      const meetingMatch = lower.match(/(meeting|termin)\s+#?(\w+)/i) || lower.match(/#(\w+)/i);
-      if (meetingMatch && !personMatch) {
-        const meetingName = meetingMatch[2] || meetingMatch[1];
-        tasksToRead = tasksToRead.filter(t => 
-          t.meetings && t.meetings.some(m => m.toLowerCase().includes(meetingName.toLowerCase()))
-        );
-        filterDescription = `Aufgaben für Meeting ${meetingName}`;
-      }
-      
-      // Helper function to speak text (with iOS fix)
-      const speakText = (text: string, onEnd?: () => void) => {
-        // Cancel any ongoing speech
-        window.speechSynthesis.cancel();
-        
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'de-DE';
-        utterance.rate = 0.9;
-        utterance.volume = 1;
-        
-        if (onEnd) {
-          utterance.onend = onEnd;
-          utterance.onerror = (e) => {
-            console.error('Speech error:', e);
-            onEnd(); // Call onEnd even on error
-          };
-        }
-        
-        // iOS Safari fix: need to trigger speech in a specific way
-        setTimeout(() => {
-          window.speechSynthesis.speak(utterance);
-          
-          // iOS fix: speechSynthesis can pause, so resume it
-          if (window.speechSynthesis.paused) {
-            window.speechSynthesis.resume();
-          }
-        }, 100);
-      };
-      
-      if (tasksToRead.length === 0) {
-        setVoiceFeedback(`ℹ️ Keine ${filterDescription} vorhanden`);
-        speakText(`Du hast keine ${filterDescription}.`, () => {
-          setTimeout(() => setShowVoiceModal(false), 1500);
-        });
-      } else {
-        // Sort by priority
-        tasksToRead.sort((a, b) => a.priority - b.priority);
-        
-        // Build speech text
-        const count = tasksToRead.length;
-        let speechText = `Du hast ${count} ${filterDescription}: `;
-        speechText += tasksToRead.slice(0, 5).map((t, i) => `${i + 1}. ${t.title}`).join('. ');
-        if (count > 5) {
-          speechText += `. Und ${count - 5} weitere.`;
-        }
-        
-        setVoiceFeedback(`🔊 Lese ${count} Aufgaben vor...`);
-        
-        speakText(speechText, () => {
-          setVoiceFeedback(`✓ ${count} Aufgaben vorgelesen`);
-          setTimeout(() => setShowVoiceModal(false), 1500);
-        });
-        return;
-      }
-      
-      setTimeout(() => setShowVoiceModal(false), 2000);
-      return;
-    }
-    
-    // ============ AUFGABE/TODO BEARBEITEN (per Nummer oder Name) ============
-    // Catches: "Aufgabe 3 Beschreibung ...", "Todo Einkaufen Priorität hoch", "bei Aufgabe 3 Datum morgen", etc.
-    const taskKeywordMatch = lower.match(/^(?:bei\s+|in\s+|an\s+|für\s+)?(?:aufgabe|todo|nummer|task|#)\s+(.+)/i);
-    if (taskKeywordMatch) {
-      const afterKeyword = taskKeywordMatch[1].trim();
-      
-      // Instruction keywords that signal where the task identifier ends
-      const instructionKeywords = /\b(beschreibung|notiz|details?|datum|fällig|deadline|termin|bis|aktionstyp|aktion|typ|priorität|prio|kritisch|hoch|mittel|niedrig|minimal|status|offen|bearbeitung|rückmeldung|starte|beginne|warte|person|meeting|titel|name|umbenennen|erledigt|fertig|done|abhaken|löschen|entfernen|delete|hinzufügen|ergänze|füge)\b/i;
-      
-      const keywordPos = afterKeyword.search(instructionKeywords);
-      
-      let found: Todo | undefined;
-      let instruction = '';
-      
-      if (keywordPos > 0) {
-        // "3 Priorität hoch" or "Einkaufen Priorität hoch"
-        const taskRef = afterKeyword.substring(0, keywordPos).trim();
-        instruction = afterKeyword.substring(keywordPos).trim();
-        const numOnly = taskRef.match(/^(\d+)$/);
-        found = numOnly ? findTodoByNumber(parseInt(numOnly[1])) : findTodoByText(taskRef);
-      } else if (afterKeyword.match(/^(\d+)\s*$/)) {
-        // Just "Aufgabe 3" without instruction — expand the task
-        const num = parseInt(afterKeyword);
-        found = findTodoByNumber(num);
-        if (found) {
-          handleToggleExpand(found.id);
-          setVoiceFeedback(`📋 #${num} "${found.title}" geöffnet`);
-          setTimeout(() => setShowVoiceModal(false), 2000);
-          return;
-        }
-      } else {
-        // No instruction keyword found — "Aufgabe 3 blabla" where blabla goes to AI
-        const numStart = afterKeyword.match(/^(\d+)\s+(.+)/);
-        if (numStart) {
-          found = findTodoByNumber(parseInt(numStart[1]));
-          instruction = numStart[2].trim();
-        }
-      }
-      
-      if (!found && instruction) {
-        setVoiceFeedback(`✗ Aufgabe nicht gefunden`);
-        setTimeout(() => setShowVoiceModal(false), 2000);
-        return;
-      }
-      
-      if (found && instruction) {
-        const instructionLower = instruction.toLowerCase();
-        let handled = false;
-        
-        // Beschreibung/Notiz hinzufügen
-        if (instructionLower.match(/^(beschreibung|notiz|details?|hinzufügen|ergänze|füge hinzu)/)) {
-          const desc = instruction
-            .replace(/^(beschreibung|notiz|details?)\s*(hinzufügen|setzen|ändern|auf|:)?\s*/i, '')
-            .replace(/^(hinzufügen|ergänze|füge hinzu)\s*(beschreibung|notiz|details?)?\s*(:|auf)?\s*/i, '')
-            .trim();
-          if (desc) {
-            const newDesc = found.description ? `${found.description}\n${desc}` : desc;
-            handleDescriptionChange(found.id, newDesc);
-            setVoiceFeedback(`✓ Beschreibung zu "${found.title}" hinzugefügt`);
-            handled = true;
-          }
-        }
-        
-        // Datum ändern
-        if (!handled && instructionLower.match(/^(datum|fällig|deadline|termin|bis)/)) {
-          const newDate = parseDate(instructionLower);
-          handleDateChange(found.id, newDate);
-          setVoiceFeedback(`✓ "${found.title}" → Fällig: ${newDate}`);
-          handled = true;
-        }
-        
-        // Aktionstyp ändern
-        if (!handled && instructionLower.match(/^(aktionstyp|aktion|typ)/)) {
-          const actionText = instruction.replace(/^(aktionstyp|aktion|typ)\s*(auf|:|\s)?\s*/i, '').trim();
-          const newAction = parseActionType(actionText) || actionText;
-          handleActionTypeChange(found.id, newAction);
-          setVoiceFeedback(`✓ "${found.title}" → Aktion: ${newAction}`);
-          handled = true;
-        }
-        
-        // Priorität ändern
-        if (!handled && instructionLower.match(/^(priorität|prio|kritisch|hoch|mittel|niedrig|minimal)/)) {
-          const newPriority = parsePriority(instructionLower);
-          if (newPriority) {
-            handlePriorityChange(found.id, newPriority);
-            setVoiceFeedback(`✓ "${found.title}" → Priorität ${newPriority}`);
-            handled = true;
-          }
-        }
-        
-        // Status ändern
-        if (!handled && instructionLower.match(/^(status|offen|bearbeitung|rückmeldung|erledigt|starte|beginne|warte)/)) {
-          const newStatus = parseStatus(instructionLower);
-          if (newStatus) {
-            handleStatusChange(found.id, newStatus);
-            setVoiceFeedback(`✓ "${found.title}" → ${newStatus}`);
-            handled = true;
-          }
-        }
-        
-        // Person hinzufügen
-        if (!handled && instructionLower.match(/^(person|@)/)) {
-          const personName = instruction.replace(/^(person|@)\s*/i, '').replace(/\s*(hinzufügen|zuweisen).*$/i, '').trim();
-          if (personName) {
-            const updatedTodo = { ...found, persons: [...(found.persons || []), personName] };
-            setTodos(prev => prev.map(t => t.id === found.id ? updatedTodo : t));
-            saveTodoToSupabase(updatedTodo);
-            setVoiceFeedback(`✓ ${personName} zu "${found.title}" hinzugefügt`);
-            handled = true;
-          }
-        }
-        
-        // Meeting hinzufügen
-        if (!handled && instructionLower.match(/^(meeting)/)) {
-          const meetingName = instruction.replace(/^meeting\s*/i, '').replace(/\s*(hinzufügen|zuweisen).*$/i, '').trim();
-          if (meetingName) {
-            const updatedTodo = { ...found, meetings: [...(found.meetings || []), meetingName] };
-            setTodos(prev => prev.map(t => t.id === found.id ? updatedTodo : t));
-            saveTodoToSupabase(updatedTodo);
-            setVoiceFeedback(`✓ Meeting ${meetingName} zu "${found.title}" hinzugefügt`);
-            handled = true;
-          }
-        }
-        
-        // Titel ändern
-        if (!handled && instructionLower.match(/^(titel|name|umbenennen)/)) {
-          const newTitle = instruction.replace(/^(titel|name|umbenennen)\s*(auf|zu|in|:)?\s*/i, '').trim();
-          if (newTitle) {
-            handleTitleChange(found.id, newTitle);
-            setVoiceFeedback(`✓ "${found.title}" umbenannt zu "${newTitle}"`);
-            handled = true;
-          }
-        }
-        
-        // Erledigt/Fertig
-        if (!handled && instructionLower.match(/^(erledigt|fertig|done|abhaken)/)) {
-          handleToggleComplete(found.id);
-          setVoiceFeedback(`✓ "${found.title}" als erledigt markiert`);
-          handled = true;
-        }
-        
-        // Löschen
-        if (!handled && instructionLower.match(/^(löschen|entfernen|delete)/)) {
-          setTodos(prev => prev.filter(t => t.id !== found.id));
-          deleteTodoFromSupabase(found.id);
-          setVoiceFeedback(`✓ "${found.title}" gelöscht`);
-          handled = true;
-        }
-        
-        // Nicht erkannt → an AI weitergeben mit Aufgaben-Kontext
-        if (!handled) {
-          const aiText = `Ändere die bestehende Aufgabe "${found.title}" (ID: ${found.id}): ${instruction}`;
-          await parseWithAI(aiText);
-          return;
-        }
-        
-        setTimeout(() => setShowVoiceModal(false), 2000);
-        return;
-      }
-    }
-    
-    // ============ FALLBACK: Use AI for anything else ============
-    if (lower.length > 5) {
-      await parseWithAI(text);
-      return;
-    }
-    
-    // Nichts erkannt
-    setVoiceFeedback(`❓ Konnte Befehl nicht verstehen: "${text}"`);
-    setTimeout(() => setShowVoiceModal(false), 3000);
-  };
-
-  // Keep ref in sync so speech recognition callback always uses latest version
-  handleVoiceCommandRef.current = handleVoiceCommand;
-
-  // ============================================
-  // END VOICE CONTROL
-  // ============================================
-
-  const theme = {
-    bg: darkMode ? colors.darkBg : '#F8F8FC',
-    text: darkMode ? '#f3f4f6' : '#1f2937',
-    textMuted: darkMode ? '#6B7280' : '#9ca3af',
-  };
-
-  // Responsive styles injected via style tag
-  const responsiveStyles = `
-    /* Pulse animation for voice button */
-    @keyframes pulse {
-      0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 107, 138, 0.7); }
-      50% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(255, 107, 138, 0); }
-      100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 107, 138, 0); }
-    }
-
-    /* Safe area for notch devices */
-    @supports (padding: env(safe-area-inset-bottom)) {
-      .mindflow-nav {
-        padding-bottom: calc(24px + env(safe-area-inset-bottom)) !important;
-      }
-      .mindflow-main {
-        padding-bottom: calc(100px + env(safe-area-inset-bottom)) !important;
-      }
-    }
-
-    /* Tablet breakpoint */
-    @media (min-width: 768px) {
-      .mindflow-container {
-        max-width: 700px !important;
-      }
-      .mindflow-stat-grid {
-        gap: 12px !important;
-      }
-      .mindflow-task-list {
-        gap: 16px !important;
-      }
-      .mindflow-header {
-        padding: 48px 32px 16px !important;
-      }
-      .mindflow-main-content {
-        padding: 0 32px !important;
-      }
-    }
-
-    /* Desktop breakpoint */
-    @media (min-width: 1024px) {
-      .mindflow-container {
-        max-width: 900px !important;
-      }
-      .mindflow-task-list {
-        display: grid !important;
-        grid-template-columns: repeat(2, 1fr) !important;
-        gap: 20px !important;
-      }
-      .mindflow-nav-inner {
-        max-width: 500px !important;
-        margin: 0 auto !important;
-      }
-      .mindflow-stat-grid {
-        gap: 16px !important;
-      }
-    }
-
-    /* Large desktop */
-    @media (min-width: 1280px) {
-      .mindflow-container {
-        max-width: 1100px !important;
-      }
-      .mindflow-header {
-        padding: 48px 48px 16px !important;
-      }
-      .mindflow-main-content {
-        padding: 0 48px !important;
-      }
-    }
-
-    /* Extra large desktop */
-    @media (min-width: 1536px) {
-      .mindflow-container {
-        max-width: 1300px !important;
-      }
-      .mindflow-task-list {
-        grid-template-columns: repeat(3, 1fr) !important;
-      }
-    }
-
-    /* Landscape mode adjustments */
-    @media (max-height: 500px) and (orientation: landscape) {
-      .mindflow-nav {
-        padding: 8px 20px 12px !important;
-      }
-      .mindflow-main {
-        padding-bottom: 80px !important;
-      }
-    }
-
-    /* Hover effects for desktop */
-    @media (hover: hover) {
-      .mindflow-task-card:hover {
-        transform: translateY(-2px);
-        transition: transform 0.2s ease;
-      }
-    }
-  `;
-
   return (
-    <>
-      <style>{responsiveStyles}</style>
-      {/* Safe area overlay for Dynamic Island - matches dark background */}
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 'env(safe-area-inset-top, 47px)',
-        background: darkMode ? colors.darkBg : '#F8F8FC',
-        zIndex: 100,
-      }} />
-      <div className="mindflow-main" style={{
-        minHeight: '100vh',
-        background: theme.bg,
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        position: 'relative',
-        overflow: 'hidden',
-        paddingBottom: '100px',
-      }}>
-        <div className="mindflow-container" style={{ maxWidth: '430px', margin: '0 auto' }}>
-      
-      {/* Loading Overlay */}
-      {dataLoading && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 9999,
-          backdropFilter: 'blur(4px)',
-        }}>
-          <div style={{
-            background: darkMode ? 'rgba(25, 28, 40, 0.95)' : 'rgba(255,255,255,0.95)',
-            padding: '24px 32px',
-            borderRadius: '16px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '12px',
-            boxShadow: '0 10px 40px rgba(0,0,0,0.3)',
-          }}>
-            <div style={{
-              width: '32px',
-              height: '32px',
-              border: `3px solid ${colors.mint}`,
-              borderTopColor: 'transparent',
-              borderRadius: '50%',
-              animation: 'spin 1s linear infinite',
-            }} />
-            <p style={{ color: theme.text, fontSize: '14px', margin: 0 }}>Daten werden geladen...</p>
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal bet-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-h">
+          <h2><span className="modal-icon"><IconPerson color="#6366f1" /></span>Beteiligte verwalten</h2>
+          <button onClick={onClose}>×</button>
+        </div>
+        <div className="modal-b">
+          <div className="bet-list">
+            <div 
+              className={`bet-item ${alleAktiv ? 'active' : ''}`}
+              onClick={() => onToggle(null)}
+            >
+              <div className="bet-icon all"><IconDashboard color="#6366f1" /></div>
+              <span>Alle Immobilien</span>
+              {alleAktiv && <span className="bet-check">✓</span>}
+            </div>
+            {beteiligte.map(b => {
+              const isActive = aktiveBeteiligte.includes(b.id);
+              return (
+                <div 
+                  key={b.id} 
+                  className={`bet-item ${isActive ? 'active' : ''}`}
+                  onClick={() => onToggle(b.id)}
+                >
+                  <div className="bet-icon" style={{ borderColor: b.farbe }}><IconPerson color={b.farbe} /></div>
+                  <span>{b.name}</span>
+                  {isActive && <span className="bet-check">✓</span>}
+                  <button className="bet-del" onClick={(e) => { e.stopPropagation(); onDelete(b.id); }} title="Löschen">×</button>
+                </div>
+              );
+            })}
+          </div>
+          
+          <div className="bet-add">
+            <input 
+              type="text" 
+              value={newName} 
+              onChange={e => setNewName(e.target.value)}
+              placeholder="Name des Beteiligten..."
+              onKeyDown={e => e.key === 'Enter' && handleAdd()}
+            />
+            <button onClick={handleAdd} disabled={!newName.trim()}>
+              <span className="btn-icon-sm"><IconCheck color="#fff" /></span>Hinzufügen
+            </button>
           </div>
         </div>
-      )}
-      
-      <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
-
-      {/* Background Glows */}
-      <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
-        <div style={{
-          position: 'absolute',
-          top: '-128px',
-          right: '-128px',
-          width: '400px',
-          height: '400px',
-          borderRadius: '50%',
-          background: colors.mint,
-          opacity: darkMode ? 0.12 : 0.20,
-          filter: 'blur(100px)',
-        }} />
-        <div style={{
-          position: 'absolute',
-          top: '33%',
-          left: '-96px',
-          width: '350px',
-          height: '350px',
-          borderRadius: '50%',
-          background: colors.purple,
-          opacity: darkMode ? 0.10 : 0.18,
-          filter: 'blur(100px)',
-        }} />
-        <div style={{
-          position: 'absolute',
-          bottom: '192px',
-          right: '-80px',
-          width: '300px',
-          height: '300px',
-          borderRadius: '50%',
-          background: colors.coral,
-          opacity: darkMode ? 0.08 : 0.15,
-          filter: 'blur(100px)',
-        }} />
-        <div style={{
-          position: 'absolute',
-          bottom: 0,
-          left: '25%',
-          width: '350px',
-          height: '350px',
-          borderRadius: '50%',
-          background: colors.skyBlue,
-          opacity: darkMode ? 0.08 : 0.15,
-          filter: 'blur(100px)',
-        }} />
       </div>
+    </div>
+  );
+};
 
-      {/* Header */}
-      <header className="mindflow-header" style={{ position: 'relative', zIndex: 10, padding: '48px 20px 16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <div>
-            <p style={{ fontSize: '14px', color: theme.textMuted, margin: 0 }} suppressHydrationWarning>
-              {!mounted ? 'Willkommen!' : (() => {
-                const hour = new Date().getHours();
-                if (hour >= 5 && hour < 12) return 'Guten Morgen!';
-                if (hour >= 12 && hour < 18) return 'Guten Tag!';
-                if (hour >= 18 && hour < 22) return 'Guten Abend!';
-                return 'Gute Nacht!';
-              })()}
-            </p>
-            <button 
-              onClick={resetToHome}
-              style={{ 
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-              }}
-            >
-              <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: theme.text, margin: '4px 0 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                MindFlow
-                <svg width="24" height="24" viewBox="0 0 48 48" fill="none" style={{ marginTop: '-2px' }}>
-                  <path d="M24 6L24 6C24 6 36 18 36 28C36 34.627 30.627 40 24 40C17.373 40 12 34.627 12 28C12 18 24 6 24 6Z" stroke={colors.mint} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  <path d="M20 28C20 30.209 21.791 32 24 32" stroke={colors.mint} strokeWidth="2" strokeLinecap="round"/>
-                </svg>
-              </h1>
-            </button>
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            {/* Lupe / Search */}
-            <button 
-              onClick={() => setShowSearch(!showSearch)}
-              style={{
-                width: '48px',
-                height: '48px',
-                borderRadius: '16px',
-                border: `1px solid ${showSearch ? colors.mint : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)')}`,
-                background: showSearch 
-                  ? (darkMode ? `${colors.mint}20` : `${colors.mint}30`)
-                  : (darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255,255,255,0.5)'),
-                backdropFilter: 'blur(24px)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                color: showSearch ? colors.mint : theme.textMuted,
-              }}>
-              {Icons.search}
-            </button>
-            {/* Dark Mode Toggle */}
-            <button 
-              onClick={() => setDarkMode(!darkMode)}
-              style={{
-                width: '48px',
-                height: '48px',
-                borderRadius: '16px',
-                border: `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)'}`,
-                background: darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255,255,255,0.5)',
-                backdropFilter: 'blur(24px)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                color: darkMode ? '#facc15' : theme.textMuted,
-              }}
-            >
-              {darkMode ? Icons.moon : Icons.sun}
-            </button>
-            {/* Profile / Login Button */}
-            <div style={{ position: 'relative' }} data-profile-dropdown>
-              <button 
-                onClick={() => {
-                  if (user) {
-                    setShowProfileDropdown(!showProfileDropdown);
-                  } else {
-                    setShowAuthModal(true);
-                    setAuthMode('login');
-                  }
-                }}
-                style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '16px',
-                  border: `1px solid ${user ? colors.mint : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)')}`,
-                  background: user 
-                    ? (darkMode ? `${colors.mint}20` : `${colors.mint}30`)
-                    : (darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255,255,255,0.5)'),
-                  backdropFilter: 'blur(24px)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  color: user ? colors.mint : theme.textMuted,
-                }}
-              >
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
-              </button>
+const DataModal = ({ items, onClose }) => {
+  const [importText, setImportText] = useState('');
+  const [importError, setImportError] = useState('');
+  const [importSuccess, setImportSuccess] = useState('');
+  const [showImport, setShowImport] = useState(false);
+  
+  const handleExport = () => {
+    const data = {
+      version: '1.0',
+      exportDate: new Date().toISOString(),
+      app: 'ImmoHub',
+      immobilien: items
+    };
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ImmoHub-Backup_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setImportText(event.target.result);
+      setImportError('');
+    };
+    reader.readAsText(file);
+  };
+  
+  const handleImport = () => {
+    try {
+      const data = JSON.parse(importText);
+      
+      if (!data.immobilien || !Array.isArray(data.immobilien)) {
+        throw new Error('Ungültiges Dateiformat');
+      }
+      
+      // Daten in localStorage speichern
+      localStorage.setItem('immoData', JSON.stringify(data.immobilien));
+      setImportSuccess(`✓ ${data.immobilien.length} Immobilie(n) importiert! Seite wird neu geladen...`);
+      setImportError('');
+      
+      // Seite neu laden um Daten zu übernehmen
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+      
+    } catch (err) {
+      setImportError('Fehler beim Import: ' + err.message);
+      setImportSuccess('');
+    }
+  };
+  
+  return (
+    <div className="modal-bg data-modal-bg" onClick={onClose}>
+      <div className="modal data-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-h">
+          <h2><span className="modal-icon"><IconSave color="#6366f1" /></span>Daten verwalten</h2>
+          <button onClick={onClose}>×</button>
+        </div>
+        <div className="modal-b">
+          {!showImport ? (
+            <>
+              <div className="data-section">
+                <h3><span className="section-icon"><IconDownload color="#10b981" /></span>Daten exportieren</h3>
+                <p>Speichere alle Immobilien als JSON-Datei. Diese kannst du als Backup in deinem iCloud-Ordner ablegen.</p>
+                <button className="btn-export-data" onClick={handleExport}>
+                  <span className="btn-icon-sm"><IconDownload color="#fff" /></span>Backup herunterladen ({items.length} Immobilie{items.length !== 1 ? 'n' : ''})
+                </button>
+              </div>
               
-              {/* Profile Dropdown */}
-              {showProfileDropdown && user && (
-                <div style={{
-                  position: 'absolute',
-                  top: '56px',
-                  right: 0,
-                  minWidth: '220px',
-                  padding: '12px',
-                  borderRadius: '16px',
-                  background: darkMode ? 'rgba(25, 28, 40, 0.95)' : 'rgba(255,255,255,0.95)',
-                  border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-                  backdropFilter: 'blur(24px)',
-                  boxShadow: '0 10px 40px rgba(0,0,0,0.3)',
-                  zIndex: 100,
-                }}>
-                  <div style={{ 
-                    padding: '8px 12px', 
-                    marginBottom: '8px',
-                    borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-                  }}>
-                    <p style={{ 
-                      fontSize: '12px', 
-                      color: theme.textMuted, 
-                      margin: '0 0 4px 0' 
-                    }}>Angemeldet als</p>
-                    <p style={{ 
-                      fontSize: '14px', 
-                      color: theme.text, 
-                      margin: 0,
-                      fontWeight: '500',
-                      wordBreak: 'break-all',
-                    }}>{user.email}</p>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      handleLogout();
-                    }}
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '10px',
-                      border: 'none',
-                      background: darkMode ? 'rgba(239, 68, 68, 0.2)' : 'rgba(239, 68, 68, 0.1)',
-                      color: '#ef4444',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                    }}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                      <polyline points="16 17 21 12 16 7" />
-                      <line x1="21" y1="12" x2="9" y2="12" />
-                    </svg>
-                    Abmelden
-                  </button>
+              <div className="data-divider"><span>oder</span></div>
+              
+              <div className="data-section">
+                <h3><span className="section-icon"><IconUpload color="#3b82f6" /></span>Daten importieren</h3>
+                <p>Lade ein zuvor erstelltes Backup wieder ein. <strong>Achtung:</strong> Dies überschreibt alle aktuellen Daten!</p>
+                <button className="btn-import-data" onClick={() => setShowImport(true)}>
+                  <span className="btn-icon-sm"><IconUpload color="#fff" /></span>Backup laden
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="data-section">
+              <h3><span className="section-icon"><IconUpload color="#3b82f6" /></span>Backup-Datei auswählen</h3>
+              
+              <input 
+                type="file" 
+                accept=".json"
+                onChange={handleFileSelect}
+                className="file-input-json"
+              />
+              
+              {importText && (
+                <div className="import-preview">
+                  <span>✓ Datei geladen</span>
+                  <small>{(importText.length / 1024).toFixed(1)} KB</small>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-
-        {/* Search Bar */}
-        {showSearch && (
-          <div style={{ marginBottom: '16px' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '12px 16px',
-              borderRadius: '16px',
-              background: darkMode ? 'rgba(25, 28, 40, 0.8)' : 'rgba(255,255,255,0.7)',
-              border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-              backdropFilter: 'blur(24px)',
-            }}>
-              <span style={{ color: colors.mint }}>{Icons.search}</span>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Aufgaben durchsuchen..."
-                autoFocus
-                style={{
-                  flex: 1,
-                  background: 'transparent',
-                  border: 'none',
-                  outline: 'none',
-                  fontSize: '16px',
-                  color: darkMode ? '#f3f4f6' : '#1f2937',
-                }}
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: theme.textMuted,
-                    padding: '4px',
-                  }}
-                >
-                  ✕
+              
+              {importError && <div className="import-error">{importError}</div>}
+              {importSuccess && <div className="import-success">{importSuccess}</div>}
+              
+              <div className="import-actions-data">
+                <button className="btn-back" onClick={() => { setShowImport(false); setImportText(''); setImportError(''); }}><span className="btn-icon-sm"><IconArrowLeft color="#fafafa" /></span>Zurück</button>
+                <button className="btn-do-import" onClick={handleImport} disabled={!importText}>
+                  <span className="btn-icon-sm"><IconWarning color="#000" /></span>Importieren
                 </button>
-              )}
+              </div>
             </div>
-            {searchQuery && (
-              <p style={{ 
-                fontSize: '12px', 
-                color: theme.textMuted, 
-                marginTop: '8px',
-                marginLeft: '4px',
-              }}>
-                {getFilteredTasks().length} Ergebnis{getFilteredTasks().length !== 1 ? 'se' : ''} für "{searchQuery}"
-              </p>
-            )}
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Einzelne importierte Immobilie Karte
+const ParsedImmoCard = ({ immo, idx, total, formatFieldName, formatValue, handleImport, buttonLabel }) => {
+  const [showMore, setShowMore] = useState(false);
+  
+  // Darlehen separat behandeln
+  const darlehenCount = immo.darlehen?.length || 0;
+  
+  const allFields = Object.entries(immo)
+    .filter(([k]) => !['gefundeneFelder', 'zuPruefen', 'quellenDokument', 'dokumentTyp', 'lfdNr', 'darlehen'].includes(k) && immo[k] !== undefined && immo[k] !== null && immo[k] !== '' && !Array.isArray(immo[k]));
+  const mainFields = allFields.slice(0, 8);
+  const extraFields = allFields.slice(8);
+  
+  return (
+    <div className="parsed-immo">
+      <div className="parsed-immo-header">
+        <span className="parsed-icon"><IconObjekt color="#6366f1" /></span>
+        <div>
+          <strong>{immo.name || immo.adresse || `Immobilie ${immo.lfdNr || idx + 1}`}</strong>
+          <small>
+            {immo.zuPruefen?.length || 0} Felder
+            {darlehenCount > 0 && <span className="parsed-darlehen-badge"> · {darlehenCount} Darlehen</span>}
+            {total > 1 && <span className="parsed-immo-idx"> · #{idx + 1} von {total}</span>}
+          </small>
+        </div>
+        {immo.quellenDokument && (
+          <span className="parsed-source-badge">{immo.quellenDokument}</span>
+        )}
+      </div>
+      <div className="parsed-fields">
+        {mainFields.map(([key, value]) => (
+          <div key={key} className="pf">
+            <span>{formatFieldName(key)}</span>
+            <span>{formatValue(key, value)}</span>
+          </div>
+        ))}
+        
+        {/* Darlehen anzeigen */}
+        {darlehenCount > 0 && (
+          <div className="pf pf-darlehen">
+            <span><IconFinanz color="#3b82f6" /> Darlehen</span>
+            <span>{darlehenCount}× ({immo.darlehen.reduce((s, d) => s + (d.betrag || 0), 0).toLocaleString('de-DE')} €)</span>
           </div>
         )}
-
-        {/* Category Pills - Collapsible on scroll */}
-        <div data-categories-panel style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
-          {/* Show only selected categories when scrolled, all when expanded */}
-          {(isScrolled && !showAllCategories 
-            ? allCategories.filter(c => selectedCategories.includes(c.id))
-            : (showAllCategories ? allCategories : allCategories.filter(c => selectedCategories.includes(c.id)))
-          ).map(cat => {
-            const isCreate = createCategoryId === cat.id;
-            const isFilter = selectedCategories.includes(cat.id);
-            let pressTimer: NodeJS.Timeout | null = null;
-
-            return (
-              <button
-                key={cat.id}
-                onClick={() => {
-                  const isCurrentlyActive = selectedCategories.includes(cat.id);
-                  // Toggle: Kategorie ein-/ausblenden
-                  toggleFilterCategory(cat.id);
-                  // Wenn gerade aktiviert � als Create-Kategorie setzen
-                  if (!isCurrentlyActive) {
-                    selectCreateCategory(cat.id);
-                  } else {
-                    // Wenn deaktiviert � n�chste verbleibende aktive als Create setzen
-                    const remaining = selectedCategories.filter(id => id !== cat.id);
-                    if (remaining.length > 0) {
-                      selectCreateCategory(remaining[remaining.length - 1]);
-                    }
-                  }
-                }}
-                onMouseDown={() => {
-                  pressTimer = setTimeout(() => {
-                    deleteCategory(cat.id, cat.label);
-                  }, 600);
-                }}
-                onMouseUp={() => clearTimeout(pressTimer)}
-                onMouseLeave={() => clearTimeout(pressTimer)}
-                onTouchStart={() => {
-                  pressTimer = setTimeout(() => {
-                    deleteCategory(cat.id, cat.label);
-                  }, 600);
-                }}
-                onTouchEnd={() => clearTimeout(pressTimer)}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '9999px',
-                  fontSize: '14px',
-                  fontWeight: isFilter ? '700' : '500',
-                  background: isFilter
-                    ? cat.color
-                    : (darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255,255,255,0.5)'),
-                  color: isFilter
-                    ? '#000'
-                    : (darkMode ? `${cat.color}80` : `${cat.color}90`),
-                  border: isCreate
-                    ? `2px solid ${darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.3)'}`
-                    : isFilter
-                      ? 'none'
-                      : `1px solid ${cat.color}40`,
-                  cursor: 'pointer',
-                  boxShadow: isCreate ? `0 0 0 2px ${cat.color}60` : 'none',
-                  opacity: isFilter ? 1 : 0.6,
-                  transition: 'all 0.2s',
-                  userSelect: 'none',
-                }}
-              >
-                {cat.label}
-              </button>
-            );
-          })}
-          
-          {/* + Weitere Button */}
-          <button 
-            onClick={() => setShowAllCategories(!showAllCategories)}
-            style={{
-              padding: '6px 12px',
-              borderRadius: '9999px',
-              fontSize: '14px',
-              fontWeight: '500',
-              background: showAllCategories ? '#e5e7eb' : (darkMode ? 'rgba(25, 28, 40, 0.7)' : 'rgba(255,255,255,0.5)'),
-              color: darkMode ? '#6B7280' : '#9ca3af',
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            + Weitere
+        
+        {extraFields.length > 0 && !showMore && (
+          <button className="pf-more-btn" onClick={() => setShowMore(true)}>
+            + {extraFields.length} weitere Felder anzeigen
           </button>
-
-          {/* Add new category button - only when expanded */}
-          {showAllCategories && !addingCategory && (
-            <button
-              onClick={() => setAddingCategory(true)}
-              style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '9999px',
-                background: darkMode ? 'rgba(70, 240, 210, 0.15)' : 'rgba(70, 240, 210, 0.3)',
-                color: colors.mint,
-                border: `2px dashed ${darkMode ? 'rgba(70, 240, 210, 0.4)' : colors.mint}`,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '18px',
-              }}
-            >
-              +
-            </button>
-          )}
-
-          {/* New category input */}
-          {showAllCategories && addingCategory && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input
-                type="text"
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && addCategory()}
-                placeholder="Name..."
-                autoFocus
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '9999px',
-                  fontSize: '14px',
-                  border: `2px solid ${newCategoryColor}`,
-                  background: darkMode ? 'rgba(25, 28, 40, 0.9)' : 'white',
-                  color: darkMode ? '#f3f4f6' : '#1f2937',
-                  width: '100px',
-                  outline: 'none',
-                }}
-              />
-              {/* Color picker button */}
-              <button
-                onClick={() => setShowColorPicker(!showColorPicker)}
-                style={{
-                  width: '28px',
-                  height: '28px',
-                  borderRadius: '50%',
-                  background: newCategoryColor,
-                  border: '2px solid white',
-                  cursor: 'pointer',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                }}
-              />
-              {/* Confirm */}
-              <button
-                onClick={addCategory}
-                style={{
-                  width: '28px',
-                  height: '28px',
-                  borderRadius: '50%',
-                  background: colors.mint,
-                  color: '#1f2937',
-                  border: 'none',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '14px',
-                }}
-              >
-                ✓
-              </button>
-              {/* Cancel */}
-              <button
-                onClick={() => { setAddingCategory(false); setNewCategoryName(''); setShowColorPicker(false); }}
-                style={{
-                  width: '28px',
-                  height: '28px',
-                  borderRadius: '50%',
-                  background: darkMode ? 'rgba(60,60,90,0.5)' : '#e5e7eb',
-                  color: darkMode ? '#9ca3af' : '#6b7280',
-                  border: 'none',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '14px',
-                }}
-              >
-                ✕
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Color picker dropdown */}
-        {showAllCategories && addingCategory && showColorPicker && (
-          <div style={{
-            display: 'flex',
-            gap: '8px',
-            marginBottom: '16px',
-            marginTop: '-12px',
-            padding: '12px',
-            borderRadius: '16px',
-            background: darkMode ? 'rgba(25, 28, 40, 0.9)' : 'white',
-            border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-            flexWrap: 'wrap',
-          }}>
-            {colorOptions.map((color, i) => (
-              <button
-                key={i}
-                onClick={() => { setNewCategoryColor(color); setShowColorPicker(false); }}
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  background: color,
-                  border: newCategoryColor === color ? '3px solid white' : '2px solid transparent',
-                  cursor: 'pointer',
-                  boxShadow: newCategoryColor === color ? '0 0 0 2px ' + color : 'none',
-                }}
-              />
+        )}
+        {showMore && extraFields.map(([key, value]) => (
+          <div key={key} className="pf pf-extra">
+            <span>{formatFieldName(key)}</span>
+            <span>{formatValue(key, value)}</span>
+          </div>
+        ))}
+        {showMore && darlehenCount > 0 && (
+          <div className="pf-darlehen-details">
+            {immo.darlehen.map((d, i) => (
+              <div key={i} className="pf-darlehen-item">
+                <strong>{d.name || d.institut || `Darlehen ${i + 1}`}</strong>
+                <span>{d.betrag?.toLocaleString('de-DE')} € · {d.zinssatz}% · {d.tilgung}% Tilg.</span>
+              </div>
             ))}
           </div>
         )}
+        {showMore && (
+          <button className="pf-more-btn" onClick={() => setShowMore(false)}>
+            − Weniger anzeigen
+          </button>
+        )}
+      </div>
+      <button className="btn-import-immo" onClick={() => handleImport(immo)}>
+        <><span className="btn-icon-sm"><IconCheck color="#fff" /></span>{buttonLabel || 'Importieren & Prüfen'}</>
+      </button>
+    </div>
+  );
+};
 
-        {/* Stats Cards */}
-        <div className="mindflow-stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
-          <StatCard 
-            value={getTaskCountForDateFilter(selectedDateFilter)} 
-            label={selectedDateFilter} 
-            color={colors.mint} 
-            darkMode={darkMode} 
-            active={activeStatFilter === 'today'}
-            hasUnread={unreadCounts.today > 0}
-            onClick={() => setActiveStatFilter(activeStatFilter === 'today' ? null : 'today')}
-            onLongPress={() => { setStatusFilterDropdown(false); setDateFilterDropdown(!dateFilterDropdown); }}
-            showDropdown={dateFilterDropdown}
-            dropdownOptions={dateFilterOptions}
-            onSelectOption={(option) => {
-              setSelectedDateFilter(option);
-              setDateFilterDropdown(false);
-            }}
-          />
-          <StatCard 
-            value={getTaskCountForPriority(1)} 
-            label="Kritisch" 
-            color={colors.coral} 
-            darkMode={darkMode} 
-            active={activeStatFilter === 'critical'}
-            hasUnread={unreadCounts.critical > 0} 
-            onClick={() => setActiveStatFilter(activeStatFilter === 'critical' ? null : 'critical')}
-          />
-          <StatCard 
-            value={getTaskCountForPriority(2)} 
-            label="Hoch" 
-            color={colors.orange} 
-            darkMode={darkMode} 
-            active={activeStatFilter === 'high'}
-            hasUnread={unreadCounts.high > 0} 
-            onClick={() => setActiveStatFilter(activeStatFilter === 'high' ? null : 'high')}
-          />
-          <StatCard 
-            value={getTaskCountForStatusFilter(selectedStatusFilter)} 
-            label={selectedStatusFilter} 
-            color={colors.purple} 
-            darkMode={darkMode} 
-            active={activeStatFilter === 'status'}
-            hasUnread={unreadCounts.waiting > 0}
-            onClick={() => setActiveStatFilter(activeStatFilter === 'status' ? null : 'status')}
-            onLongPress={() => { setDateFilterDropdown(false); setStatusFilterDropdown(!statusFilterDropdown); }}
-            showDropdown={statusFilterDropdown}
-            dropdownOptions={statusFilterOptions}
-            onSelectOption={(option) => {
-              setSelectedStatusFilter(option);
-              setStatusFilterDropdown(false);
-            }}
-          />
+// Import Modal mit echter KI-Dokumentenanalyse
+const IMMO_DOC_PROMPT = `Du bist ein Experte für die Analyse von Immobiliendokumenten. 
+Analysiere das Dokument und extrahiere alle relevanten Daten.
+
+SCHRITT 1: Erkenne den Dokumenttyp:
+- "kaufvertrag" - Kaufvertrag, Exposé (meist 1 Immobilie)
+- "mietvertrag" - Mietvertrag, Mieterhöhung (meist 1 Immobilie)
+- "darlehen_liste" - Liste/Übersicht von Darlehen/Finanzierungen (MEHRERE Darlehen!)
+- "darlehen" - Einzelner Darlehensvertrag, Finanzierungsbestätigung
+- "nebenkostenabrechnung" - Nebenkostenabrechnung, Hausgeldabrechnung
+- "grundbuch" - Grundbuchauszug, Flurkarte
+- "auflistung" - Vermögensübersicht, Aufstellung mehrerer Immobilien, Portfolio-Übersicht (MEHRERE Immobilien!)
+- "sonstiges" - Andere Dokumente
+
+SCHRITT 2: Extrahiere die relevanten Felder je nach Dokumenttyp.
+
+WICHTIG - LAUFENDE NUMMERN & ZUORDNUNG:
+- Wenn Einträge nummeriert sind (1, 2, 3... oder Nr. 1, Nr. 2...), dann erfasse die "lfdNr" (laufende Nummer)!
+- Diese Nummer dient zur Zuordnung zwischen verschiedenen Dokumenten (z.B. Immobilie 1 gehört zu Darlehen 1)
+- Bei Darlehen: Erfasse auch welcher Immobilie es zugeordnet ist (über "lfdNr" oder "immobilienNr")
+
+WICHTIG - DARLEHEN:
+- Darlehen werden im Array "darlehen" erfasst (NICHT als einzelne Felder!)
+- Jedes Darlehen hat: name, institut, betrag, zinssatz, tilgung, monatsrate, laufzeit, zinsbindungJahre, etc.
+- Bei einer Darlehensübersicht: JEDES Darlehen als separates Objekt im Array!
+
+WICHTIG - WERBUNGSKOSTEN:
+- Werbungskosten sind Kosten die steuerlich absetzbar sind (z.B. Hausgeld, Verwaltungskosten, Reparaturen, Versicherungen)
+- Erfasse sie im Array "werbungskosten" mit Jahr, Bezeichnung und Betrag
+- Beispiele: Hausgeld, Verwaltungskosten, Instandhaltungsrücklage, Versicherungen, Kontoführung, Fahrtkosten
+
+Antworte NUR mit einem validen JSON-Objekt. Keine Erklärungen, kein Markdown.
+
+Format:
+{
+  "dokumentTyp": "kaufvertrag|mietvertrag|darlehen|darlehen_liste|nebenkostenabrechnung|grundbuch|auflistung|sonstiges",
+  "dokumentBeschreibung": "Kurze Beschreibung was für ein Dokument es ist",
+  "immobilien": [{
+    "lfdNr": 1,
+    "name": "Bezeichnung/Name der Immobilie",
+    "eigentuemer": "Name des Eigentümers",
+    "mieterName": "Name des Mieters",
+    "adresse": "Vollständige Adresse",
+    "wohnungsNr": "Wohnungsnummer",
+    "etage": "Etage",
+    "typ": "etw|mfh|efh|gewerbe|grundstueck",
+    "objektstatus": "neubau|bestand",
+    "nutzung": "vermietet|eigengenutzt",
+    "bundesland": "hessen",
+    "kaufdatum": "YYYY-MM-DD",
+    "baujahr": 2020,
+    "verkehrswert": 280000,
+    "kaufpreisImmobilie": 250000,
+    "kaufpreisStellplatz": 15000,
+    "wohnflaeche": 85.5,
+    "mieteProQm": 12.50,
+    "kaltmiete": 1000,
+    "nebenkostenVorauszahlung": 200,
+    "mieteSonderausstattung": 50,
+    "mietbeginn": "YYYY-MM-DD",
+    "mietende": "YYYY-MM-DD",
+    "mieteStellplatz": 50,
+    "kaution": 3000,
+    "anzahlStellplaetze": 1,
+    "maklerProvision": 0,
+    "grunderwerbsteuer": 0,
+    "notarkosten": 0,
+    "eigenkapitalAnteil": 20,
+    "eigenkapitalBetrag": 50000,
+    "afaSatz": 3,
+    "grundstueckGroesse": 500,
+    "bodenrichtwert": 150,
+    "personenzahl": 2,
+    "eigentumsart": "weg",
+    "erbbaurecht": false,
+    "erbbauzins": 0,
+    "energietraeger": "Erdgas",
+    "energieausweisArt": "verbrauch",
+    "energiekennwert": 105.4,
+    "energieeffizienzklasse": "D",
+    "energieausweisGueltigBis": "YYYY-MM-DD",
+    "ausbaureserveFlaeche": 0,
+    "ausbaureserveBeschreibung": "",
+    "darlehen": [{
+      "name": "Hauptdarlehen",
+      "institut": "Sparkasse",
+      "kontonummer": "123456789",
+      "typ": "annuitaeten|tilgung|endfaellig|kfw|bauspar|privat",
+      "betrag": 200000,
+      "zinssatz": 3.5,
+      "effektivzins": 3.65,
+      "tilgung": 2,
+      "monatsrate": 916.67,
+      "sondertilgung": 5,
+      "abschluss": "YYYY-MM-DD",
+      "ersteRate": "YYYY-MM-DD",
+      "laufzeit": 30,
+      "zinsbindungJahre": 10,
+      "zinsbindungEnde": "YYYY-MM-DD",
+      "restschuld": 180000
+    }],
+    "werbungskosten": [{
+      "jahr": 2024,
+      "bez": "Hausgeld",
+      "betrag": 3600
+    }, {
+      "jahr": 2024,
+      "bez": "Verwaltungskosten",
+      "betrag": 300
+    }],
+    "gefundeneFelder": ["liste", "der", "extrahierten", "felder"]
+  }],
+  "darlehen_ohne_zuordnung": [{
+    "lfdNr": 1,
+    "immobilienNr": 1,
+    "name": "Darlehen für Immobilie 1",
+    "institut": "Bank XY",
+    "betrag": 200000,
+    "zinssatz": 3.5,
+    "tilgung": 2,
+    "monatsrate": 916.67,
+    "zinsbindungJahre": 10
+  }]
+}
+
+Wichtig:
+- Zahlen als Nummern, nicht als Strings
+- "lfdNr" und "immobilienNr" sind wichtig für die Zuordnung!
+- Bei Darlehen-Liste ohne direkte Immobilien-Infos: Nutze "darlehen_ohne_zuordnung" mit "immobilienNr" zur späteren Zuordnung
+- Bei Immobilien-Liste mit Finanzierungsinfos: Packe die Darlehen direkt ins "darlehen" Array der jeweiligen Immobilie
+- Bei MEHREREN Einträgen: JEDER als separates Objekt im jeweiligen Array!
+WICHTIG - ENERGIEAUSWEIS:
+- "energieausweisArt": "verbrauch" (Verbrauchsausweis: "Erfasster Energieverbrauch", "Energieverbrauchskennwert") oder "bedarf" (Bedarfsausweis: "Energiebedarf", "Endenergiebedarf")
+- "energiekennwert": der Endenergie-Wert in kWh/(m²·a) (NICHT der Primärenergiewert!). Beispiel: "Endenergieverbrauch 105,4 kWh/(m²·a)" -> 105.4
+- "energieeffizienzklasse": die Klasse A+/A/B/C/D/E/F/G (der markierte Buchstabe auf der Farbskala)
+- "energietraeger": z.B. Erdgas, Heizöl, Fernwärme, Wärmepumpe, Strom, Pellets (aus "Energieträger"/Heizung)
+- "energieausweisGueltigBis": falls ein Ausstellungsdatum genannt ist, plus 10 Jahre rechnen; falls "gültig bis" direkt genannt, dieses übernehmen
+
+WICHTIG - WEITERE FELDER:
+- "personenzahl": Anzahl der Personen im Haushalt/in der Wohnung, falls genannt
+- "eigentumsart": "gesamt" wenn es ein ungeteiltes MFH/Gesamteigentum ist (kein Teileigentum, ein Grundbuchblatt), sonst "weg" (Eigentumswohnung mit Teilungserklärung)
+- "erbbaurecht": true wenn das Grundstück im Erbbaurecht ist (Erbbauzins), sonst false; "erbbauzins": jährlicher Erbbauzins in EUR
+- "ausbaureserveFlaeche"/"ausbaureserveBeschreibung": Ausbaureserve/Entwicklungspotenzial (z.B. "DG-Ausbau ca. 146 qm möglich")
+- "gefundeneFelder" enthält die Namen aller extrahierten Felder`;
+
+const ImportModal = ({ onClose, onImport, existingImmo = null, existingEinheiten = [] }) => {
+  const [files, setFiles] = useState([]);
+  const [currentFileIndex, setCurrentFileIndex] = useState(0);
+  const [preview, setPreview] = useState(null);
+  const [base64Data, setBase64Data] = useState(null);
+  const [parsing, setParsing] = useState(false);
+  const [parsedData, setParsedData] = useState(null);
+  const [allParsedData, setAllParsedData] = useState([]);
+  const [error, setError] = useState(null);
+  const [mergeMode, setMergeMode] = useState(false);
+  const [mergeDecisions, setMergeDecisions] = useState({});
+  const [documentType, setDocumentType] = useState(null);
+  const [processingStatus, setProcessingStatus] = useState(null); // 'processing', 'done', null
+  const fileInputRef = React.useRef(null);
+
+  const addFiles = (newOnes) => {
+    if (!newOnes || newOnes.length === 0) return;
+    const wasEmpty = files.length === 0;
+    setFiles(prev => [...prev, ...newOnes]);
+    if (wasEmpty) {
+      setCurrentFileIndex(0);
+      setAllParsedData([]);
+      processFile(newOnes[0]);
+    }
+  };
+
+  const clearFiles = () => {
+    setFiles([]);
+    setCurrentFileIndex(0);
+    setAllParsedData([]);
+    setPreview(null);
+    setBase64Data(null);
+    setError(null);
+    setProcessingStatus(null);
+  };
+
+  const handleFileSelect = (e) => {
+    addFiles(Array.from(e.target.files));
+    e.target.value = '';
+  };
+
+  const processFile = async (selectedFile) => {
+    setError(null);
+    setParsedData(null);
+    setMergeMode(false);
+    setMergeDecisions({});
+    setDocumentType(null);
+    
+    try {
+      // Datei komprimieren/vorbereiten
+      const prepared = await prepareFileForUpload(selectedFile);
+      setBase64Data(prepared.base64);
+      
+      // Warnung bei großen Dateien anzeigen
+      if (prepared.warning) {
+        console.warn(prepared.warning);
+      }
+      
+      // Preview für Bilder
+      if (selectedFile.type.startsWith('image/')) {
+        setPreview('data:' + (prepared.mimeType || selectedFile.type) + ';base64,' + prepared.base64);
+      } else {
+        setPreview(null);
+      }
+      
+      // Info über Komprimierung (optional)
+      if (prepared.compressedSize && prepared.originalSize > prepared.compressedSize) {
+        console.log(`Datei komprimiert: ${(prepared.originalSize / 1024).toFixed(0)} KB → ${(prepared.compressedSize / 1024).toFixed(0)} KB`);
+      }
+    } catch (err) {
+      console.error('Fehler beim Verarbeiten der Datei:', err);
+      setError('Fehler beim Verarbeiten der Datei: ' + err.message);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    addFiles(Array.from(e.dataTransfer.files));
+  };
+
+  const currentFile = files[currentFileIndex];
+
+  const getMediaType = () => {
+    if (!currentFile) return null;
+    if (currentFile.type === 'application/pdf') return 'application/pdf';
+    if (currentFile.type === 'image/png') return 'image/png';
+    if (currentFile.type === 'image/jpeg') return 'image/jpeg';
+    if (currentFile.type === 'image/webp') return 'image/webp';
+    return currentFile.type;
+  };
+
+  const analyzeOne = async (filename, base64, mediaType) => {
+    const fullPrompt = IMMO_DOC_PROMPT + "\n\nAnalysiere dieses Dokument. Erkenne den Dokumenttyp, extrahiere alle Immobilien- und Darlehensdaten. Achte auf laufende Nummern zur Zuordnung. Antworte nur mit JSON.";
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: base64, mimeType: mediaType, systemPrompt: fullPrompt })
+    });
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || `API Fehler: ${response.status}`);
+    }
+    const data = await response.json();
+    const textContent = data.text || '';
+    if (!textContent) throw new Error('Keine Antwort vom Server erhalten.');
+    let jsonStr = textContent.trim();
+    if (jsonStr.includes('```')) jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+    let result;
+    try { result = JSON.parse(jsonStr); }
+    catch (parseError) {
+      const lastCompleteIndex = jsonStr.lastIndexOf('},');
+      if (lastCompleteIndex > 0) {
+        let repairedJson = jsonStr.substring(0, lastCompleteIndex + 1);
+        const openBrackets = (repairedJson.match(/\[/g) || []).length;
+        const closeBrackets = (repairedJson.match(/\]/g) || []).length;
+        const openBraces = (repairedJson.match(/\{/g) || []).length;
+        const closeBraces = (repairedJson.match(/\}/g) || []).length;
+        for (let i = 0; i < openBrackets - closeBrackets; i++) repairedJson += ']';
+        for (let i = 0; i < openBraces - closeBraces; i++) repairedJson += '}';
+        result = JSON.parse(repairedJson);
+      } else { throw parseError; }
+    }
+    const immoArray = Array.isArray(result.immobilien) ? result.immobilien : [];
+    const darlehenOhneZuordnung = Array.isArray(result.darlehen_ohne_zuordnung) ? result.darlehen_ohne_zuordnung : [];
+    if (immoArray.length === 0 && darlehenOhneZuordnung.length === 0) return null;
+    return {
+      filename,
+      dokumentTyp: result.dokumentTyp || 'sonstiges',
+      dokumentBeschreibung: result.dokumentBeschreibung || 'Dokument',
+      immobilien: immoArray.map(immo => ({
+        ...immo,
+        zuPruefen: immo.gefundeneFelder || Object.keys(immo).filter(k => !['gefundeneFelder', 'zuPruefen', 'darlehen'].includes(k))
+      })),
+      darlehenOhneZuordnung: darlehenOhneZuordnung
+    };
+  };
+
+  const buildCombined = (updatedAllParsed) => {
+    let allImmobilien = updatedAllParsed.flatMap(pd =>
+      pd.immobilien.map(immo => ({ ...immo, quellenDokument: pd.filename, dokumentTyp: pd.dokumentTyp }))
+    );
+    const allDarlehenOhneZuordnung = updatedAllParsed.flatMap(pd =>
+      (pd.darlehenOhneZuordnung || []).map(d => ({ ...d, quellenDokument: pd.filename }))
+    );
+    if (allDarlehenOhneZuordnung.length > 0 && allImmobilien.length > 0) {
+      allImmobilien = allImmobilien.map(immo => {
+        const passendeDarlehen = allDarlehenOhneZuordnung.filter(d => {
+          if (d.immobilienNr && immo.lfdNr && d.immobilienNr === immo.lfdNr) return true;
+          if (d.lfdNr && immo.lfdNr && d.lfdNr === immo.lfdNr) return true;
+          if (d.immobilienName && immo.name && d.immobilienName.toLowerCase().includes(immo.name.toLowerCase())) return true;
+          return false;
+        });
+        if (passendeDarlehen.length > 0) {
+          const existingDarlehen = immo.darlehen || [];
+          const neueDarlehen = passendeDarlehen.map(d => ({
+            name: d.name || `Darlehen ${d.lfdNr || ''}`,
+            institut: d.institut || d.bank || '',
+            kontonummer: d.kontonummer || '',
+            typ: d.typ || 'annuitaeten',
+            betrag: d.betrag || d.darlehenssumme || 0,
+            zinssatz: d.zinssatz || d.sollzins || 0,
+            effektivzins: d.effektivzins || 0,
+            tilgung: d.tilgung || d.anfangstilgung || 2,
+            monatsrate: d.monatsrate || d.rate || 0,
+            sondertilgung: d.sondertilgung || 5,
+            abschluss: d.abschluss || d.abschlussdatum || '',
+            ersteRate: d.ersteRate || '',
+            laufzeit: d.laufzeit || 0,
+            zinsbindungJahre: d.zinsbindungJahre || d.zinsbindung || 10,
+            zinsbindungEnde: d.zinsbindungEnde || '',
+            restschuld: d.restschuld || 0
+          }));
+          return { ...immo, darlehen: [...existingDarlehen, ...neueDarlehen], zuPruefen: [...(immo.zuPruefen || []), 'darlehen'] };
+        }
+        return immo;
+      });
+    }
+    if (allImmobilien.length === 0 && allDarlehenOhneZuordnung.length > 0) {
+      const darlehenByImmo = {};
+      allDarlehenOhneZuordnung.forEach(d => {
+        const key = d.immobilienNr || d.lfdNr || 'unknown';
+        if (!darlehenByImmo[key]) darlehenByImmo[key] = [];
+        darlehenByImmo[key].push(d);
+      });
+      allImmobilien = Object.entries(darlehenByImmo).map(([key, darlehen]) => ({
+        name: `Immobilie ${key}`,
+        lfdNr: parseInt(key) || 0,
+        quellenDokument: darlehen[0]?.quellenDokument,
+        dokumentTyp: 'darlehen_liste',
+        darlehen: darlehen.map(d => ({
+          name: d.name || `Darlehen`,
+          institut: d.institut || d.bank || '',
+          betrag: d.betrag || d.darlehenssumme || 0,
+          zinssatz: d.zinssatz || 0,
+          tilgung: d.tilgung || 2,
+          monatsrate: d.monatsrate || 0,
+          zinsbindungJahre: d.zinsbindungJahre || d.zinsbindung || 10
+        })),
+        zuPruefen: ['name', 'adresse', 'darlehen']
+      }));
+    }
+    return {
+      filename: updatedAllParsed.map(pp => pp.filename).join(', '),
+      dokumentTyp: updatedAllParsed.map(pp => pp.dokumentTyp).join(' + '),
+      dokumentBeschreibung: updatedAllParsed.map(pp => pp.dokumentBeschreibung).join(' | '),
+      immobilien: allImmobilien,
+      quellenDokumente: updatedAllParsed
+    };
+  };
+
+  const parseDocument = async () => {
+    if (!currentFile || !base64Data) return;
+    setParsing(true);
+    setError(null);
+    setProcessingStatus('processing');
+    try {
+      const newParsedData = await analyzeOne(currentFile.name, base64Data, getMediaType());
+      if (!newParsedData) {
+        setError('Keine Immobilien- oder Darlehensdaten im Dokument gefunden.');
+        setProcessingStatus(null);
+        setParsing(false);
+        return;
+      }
+      setDocumentType(newParsedData.dokumentTyp);
+      const updatedAllParsed = [...allParsedData, newParsedData];
+      setAllParsedData(updatedAllParsed);
+      setParsedData(buildCombined(updatedAllParsed));
+      setProcessingStatus('done');
+    } catch (err) {
+      console.error('Parse error:', err);
+      setError(`Fehler beim Analysieren: ${err.message}`);
+      setProcessingStatus(null);
+    }
+    setParsing(false);
+  };
+
+  const parseAllDocuments = async () => {
+    if (files.length === 0) return;
+    if (files.length === 1) return parseDocument();
+    setParsing(true);
+    setError(null);
+    setProcessingStatus('processing');
+    const accumulated = [];
+    let lastErr = null;
+    try {
+      for (let i = 0; i < files.length; i++) {
+        setCurrentFileIndex(i);
+        try {
+          const prepared = await prepareFileForUpload(files[i]);
+          const mt = prepared.mimeType || files[i].type;
+          const res = await analyzeOne(files[i].name, prepared.base64, mt);
+          if (res) accumulated.push(res);
+        } catch (e) {
+          lastErr = e;
+          console.error('Fehler bei Datei', files[i] && files[i].name, e);
+        }
+      }
+      if (accumulated.length === 0) {
+        setError(lastErr ? `Fehler beim Analysieren: ${lastErr.message}` : 'Keine Daten in den Dokumenten gefunden.');
+        setProcessingStatus(null);
+        setParsing(false);
+        return;
+      }
+      setDocumentType(accumulated[accumulated.length - 1].dokumentTyp);
+      setAllParsedData(accumulated);
+      setParsedData(buildCombined(accumulated));
+      setProcessingStatus('done');
+      if (lastErr) setError(`Hinweis: Ein Dokument konnte nicht gelesen werden (${lastErr.message}). Die \u00fcbrigen wurden verarbeitet.`);
+    } catch (err) {
+      setError(`Fehler beim Analysieren: ${err.message}`);
+      setProcessingStatus(null);
+    }
+    setParsing(false);
+  };
+
+  const processNextFile = () => {
+    if (currentFileIndex < files.length - 1) {
+      const nextIndex = currentFileIndex + 1;
+      setCurrentFileIndex(nextIndex);
+      processFile(files[nextIndex]);
+      setProcessingStatus(null);
+    }
+  };
+
+  // Mehrere Dokumente zu EINEM Gebäude mit Einheiten zusammenführen
+  const mapDarlehenImport = (darlehen) => (Array.isArray(darlehen) ? darlehen.map(d => ({
+    name: d.name || '', institut: d.institut || '', kontonummer: d.kontonummer || '',
+    typ: d.typ || 'annuitaeten', betrag: d.betrag || 0, zinssatz: d.zinssatz || 0,
+    effektivzins: d.effektivzins || 0, tilgung: d.tilgung || 2, monatsrate: d.monatsrate || 0,
+    sondertilgung: d.sondertilgung || 5, abschluss: d.abschluss || '', ersteRate: d.ersteRate || '',
+    laufzeit: d.laufzeit || 0, zinsbindungJahre: d.zinsbindungJahre || 10, zinsbindungEnde: d.zinsbindungEnde || '',
+    restschuld: d.restschuld || 0
+  })) : []);
+
+  const cleanImmo = (immo) => {
+    const { gefundeneFelder, zuPruefen, quellenDokument, dokumentTyp, lfdNr, immobilienNr, darlehen, werbungskosten, ...rest } = immo;
+    return rest;
+  };
+
+  const existingUnitNrs = new Set((existingEinheiten || []).map(e => String(e.stammdaten?.wohnungsNr || '').trim().toLowerCase()).filter(Boolean));
+  const isDuplicateUnit = (immo) => {
+    const nr = String(immo.wohnungsNr || '').trim().toLowerCase();
+    return !!nr && existingUnitNrs.has(nr);
+  };
+
+  const importAsGebaeude = () => {
+    const containerId = Date.now() + '_geb_' + Math.random().toString(36).substr(2, 9);
+    const docs = (parsedData.quellenDokumente && parsedData.quellenDokumente.length)
+      ? parsedData.quellenDokumente
+      : [{ immobilien: parsedData.immobilien, dokumentTyp: parsedData.dokumentTyp }];
+
+    let buildingFields = {};
+    let buildingDarlehen = [];
+    let buildingZuPruefen = [];
+    const units = [];
+
+    docs.forEach(doc => {
+      const list = doc.immobilien || [];
+      const isUnitDoc = list.length > 1 || ['mietvertrag', 'auflistung'].includes(doc.dokumentTyp);
+      if (isUnitDoc) {
+        list.forEach(u => units.push(u));
+      } else {
+        list.forEach(b => {
+          Object.entries(cleanImmo(b)).forEach(([k, v]) => {
+            const empty = v === '' || v === null || v === undefined || (typeof v === 'number' && v === 0);
+            if (!empty && buildingFields[k] === undefined) buildingFields[k] = v;
+          });
+          buildingDarlehen = buildingDarlehen.concat(mapDarlehenImport(b.darlehen));
+          buildingZuPruefen = buildingZuPruefen.concat(b.zuPruefen || b.gefundeneFelder || []);
+        });
+      }
+    });
+
+    if (!buildingFields.name) buildingFields.name = units[0]?.adresse || units[0]?.name || 'Importiertes Gebäude';
+    const baseStamm = createEmpty().stammdaten;
+    const ea = buildingFields.eigentumsart || 'gesamt';
+
+    const container = {
+      ...createEmpty(),
+      id: containerId,
+      isContainer: true,
+      parentId: null,
+      importiert: true,
+      zuPruefen: Array.from(new Set(buildingZuPruefen)),
+      darlehen: buildingDarlehen,
+      stammdaten: { ...baseStamm, ...buildingFields, eigentumsart: ea },
+    };
+
+    const unitImmos = units.map((u, idx) => ({
+      ...createEmpty(),
+      id: containerId + '_u' + idx,
+      isContainer: false,
+      parentId: containerId,
+      importiert: true,
+      zuPruefen: u.zuPruefen || u.gefundeneFelder || [],
+      darlehen: mapDarlehenImport(u.darlehen),
+      stammdaten: { ...baseStamm, ...cleanImmo(u), eigentumsart: ea },
+    }));
+
+    onImport([container, ...unitImmos]);
+  };
+
+  // Gefundene Wohnungen als Einheiten zu einem bereits geöffneten Gebäude hinzufügen
+  const importAsEinheiten = () => {
+    const parentId = existingImmo.id;
+    const ea = existingImmo.stammdaten?.eigentumsart || 'weg';
+    const baseStamm = createEmpty().stammdaten;
+    const incoming = parsedData.immobilien;
+    const toAdd = incoming.filter(u => !isDuplicateUnit(u));
+    const skipped = incoming.length - toAdd.length;
+    const unitImmos = toAdd.map((u, idx) => ({
+      ...createEmpty(),
+      id: Date.now() + '_eu' + idx + '_' + Math.random().toString(36).substr(2, 5),
+      isContainer: false,
+      parentId,
+      importiert: true,
+      zuPruefen: u.zuPruefen || u.gefundeneFelder || [],
+      darlehen: mapDarlehenImport(u.darlehen),
+      stammdaten: { ...baseStamm, ...cleanImmo(u), eigentumsart: ea },
+    }));
+    if (skipped > 0) {
+      alert(skipped + ' Wohnung(en) waren bereits als Einheit vorhanden (gleiche Wohnungs-Nr.) und wurden übersprungen. ' + unitImmos.length + ' neu hinzugefügt.');
+    }
+    if (unitImmos.length === 0) return;
+    onImport(unitImmos);
+  };
+
+  const addOneAsEinheit = (immo) => {
+    if (isDuplicateUnit(immo)) {
+      alert('Eine Einheit mit dieser Wohnungs-Nr. ist bereits im Gebäude vorhanden. Sie wurde nicht doppelt angelegt.');
+      return;
+    }
+    const parentId = existingImmo.id;
+    const ea = existingImmo.stammdaten?.eigentumsart || 'weg';
+    const baseStamm = createEmpty().stammdaten;
+    const unit = {
+      ...createEmpty(),
+      id: Date.now() + '_eu_' + Math.random().toString(36).substr(2, 6),
+      isContainer: false,
+      parentId,
+      importiert: true,
+      zuPruefen: immo.zuPruefen || immo.gefundeneFelder || [],
+      darlehen: mapDarlehenImport(immo.darlehen),
+      stammdaten: { ...baseStamm, ...cleanImmo(immo), eigentumsart: ea },
+    };
+    onImport([unit]);
+  };
+
+  const handleImport = (immoData) => {
+    const { gefundeneFelder, zuPruefen, quellenDokument, dokumentTyp, lfdNr, darlehen, werbungskosten, ...cleanData } = immoData;
+    
+    // Darlehen separat verarbeiten (nicht in stammdaten)
+    const darlehenArray = Array.isArray(darlehen) ? darlehen.map(d => ({
+      name: d.name || '',
+      institut: d.institut || '',
+      kontonummer: d.kontonummer || '',
+      typ: d.typ || 'annuitaeten',
+      betrag: d.betrag || 0,
+      zinssatz: d.zinssatz || 0,
+      effektivzins: d.effektivzins || 0,
+      tilgung: d.tilgung || 2,
+      monatsrate: d.monatsrate || 0,
+      sondertilgung: d.sondertilgung || 5,
+      abschluss: d.abschluss || '',
+      ersteRate: d.ersteRate || '',
+      laufzeit: d.laufzeit || 0,
+      zinsbindungJahre: d.zinsbindungJahre || 10,
+      zinsbindungEnde: d.zinsbindungEnde || '',
+      restschuld: d.restschuld || 0
+    })) : [];
+    
+    // Werbungskosten nach Jahr gruppieren für steuerJahre
+    const steuerJahre = {};
+    if (Array.isArray(werbungskosten) && werbungskosten.length > 0) {
+      werbungskosten.forEach(wk => {
+        const jahr = wk.jahr || new Date().getFullYear();
+        if (!steuerJahre[jahr]) {
+          steuerJahre[jahr] = { wk: [], miet: 0, nkVor: 0, nkNach: 0, nkAbr: 0 };
+        }
+        steuerJahre[jahr].wk.push({
+          bez: wk.bez || 'Werbungskosten',
+          betrag: wk.betrag || 0
+        });
+      });
+    }
+    
+    const newImmo = {
+      ...createEmpty(),
+      importiert: true,
+      zuPruefen: zuPruefen || gefundeneFelder || [],
+      darlehen: darlehenArray,
+      steuerJahre: Object.keys(steuerJahre).length > 0 ? steuerJahre : {},
+      stammdaten: {
+        ...createEmpty().stammdaten,
+        ...cleanData,
+      }
+    };
+    onImport(newImmo);
+  };
+
+  // Für Merge mit bestehender Immobilie
+  const prepareMerge = (immoData) => {
+    if (!existingImmo) {
+      handleImport(immoData);
+      return;
+    }
+    
+    const { gefundeneFelder, zuPruefen, ...newData } = immoData;
+    const existing = existingImmo.stammdaten;
+    
+    const decisions = {};
+    const autoFill = [];
+    const conflicts = [];
+    const unchanged = [];
+    
+    // Alle Felder durchgehen
+    Object.entries(newData).forEach(([key, newValue]) => {
+      if (newValue === undefined || newValue === null || newValue === '' || newValue === 0) return;
+      
+      const existingValue = existing[key];
+      const isEmpty = existingValue === undefined || existingValue === null || existingValue === '' || existingValue === 0;
+      
+      if (isEmpty) {
+        // Feld ist leer -> automatisch übernehmen
+        autoFill.push({ key, newValue });
+        decisions[key] = 'new';
+      } else if (existingValue === newValue) {
+        // Werte sind identisch -> nichts tun
+        unchanged.push({ key, value: existingValue });
+      } else {
+        // Konflikt -> User entscheiden lassen
+        conflicts.push({ key, existingValue, newValue });
+        decisions[key] = 'keep'; // Default: behalten
+      }
+    });
+    
+    setMergeDecisions(decisions);
+    setParsedData(prev => ({
+      ...prev,
+      mergeData: { newData, autoFill, conflicts, unchanged }
+    }));
+    setMergeMode(true);
+  };
+
+  const handleMergeDecision = (field, decision) => {
+    setMergeDecisions(prev => ({ ...prev, [field]: decision }));
+  };
+
+  const executeMerge = () => {
+    if (!existingImmo || !parsedData?.mergeData) return;
+    
+    const { newData, autoFill, conflicts } = parsedData.mergeData;
+    const updatedStammdaten = { ...existingImmo.stammdaten };
+    const mergedFields = [];
+    
+    // Auto-fill Felder übernehmen
+    autoFill.forEach(({ key, newValue }) => {
+      updatedStammdaten[key] = newValue;
+      mergedFields.push(key);
+    });
+    
+    // Konflikte nach User-Entscheidung
+    conflicts.forEach(({ key, newValue }) => {
+      if (mergeDecisions[key] === 'new') {
+        updatedStammdaten[key] = newValue;
+        mergedFields.push(key);
+      }
+    });
+    
+    const updatedImmo = {
+      ...existingImmo,
+      importiert: true,
+      zuPruefen: mergedFields,
+      stammdaten: updatedStammdaten,
+    };
+    
+    onImport(updatedImmo);
+  };
+
+  const getDocTypeIcon = (docType) => {
+    switch (docType) {
+      case 'kaufvertrag': return <IconKaufpreis color="#10b981" />;
+      case 'mietvertrag': return <IconMiete color="#ec4899" />;
+      case 'darlehen': return <IconFinanz color="#3b82f6" />;
+      case 'nebenkostenabrechnung': return <IconWerbung color="#f59e0b" />;
+      case 'grundbuch': return <IconObjekt color="#8b5cf6" />;
+      case 'auflistung': return <IconList color="#06b6d4" />;
+      default: return <IconSteuer color="#6366f1" />;
+    }
+  };
+
+  const getDocTypeName = (docType) => {
+    const names = {
+      kaufvertrag: 'Kaufvertrag / Exposé',
+      mietvertrag: 'Mietvertrag',
+      darlehen: 'Darlehensvertrag',
+      darlehen_liste: 'Darlehen-Übersicht',
+      nebenkostenabrechnung: 'Nebenkostenabrechnung',
+      grundbuch: 'Grundbuchauszug',
+      auflistung: 'Auflistung / Übersicht',
+      sonstiges: 'Sonstiges Dokument'
+    };
+    return names[docType] || 'Dokument';
+  };
+
+  const formatFieldName = (field) => {
+    const names = {
+      name: 'Name', adresse: 'Adresse', typ: 'Typ', objektstatus: 'Status',
+      nutzung: 'Nutzung', eigentuemer: 'Eigentümer', mieterName: 'Mieter',
+      bundesland: 'Bundesland', kaufdatum: 'Kaufdatum', baujahr: 'Baujahr',
+      wohnungsNr: 'Wohnungs-Nr.', etage: 'Etage',
+      verkehrswert: 'Verkehrswert', verkehrswertDatum: 'Bewertungsdatum',
+      kaufpreisImmobilie: 'Kaufpreis', kaufpreisStellplatz: 'Stellplatz-Preis',
+      wohnflaeche: 'Wohnfläche', mieteProQm: 'Miete/qm', mieteStellplatz: 'Miete Stellplatz',
+      kaltmiete: 'Kaltmiete', warmmiete: 'Warmmiete', mietbeginn: 'Mietbeginn', mietende: 'Mietende',
+      anzahlStellplaetze: 'Stellplätze', mieteSonderausstattung: 'Miete Sonderausst.',
+      nebenkostenVorauszahlung: 'NK-Vorauszahlung', kaution: 'Kaution',
+      maklerProvision: 'Makler', grunderwerbsteuer: 'GrESt', notarkosten: 'Notar',
+      darlehenssumme: 'Darlehenssumme', darlehenAbschluss: 'Darlehen Abschluss',
+      zinsbindung: 'Zinsbindung', monatlicheRate: 'Monatl. Rate', laufzeit: 'Laufzeit',
+      eigenkapitalAnteil: 'EK-Anteil', zinssatz: 'Zinssatz', tilgung: 'Tilgung',
+      afaSatz: 'AfA-Satz', steuersatz: 'Steuersatz',
+      grundstueckGroesse: 'Grundstück', bodenrichtwert: 'Bodenrichtwert'
+    };
+    return names[field] || field;
+  };
+
+  const formatValue = (field, value) => {
+    if (value === undefined || value === null) return '–';
+    if (['kaufpreisImmobilie', 'kaufpreisStellplatz', 'maklerProvision', 'grunderwerbsteuer', 'notarkosten', 'verkehrswert', 'darlehenssumme', 'kaltmiete', 'warmmiete', 'nebenkostenVorauszahlung', 'monatlicheRate', 'kaution'].includes(field)) {
+      return fmt(value);
+    }
+    if (['mieteProQm', 'mieteStellplatz', 'mieteSonderausstattung', 'bodenrichtwert'].includes(field)) {
+      return `${value} €`;
+    }
+    if (['eigenkapitalAnteil', 'zinssatz', 'tilgung', 'afaSatz', 'steuersatz'].includes(field)) {
+      return `${value}%`;
+    }
+    if (field === 'wohnflaeche' || field === 'grundstueckGroesse') return `${value} qm`;
+    if (field === 'laufzeit' || field === 'zinsbindung') return `${value} Jahre`;
+    return String(value);
+  };
+
+  // Merge-Ansicht rendern
+  const renderMergeView = () => {
+    const { mergeData } = parsedData;
+    const { autoFill, conflicts, unchanged } = mergeData;
+    
+    return (
+      <div className="merge-view">
+        <div className="merge-header">
+          <div className="merge-header-icon">{getDocTypeIcon(documentType)}</div>
+          <div className="merge-header-info">
+            <strong>{getDocTypeName(documentType)}</strong>
+            <small>Daten werden mit "{existingImmo.stammdaten.name}" zusammengeführt</small>
+          </div>
         </div>
-      </header>
-
-      {/* Content */}
-      <main className="mindflow-main-content" style={{ position: 'relative', zIndex: 1, padding: '0 20px' }}>
-        {/* Filter Buttons */}
-        <div data-filter-panel style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '8px' }}>
-          <FilterButton 
-            icon={Icons.bolt} 
-            label="Aktion" 
-            darkMode={darkMode}
-            expanded={expandedFilter === 'action'}
-            onClick={() => setExpandedFilter(expandedFilter === 'action' ? null : 'action')}
-          />
-          <FilterButton 
-            icon={Icons.persons} 
-            label="Personen" 
-            darkMode={darkMode}
-            expanded={expandedFilter === 'persons'}
-            onClick={() => setExpandedFilter(expandedFilter === 'persons' ? null : 'persons')}
-          />
-          <FilterButton 
-            icon={Icons.calendar} 
-            label="Meetings" 
-            darkMode={darkMode}
-            expanded={expandedFilter === 'meetings'}
-            onClick={() => setExpandedFilter(expandedFilter === 'meetings' ? null : 'meetings')}
-          />
-        </div>
-
-        {/* Expanded Filter Panels */}
-        {expandedFilter === 'action' && (
-          <div data-filter-panel style={{
-            padding: '12px',
-            marginBottom: '12px',
-            borderRadius: '16px',
-            background: darkMode ? 'rgba(255, 171, 94, 0.1)' : 'rgba(255, 251, 235, 0.8)',
-            border: `1px solid ${darkMode ? 'rgba(255, 171, 94, 0.3)' : '#fde68a'}`,
-            backdropFilter: 'blur(24px)',
-          }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-              {allActions.map(action => {
-                let pressTimer: NodeJS.Timeout | null = null;
-                const isDefault = defaultActions.includes(action);
-                
-                const handleDelete = () => {
-                  if (isDefault) return; // Default actions can't be deleted
-                  const usageCount = isActionInUse(action);
-                  setDeleteConfirm({ type: 'action', id: action, label: action, usageCount });
-                };
-                
-                return (
-                <button 
-                  key={action} 
-                  onMouseDown={() => {
-                    if (!isDefault) pressTimer = setTimeout(handleDelete, 600);
-                  }}
-                  onMouseUp={() => { if (pressTimer) clearTimeout(pressTimer); }}
-                  onMouseLeave={() => { if (pressTimer) clearTimeout(pressTimer); }}
-                  onTouchStart={() => {
-                    if (!isDefault) pressTimer = setTimeout(handleDelete, 600);
-                  }}
-                  onTouchEnd={() => { if (pressTimer) clearTimeout(pressTimer); }}
-                  style={{
-                  padding: '6px 12px',
-                  borderRadius: '9999px',
-                  fontSize: '13px',
-                  fontWeight: '500',
-                  background: darkMode ? 'rgba(255, 171, 94, 0.2)' : 'white',
-                  color: darkMode ? colors.orange : '#92400e',
-                  border: 'none',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                }}>
-                  {action === 'E-Mail' && Icons.email}
-                  {action === 'Gespräch' && Icons.chat}
-                  {action === 'Prüfen' && Icons.check}
-                  {action === 'Anruf' && Icons.email}
-                  {action === 'Dokument' && Icons.email}
-                  {action === 'Recherche' && Icons.search}
-                  {!['E-Mail', 'Gespräch', 'Prüfen', 'Anruf', 'Dokument', 'Recherche'].includes(action) && <span style={{ fontSize: '12px' }}>⚡</span>}
-                  {action}
-                </button>
-              );
-              })}
-              {addingAction ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <input
-                    type="text"
-                    value={newActionName}
-                    onChange={(e) => setNewActionName(e.target.value)}
-                    placeholder="Neue Aktion..."
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newActionName.trim()) {
-                        setCustomActions([...customActions, newActionName.trim()]);
-                        setNewActionName('');
-                        setAddingAction(false);
-                      } else if (e.key === 'Escape') {
-                        setAddingAction(false);
-                        setNewActionName('');
-                      }
-                    }}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '9999px',
-                      fontSize: '13px',
-                      border: `1px solid ${colors.orange}`,
-                      background: darkMode ? 'rgba(255, 171, 94, 0.1)' : 'white',
-                      color: darkMode ? colors.orange : '#92400e',
-                      outline: 'none',
-                      width: '120px',
-                    }}
-                  />
-                  <button
-                    onClick={() => {
-                      if (newActionName.trim()) {
-                        setCustomActions([...customActions, newActionName.trim()]);
-                        setNewActionName('');
-                        setAddingAction(false);
-                      }
-                    }}
-                    style={{
-                      width: '28px',
-                      height: '28px',
-                      borderRadius: '50%',
-                      background: colors.orange,
-                      color: 'white',
-                      border: 'none',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                    }}
-                  >✓</button>
-                  <button
-                    onClick={() => { setAddingAction(false); setNewActionName(''); }}
-                    style={{
-                      width: '28px',
-                      height: '28px',
-                      borderRadius: '50%',
-                      background: 'transparent',
-                      color: darkMode ? '#6B7280' : '#9ca3af',
-                      border: `1px solid ${darkMode ? '#6B7280' : '#9ca3af'}`,
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                    }}
-                  >✕</button>
-                </div>
-              ) : (
-                <button 
-                  onClick={() => setAddingAction(true)}
-                  style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '9999px',
-                    background: darkMode ? 'rgba(255, 171, 94, 0.15)' : 'rgba(255, 171, 94, 0.3)',
-                    color: darkMode ? colors.orange : '#d97706',
-                    border: `2px dashed ${darkMode ? 'rgba(255, 171, 94, 0.4)' : '#fbbf24'}`,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '18px',
-                  }}>+</button>
-              )}
+        
+        {autoFill.length > 0 && (
+          <div className="merge-section">
+            <div className="merge-section-header auto">
+              <span className="merge-badge auto">🟢 Wird automatisch ergänzt</span>
+              <small>{autoFill.length} Feld{autoFill.length !== 1 ? 'er' : ''}</small>
             </div>
-          </div>
-        )}
-
-        {expandedFilter === 'persons' && (
-          <div data-filter-panel style={{
-            padding: '12px',
-            marginBottom: '12px',
-            borderRadius: '16px',
-            background: darkMode ? 'rgba(167, 139, 250, 0.1)' : 'rgba(245, 243, 255, 0.8)',
-            border: `1px solid ${darkMode ? 'rgba(167, 139, 250, 0.3)' : '#c4b5fd'}`,
-            backdropFilter: 'blur(24px)',
-          }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-              {allPersons.map(person => {
-                let pressTimer: NodeJS.Timeout | null = null;
-                
-                const handleDelete = () => {
-                  const usageCount = isPersonInUse(person);
-                  setDeleteConfirm({ type: 'person', id: person, label: `@${person}`, usageCount });
-                };
-                
-                return (
-                <button 
-                  key={person} 
-                  onClick={() => {
-                    setPersonFilter(personFilter === `@${person}` ? null : `@${person}`);
-                    setSearchQuery(personFilter === `@${person}` ? '' : `@${person}`);
-                  }}
-                  onMouseDown={() => {
-                    pressTimer = setTimeout(handleDelete, 600);
-                  }}
-                  onMouseUp={() => { if (pressTimer) clearTimeout(pressTimer); }}
-                  onMouseLeave={() => { if (pressTimer) clearTimeout(pressTimer); }}
-                  onTouchStart={() => {
-                    pressTimer = setTimeout(handleDelete, 600);
-                  }}
-                  onTouchEnd={() => { if (pressTimer) clearTimeout(pressTimer); }}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: '9999px',
-                    fontSize: '13px',
-                    fontWeight: '500',
-                    background: personFilter === `@${person}` 
-                      ? colors.purple 
-                      : darkMode ? 'rgba(167, 139, 250, 0.2)' : 'white',
-                    color: personFilter === `@${person}` 
-                      ? 'white' 
-                      : darkMode ? colors.purple : '#6d28d9',
-                    border: 'none',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                  }}>
-                  @{person}
-                </button>
-              );
-              })}
-              {addingPerson ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <input
-                    type="text"
-                    value={newPersonName}
-                    onChange={(e) => setNewPersonName(e.target.value)}
-                    placeholder="Name..."
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newPersonName.trim()) {
-                        setCustomPersons([...customPersons, newPersonName.trim()]);
-                        setNewPersonName('');
-                        setAddingPerson(false);
-                      } else if (e.key === 'Escape') {
-                        setAddingPerson(false);
-                        setNewPersonName('');
-                      }
-                    }}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '9999px',
-                      fontSize: '13px',
-                      border: `1px solid ${colors.purple}`,
-                      background: darkMode ? 'rgba(167, 139, 250, 0.1)' : 'white',
-                      color: darkMode ? colors.purple : '#6d28d9',
-                      outline: 'none',
-                      width: '100px',
-                    }}
-                  />
-                  <button
-                    onClick={() => {
-                      if (newPersonName.trim()) {
-                        setCustomPersons([...customPersons, newPersonName.trim()]);
-                        setNewPersonName('');
-                        setAddingPerson(false);
-                      }
-                    }}
-                    style={{
-                      width: '28px',
-                      height: '28px',
-                      borderRadius: '50%',
-                      background: colors.purple,
-                      color: 'white',
-                      border: 'none',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                    }}
-                  >✓</button>
-                  <button
-                    onClick={() => { setAddingPerson(false); setNewPersonName(''); }}
-                    style={{
-                      width: '28px',
-                      height: '28px',
-                      borderRadius: '50%',
-                      background: 'transparent',
-                      color: darkMode ? '#6B7280' : '#9ca3af',
-                      border: `1px solid ${darkMode ? '#6B7280' : '#9ca3af'}`,
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                    }}
-                  >✕</button>
+            <div className="merge-fields">
+              {autoFill.map(({ key, newValue }) => (
+                <div key={key} className="merge-field auto">
+                  <span className="merge-field-name">{formatFieldName(key)}</span>
+                  <span className="merge-field-value new">{formatValue(key, newValue)}</span>
                 </div>
-              ) : (
-                <button 
-                  onClick={() => setAddingPerson(true)}
-                  style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '9999px',
-                    background: darkMode ? 'rgba(167, 139, 250, 0.15)' : 'rgba(167, 139, 250, 0.3)',
-                    color: darkMode ? colors.purple : '#7c3aed',
-                    border: `2px dashed ${darkMode ? 'rgba(167, 139, 250, 0.4)' : '#a78bfa'}`,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '18px',
-                  }}>+</button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {expandedFilter === 'meetings' && (
-          <div data-filter-panel style={{
-            padding: '12px',
-            marginBottom: '12px',
-            borderRadius: '16px',
-            background: darkMode ? 'rgba(91, 192, 235, 0.1)' : 'rgba(239, 246, 255, 0.8)',
-            border: `1px solid ${darkMode ? 'rgba(91, 192, 235, 0.3)' : '#93c5fd'}`,
-            backdropFilter: 'blur(24px)',
-          }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-              {allMeetings.map(meeting => {
-                let pressTimer: NodeJS.Timeout | null = null;
-                
-                const handleDelete = () => {
-                  const usageCount = isMeetingInUse(meeting);
-                  setDeleteConfirm({ type: 'meeting', id: meeting, label: `#${meeting}`, usageCount });
-                };
-                
-                return (
-                <button 
-                  key={meeting} 
-                  onClick={() => {
-                    setMeetingFilter(meetingFilter === `#${meeting}` ? null : `#${meeting}`);
-                    setSearchQuery(meetingFilter === `#${meeting}` ? '' : `#${meeting}`);
-                  }}
-                  onMouseDown={() => {
-                    pressTimer = setTimeout(handleDelete, 600);
-                  }}
-                  onMouseUp={() => { if (pressTimer) clearTimeout(pressTimer); }}
-                  onMouseLeave={() => { if (pressTimer) clearTimeout(pressTimer); }}
-                  onTouchStart={() => {
-                    pressTimer = setTimeout(handleDelete, 600);
-                  }}
-                  onTouchEnd={() => { if (pressTimer) clearTimeout(pressTimer); }}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: '9999px',
-                    fontSize: '13px',
-                    fontWeight: '500',
-                    background: meetingFilter === `#${meeting}` 
-                      ? colors.skyBlue 
-                      : darkMode ? 'rgba(91, 192, 235, 0.2)' : 'white',
-                    color: meetingFilter === `#${meeting}` 
-                      ? 'white' 
-                      : darkMode ? colors.skyBlue : '#1d4ed8',
-                    border: 'none',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                  }}>
-                  #{meeting}
-                </button>
-              );
-              })}
-              {addingMeeting ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <input
-                    type="text"
-                    value={newMeetingName}
-                    onChange={(e) => setNewMeetingName(e.target.value)}
-                    placeholder="Meeting Name..."
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newMeetingName.trim()) {
-                        setCustomMeetings([...customMeetings, newMeetingName.trim()]);
-                        setNewMeetingName('');
-                        setAddingMeeting(false);
-                      } else if (e.key === 'Escape') {
-                        setAddingMeeting(false);
-                        setNewMeetingName('');
-                      }
-                    }}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '9999px',
-                      fontSize: '13px',
-                      border: `1px solid ${colors.skyBlue}`,
-                      background: darkMode ? 'rgba(91, 192, 235, 0.1)' : 'white',
-                      color: darkMode ? colors.skyBlue : '#1d4ed8',
-                      outline: 'none',
-                      width: '130px',
-                    }}
-                  />
-                  <button
-                    onClick={() => {
-                      if (newMeetingName.trim()) {
-                        setCustomMeetings([...customMeetings, newMeetingName.trim()]);
-                        setNewMeetingName('');
-                        setAddingMeeting(false);
-                      }
-                    }}
-                    style={{
-                      width: '28px',
-                      height: '28px',
-                      borderRadius: '50%',
-                      background: colors.skyBlue,
-                      color: 'white',
-                      border: 'none',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                    }}
-                  >✓</button>
-                  <button
-                    onClick={() => { setAddingMeeting(false); setNewMeetingName(''); }}
-                    style={{
-                      width: '28px',
-                      height: '28px',
-                      borderRadius: '50%',
-                      background: 'transparent',
-                      color: darkMode ? '#6B7280' : '#9ca3af',
-                      border: `1px solid ${darkMode ? '#6B7280' : '#9ca3af'}`,
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                    }}
-                  >✕</button>
-                </div>
-              ) : (
-                <button 
-                  onClick={() => setAddingMeeting(true)}
-                  style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '9999px',
-                    background: darkMode ? 'rgba(91, 192, 235, 0.15)' : 'rgba(91, 192, 235, 0.3)',
-                    color: darkMode ? colors.skyBlue : '#2563eb',
-                    border: `2px dashed ${darkMode ? 'rgba(91, 192, 235, 0.4)' : '#60a5fa'}`,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '18px',
-                  }}>+</button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Onboarding Message - Show when no categories exist */}
-        {user && allCategories.length === 0 && (
-          <div style={{
-            padding: '32px 20px',
-            textAlign: 'center',
-            borderRadius: '20px',
-            background: darkMode 
-              ? 'linear-gradient(135deg, rgba(70, 240, 210, 0.1), rgba(167, 139, 250, 0.1))'
-              : 'linear-gradient(135deg, rgba(70, 240, 210, 0.15), rgba(167, 139, 250, 0.15))',
-            border: `1px solid ${darkMode ? 'rgba(70, 240, 210, 0.3)' : 'rgba(70, 240, 210, 0.4)'}`,
-            marginBottom: '20px',
-          }}>
-            <div style={{ fontSize: '48px', marginBottom: '16px' }}>🎉</div>
-            <h2 style={{ 
-              fontSize: '20px', 
-              fontWeight: '700', 
-              color: theme.text, 
-              marginBottom: '8px' 
-            }}>
-              Willkommen bei MindFlow!
-            </h2>
-            <p style={{ 
-              fontSize: '14px', 
-              color: theme.textMuted, 
-              marginBottom: '20px',
-              lineHeight: '1.5',
-            }}>
-              Erstelle deine erste Kategorie um loszulegen.<br/>
-              Klicke auf <span style={{ color: colors.mint, fontWeight: '600' }}>+ Weitere</span> oben.
-            </p>
-            <button
-              onClick={() => {
-                setShowAllCategories(true);
-                setAddingCategory(true);
-              }}
-              style={{
-                padding: '12px 24px',
-                borderRadius: '12px',
-                border: 'none',
-                background: `linear-gradient(135deg, ${colors.mint}, ${colors.purple})`,
-                color: '#1f2937',
-                fontSize: '15px',
-                fontWeight: '600',
-                cursor: 'pointer',
-              }}
-            >
-              + Erste Kategorie erstellen
-            </button>
-          </div>
-        )}
-
-        {/* Task List - Active Tasks */}
-        <div className="mindflow-task-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {getFilteredTasks().map((todo, index) => (
-            <TaskCard 
-              key={todo.id} 
-              todo={todo} 
-              displayNumber={index + 1}
-              darkMode={darkMode} 
-              expanded={expandedTask === todo.id}
-              onToggleExpand={() => handleToggleExpand(todo.id)}
-              onCalendarClick={(t) => setCalendarModal({ show: true, todo: t })}
-              onStatusChange={handleStatusChange}
-              onPriorityChange={handlePriorityChange}
-              onActionTypeChange={handleActionTypeChange}
-              onDateChange={handleDateChange}
-              onToggleComplete={handleToggleComplete}
-              onCategoryChange={handleCategoryChange}
-              onDescriptionChange={handleDescriptionChange}
-              onTitleChange={handleTitleChange}
-              onDelete={handleDeleteTask}
-              allCategories={allCategories}
-              allActions={allActions}
-            />
-          ))}
-        </div>
-
-        {/* Completed Tasks Section */}
-        {todos.filter(t => t.completed).length > 0 && (
-          <div style={{ marginTop: '24px' }}>
-            <h3 style={{ 
-              fontSize: '14px', 
-              fontWeight: '600', 
-              color: darkMode ? '#6B7280' : '#9ca3af',
-              marginBottom: '12px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-            }}>
-              <svg style={{ width: '16px', height: '16px', color: colors.mint }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-              Erledigt ({todos.filter(t => t.completed).length})
-            </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', opacity: 0.7 }}>
-              {todos.filter(t => t.completed).map((todo) => (
-                <TaskCard 
-                  key={todo.id} 
-                  todo={todo} 
-                  displayNumber={0}
-                  darkMode={darkMode} 
-                  expanded={expandedTask === todo.id}
-                  onToggleExpand={() => handleToggleExpand(todo.id)}
-                  onCalendarClick={(t) => setCalendarModal({ show: true, todo: t })}
-                  onStatusChange={handleStatusChange}
-                  onPriorityChange={handlePriorityChange}
-                  onActionTypeChange={handleActionTypeChange}
-                  onDateChange={handleDateChange}
-                  onToggleComplete={handleToggleComplete}
-                  onCategoryChange={handleCategoryChange}
-                  onDescriptionChange={handleDescriptionChange}
-                  onTitleChange={handleTitleChange}
-                  onDelete={handleDeleteTask}
-                  allCategories={allCategories}
-                  allActions={allActions}
-                />
               ))}
             </div>
           </div>
         )}
-      </main>
-
-      {/* Delete Confirmation Modal - Unified Design */}
-      {deleteConfirm && (
-        <div 
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 300,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px',
-            background: 'rgba(0,0,0,0.5)',
-            backdropFilter: 'blur(4px)',
-          }}
-          onClick={() => setDeleteConfirm(null)}
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: darkMode ? 'rgba(30, 33, 45, 0.98)' : 'rgba(255, 255, 255, 0.98)',
-              borderRadius: '16px',
-              padding: '20px 24px',
-              boxShadow: '0 10px 40px rgba(0,0,0,0.4)',
-              border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
-              backdropFilter: 'blur(10px)',
-              maxWidth: '320px',
-              width: '100%',
-            }}
-          >
-            {deleteConfirm.usageCount > 0 ? (
-              <>
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '10px', 
-                  marginBottom: '12px',
-                  color: '#f59e0b',
-                  fontSize: '14px',
-                  fontWeight: '500',
-                }}>
-                  <span style={{ fontSize: '18px' }}>⚠️</span>
-                  In Verwendung
+        
+        {conflicts.length > 0 && (
+          <div className="merge-section">
+            <div className="merge-section-header conflict">
+              <span className="merge-badge conflict">🔄 Abweichung – bitte entscheiden</span>
+              <small>{conflicts.length} Feld{conflicts.length !== 1 ? 'er' : ''}</small>
+            </div>
+            <div className="merge-conflicts">
+              {conflicts.map(({ key, existingValue, newValue }) => (
+                <div key={key} className="merge-conflict">
+                  <div className="merge-conflict-header">
+                    <strong>{formatFieldName(key)}</strong>
+                  </div>
+                  <div className="merge-conflict-options">
+                    <label className={`merge-option ${mergeDecisions[key] === 'keep' ? 'selected' : ''}`}>
+                      <input 
+                        type="radio" 
+                        name={`merge-${key}`} 
+                        checked={mergeDecisions[key] === 'keep'} 
+                        onChange={() => handleMergeDecision(key, 'keep')}
+                      />
+                      <span className="merge-option-label">
+                        <span className="merge-option-tag keep">Behalten</span>
+                        <span className="merge-option-value">{formatValue(key, existingValue)}</span>
+                      </span>
+                    </label>
+                    <label className={`merge-option ${mergeDecisions[key] === 'new' ? 'selected' : ''}`}>
+                      <input 
+                        type="radio" 
+                        name={`merge-${key}`} 
+                        checked={mergeDecisions[key] === 'new'} 
+                        onChange={() => handleMergeDecision(key, 'new')}
+                      />
+                      <span className="merge-option-label">
+                        <span className="merge-option-tag new">Übernehmen</span>
+                        <span className="merge-option-value">{formatValue(key, newValue)}</span>
+                      </span>
+                    </label>
+                  </div>
                 </div>
-                <p style={{ 
-                  color: theme.text, 
-                  fontSize: '14px', 
-                  marginBottom: '8px',
-                  fontWeight: '500',
-                }}>
-                  "{deleteConfirm.label}" löschen?
-                </p>
-                <p style={{ 
-                  color: theme.textMuted, 
-                  fontSize: '13px', 
-                  marginBottom: '20px',
-                }}>
-                  Wird in {deleteConfirm.usageCount} Aufgabe{deleteConfirm.usageCount > 1 ? 'n' : ''} verwendet
-                </p>
-              </>
-            ) : (
-              <p style={{ 
-                color: theme.text, 
-                fontSize: '14px', 
-                marginBottom: '20px',
-                fontWeight: '500',
-              }}>
-                "{deleteConfirm.label}" löschen?
-              </p>
-            )}
-            
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                style={{
-                  padding: '10px 20px',
-                  borderRadius: '10px',
-                  border: `1px solid ${darkMode ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)'}`,
-                  background: 'transparent',
-                  color: theme.textMuted,
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  fontWeight: '500',
-                }}
-              >Abbrechen</button>
-              <button
-                onClick={confirmDelete}
-                style={{
-                  padding: '10px 20px',
-                  borderRadius: '10px',
-                  border: 'none',
-                  background: 'rgba(239, 68, 68, 0.15)',
-                  color: '#ef4444',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                }}
-              >Löschen</button>
+              ))}
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Auth Modal */}
-      {showAuthModal && (
-        <div 
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 200,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px',
-            background: 'rgba(0,0,0,0.7)',
-          }}
-          onClick={() => setShowAuthModal(false)}
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: '100%',
-              maxWidth: '380px',
-              padding: '32px 24px',
-              borderRadius: '24px',
-              background: darkMode ? 'rgba(25, 28, 40, 0.98)' : 'rgba(255,255,255,0.98)',
-              border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-              backdropFilter: 'blur(24px)',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
-            }}
-          >
-            {/* Header */}
-            <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-              <div style={{ 
-                width: '64px', 
-                height: '64px', 
-                margin: '0 auto 16px',
-                borderRadius: '20px',
-                background: `linear-gradient(135deg, ${colors.mint}40, ${colors.purple}40)`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}>
-                <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
-                  <path d="M24 6L24 6C24 6 36 18 36 28C36 34.627 30.627 40 24 40C17.373 40 12 34.627 12 28C12 18 24 6 24 6Z" stroke={colors.mint} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  <path d="M20 28C20 30.209 21.791 32 24 32" stroke={colors.mint} strokeWidth="2.5" strokeLinecap="round"/>
-                </svg>
-              </div>
-              <h2 style={{ 
-                fontSize: '22px', 
-                fontWeight: '700', 
-                color: theme.text, 
-                margin: '0 0 4px 0' 
-              }}>
-                {authMode === 'login' ? 'Willkommen zurück!' : authMode === 'register' ? 'Konto erstellen' : 'Passwort vergessen?'}
-              </h2>
-              <p style={{ fontSize: '14px', color: theme.textMuted, margin: 0 }}>
-                {authMode === 'login' ? 'Melde dich bei MindFlow an' : authMode === 'register' ? 'Registriere dich bei MindFlow' : 'Wir senden dir einen Reset-Link'}
-              </p>
+        )}
+        
+        {unchanged.length > 0 && (
+          <div className="merge-section">
+            <div className="merge-section-header unchanged">
+              <span className="merge-badge unchanged">⚪ Unverändert</span>
+              <small>{unchanged.length} Feld{unchanged.length !== 1 ? 'er' : ''}</small>
             </div>
-
-            {/* Error Message */}
-            {authError && (
-              <div style={{
-                padding: '12px',
-                marginBottom: '16px',
-                borderRadius: '12px',
-                background: 'rgba(239, 68, 68, 0.1)',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                color: '#ef4444',
-                fontSize: '13px',
-                textAlign: 'center',
-              }}>
-                {authError}
-              </div>
-            )}
-
-            {/* Email Input */}
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ 
-                display: 'block', 
-                fontSize: '13px', 
-                fontWeight: '500', 
-                color: theme.textMuted,
-                marginBottom: '6px',
-              }}>E-Mail</label>
-              <input
-                type="email"
-                value={authEmail}
-                onChange={(e) => setAuthEmail(e.target.value)}
-                placeholder="deine@email.de"
-                style={{
-                  width: '100%',
-                  padding: '14px 16px',
-                  borderRadius: '12px',
-                  border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : '#d1d5db'}`,
-                  background: darkMode ? 'rgba(255,255,255,0.05)' : '#f9fafb',
-                  color: theme.text,
-                  fontSize: '15px',
-                  outline: 'none',
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-
-            {/* Password Input - hide in forgot mode */}
-            {authMode !== 'forgot' && (
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ 
-                display: 'block', 
-                fontSize: '13px', 
-                fontWeight: '500', 
-                color: theme.textMuted,
-                marginBottom: '6px',
-              }}>Passwort</label>
-              <input
-                type="password"
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-                placeholder="••••••••"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    authMode === 'login' ? handleLogin() : handleRegister();
-                  }
-                }}
-                style={{
-                  width: '100%',
-                  padding: '14px 16px',
-                  borderRadius: '12px',
-                  border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : '#d1d5db'}`,
-                  background: darkMode ? 'rgba(255,255,255,0.05)' : '#f9fafb',
-                  color: theme.text,
-                  fontSize: '15px',
-                  outline: 'none',
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-            )}
-            
-            {/* Forgot Password Link - only show in login mode */}
-            {authMode === 'login' && (
-              <div style={{ marginTop: '-16px', marginBottom: '24px', textAlign: 'right' }}>
-                <button
-                  onClick={() => {
-                    setAuthMode('forgot');
-                    setAuthError(null);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: theme.textMuted,
-                    fontSize: '13px',
-                    cursor: 'pointer',
-                    padding: 0,
-                  }}
-                >
-                  Passwort vergessen?
-                </button>
-              </div>
-            )}
-
-            {/* Submit Button */}
-            <button
-              onClick={authMode === 'login' ? handleLogin : authMode === 'register' ? handleRegister : handleForgotPassword}
-              disabled={authLoading}
-              style={{
-                width: '100%',
-                padding: '14px',
-                borderRadius: '12px',
-                border: 'none',
-                background: `linear-gradient(135deg, ${colors.mint}, ${colors.purple})`,
-                color: '#1f2937',
-                fontSize: '15px',
-                fontWeight: '600',
-                cursor: authLoading ? 'not-allowed' : 'pointer',
-                opacity: authLoading ? 0.7 : 1,
-                marginBottom: '16px',
-              }}
-            >
-              {authLoading ? 'Laden...' : (authMode === 'login' ? 'Anmelden' : authMode === 'register' ? 'Registrieren' : 'Link senden')}
-            </button>
-
-            {/* Switch Mode */}
-            <p style={{ 
-              textAlign: 'center', 
-              fontSize: '14px', 
-              color: theme.textMuted,
-              margin: 0,
-            }}>
-              {authMode === 'forgot' ? (
-                <button
-                  onClick={() => {
-                    setAuthMode('login');
-                    setAuthError(null);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: colors.mint,
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                  }}
-                >
-                  ← Zurück zum Login
-                </button>
-              ) : (
-                <>
-                  {authMode === 'login' ? 'Noch kein Konto? ' : 'Bereits registriert? '}
-                  <button
-                    onClick={() => {
-                      setAuthMode(authMode === 'login' ? 'register' : 'login');
-                      setAuthError(null);
-                    }}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: colors.mint,
-                      fontWeight: '600',
-                      cursor: 'pointer',
-                      fontSize: '14px',
-                    }}
-                  >
-                    {authMode === 'login' ? 'Registrieren' : 'Anmelden'}
-                  </button>
-                </>
+            <div className="merge-fields collapsed">
+              {unchanged.slice(0, 3).map(({ key, value }) => (
+                <div key={key} className="merge-field unchanged">
+                  <span className="merge-field-name">{formatFieldName(key)}</span>
+                  <span className="merge-field-value">{formatValue(key, value)}</span>
+                </div>
+              ))}
+              {unchanged.length > 3 && (
+                <div className="merge-field-more">+ {unchanged.length - 3} weitere</div>
               )}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Calendar Modal */}
-      {calendarModal.show && calendarModal.todo && (
-        <div 
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 100,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px',
-            background: 'rgba(0,0,0,0.6)',
-          }}
-          onClick={() => setCalendarModal({ show: false, todo: null })}
-        >
-          <div 
-            style={{
-              background: darkMode ? 'rgba(25, 28, 40, 0.95)' : 'white',
-              borderRadius: '24px',
-              padding: '24px',
-              maxWidth: '320px',
-              width: '100%',
-              backdropFilter: 'blur(24px)',
-              border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-              boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ 
-              color: darkMode ? '#f3f4f6' : '#1f2937', 
-              margin: '0 0 8px 0',
-              fontSize: '18px',
-              fontWeight: '600',
-            }}>
-              Kalender auswählen
-            </h3>
-            <p style={{ 
-              color: darkMode ? '#6B7280' : '#9ca3af', 
-              margin: '0 0 20px 0',
-              fontSize: '14px',
-            }}>
-              "{calendarModal.todo.title}"
-            </p>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {/* Apple Calendar */}
-              <button
-                onClick={() => openAppleCalendar(calendarModal.todo)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '14px 16px',
-                  borderRadius: '12px',
-                  border: 'none',
-                  background: darkMode ? 'rgba(255,255,255,0.08)' : '#f3f4f6',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-              >
-                <div style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  background: 'linear-gradient(180deg, #FF5E5E 0%, #FF2D55 100%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'white',
-                  fontSize: '18px',
-                }}>
-                  📅
-                </div>
-                <div style={{ textAlign: 'left' }}>
-                  <p style={{ margin: 0, fontWeight: '500', color: darkMode ? '#f3f4f6' : '#1f2937' }}>Apple Kalender</p>
-                  <p style={{ margin: 0, fontSize: '12px', color: darkMode ? '#6B7280' : '#9ca3af' }}>iPhone, iPad, Mac</p>
-                </div>
-              </button>
-
-              {/* Google Calendar */}
-              <button
-                onClick={() => openGoogleCalendar(calendarModal.todo)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '14px 16px',
-                  borderRadius: '12px',
-                  border: 'none',
-                  background: darkMode ? 'rgba(255,255,255,0.08)' : '#f3f4f6',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-              >
-                <div style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  background: 'linear-gradient(180deg, #4285F4 0%, #34A853 50%, #FBBC05 75%, #EA4335 100%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'white',
-                  fontSize: '18px',
-                }}>
-                  📆
-                </div>
-                <div style={{ textAlign: 'left' }}>
-                  <p style={{ margin: 0, fontWeight: '500', color: darkMode ? '#f3f4f6' : '#1f2937' }}>Google Kalender</p>
-                  <p style={{ margin: 0, fontSize: '12px', color: darkMode ? '#6B7280' : '#9ca3af' }}>Web, Android, iOS</p>
-                </div>
-              </button>
-
-              {/* Download ICS */}
-              <button
-                onClick={() => downloadICS(calendarModal.todo)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '14px 16px',
-                  borderRadius: '12px',
-                  border: 'none',
-                  background: darkMode ? 'rgba(255,255,255,0.08)' : '#f3f4f6',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-              >
-                <div style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  background: darkMode ? 'rgba(70, 240, 210, 0.2)' : colors.mint,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: darkMode ? colors.mint : '#1f2937',
-                  fontSize: '18px',
-                }}>
-                  ⬇️
-                </div>
-                <div style={{ textAlign: 'left' }}>
-                  <p style={{ margin: 0, fontWeight: '500', color: darkMode ? '#f3f4f6' : '#1f2937' }}>Herunterladen</p>
-                  <p style={{ margin: 0, fontSize: '12px', color: darkMode ? '#6B7280' : '#9ca3af' }}>.ics Datei (Outlook, etc.)</p>
-                </div>
-              </button>
             </div>
-
-            {/* Cancel button */}
-            <button
-              onClick={() => setCalendarModal({ show: false, todo: null })}
-              style={{
-                marginTop: '16px',
-                width: '100%',
-                padding: '12px',
-                borderRadius: '12px',
-                border: 'none',
-                background: 'transparent',
-                color: darkMode ? '#6B7280' : '#9ca3af',
-                cursor: 'pointer',
-                fontSize: '14px',
-              }}
-            >
-              Abbrechen
-            </button>
           </div>
+        )}
+        
+        <div className="merge-actions">
+          <button className="btn-back" onClick={() => setMergeMode(false)}>
+            <span className="btn-icon-sm"><IconArrowLeft color="var(--text)" /></span>Zurück
+          </button>
+          <button className="btn-merge" onClick={executeMerge}>
+            <span className="btn-icon-sm"><IconCheck color="#fff" /></span>
+            Änderungen übernehmen
+          </button>
         </div>
-      )}
+      </div>
+    );
+  };
 
-      {/* Voice Control Modal */}
-      {showVoiceModal && (
-        <div 
-          onClick={() => {
-            if (!isListening) {
-              setShowVoiceModal(false);
-              setVoiceFeedback(null);
-            }
-          }}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(8px)',
-            zIndex: 100,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
-          }}>
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: darkMode 
-                ? 'linear-gradient(145deg, rgba(25, 28, 40, 0.95), rgba(25, 28, 40, 0.9))'
-                : 'rgba(255, 255, 255, 0.95)',
-              borderRadius: '24px',
-              padding: '32px',
-              maxWidth: '350px',
-              width: '100%',
-              textAlign: 'center',
-              border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : '#e5e7eb'}`,
-            }}>
-            {/* Mic Animation */}
-            <div style={{
-              width: '80px',
-              height: '80px',
-              margin: '0 auto 24px',
-              borderRadius: '50%',
-              background: isListening 
-                ? `linear-gradient(135deg, ${colors.coral} 0%, ${colors.orange} 100%)`
-                : `linear-gradient(135deg, ${colors.mint}30 0%, ${colors.skyBlue}30 100%)`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              animation: isListening ? 'pulse 1.5s ease-in-out infinite' : 'none',
-              cursor: 'pointer',
-            }}
-            onClick={toggleVoiceRecognition}
-            >
-              <svg style={{ width: '32px', height: '32px', color: isListening ? 'white' : colors.mint }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-              </svg>
-            </div>
-            
-            {/* Status Text */}
-            <h3 style={{ 
-              fontSize: '18px', 
-              fontWeight: '600', 
-              color: theme.text, 
-              marginBottom: '8px',
-            }}>
-              {isListening ? 'Ich höre zu...' : 'Sprachsteuerung'}
-            </h3>
-            
-            <p style={{ 
-              fontSize: '14px', 
-              color: theme.textMuted, 
-              marginBottom: '16px',
-            }}>
-              {isListening 
-                ? 'Sag deinen Befehl...' 
-                : 'Tippe auf das Mikrofon um zu starten'}
-            </p>
-            
-            {/* Transcript Display */}
-            {(voiceTranscript || voiceInterim) && (
-              <div style={{
-                background: darkMode ? 'rgba(70, 240, 210, 0.1)' : 'rgba(70, 240, 210, 0.15)',
-                borderRadius: '12px',
-                padding: '12px 16px',
-                marginBottom: '16px',
-                minHeight: '48px',
-              }}>
-                <p style={{ 
-                  fontSize: '16px', 
-                  color: theme.text,
-                  fontStyle: voiceInterim && !voiceTranscript ? 'italic' : 'normal',
-                  opacity: voiceInterim && !voiceTranscript ? 0.7 : 1,
-                }}>
-                  "{voiceTranscript || voiceInterim}"
-                </p>
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal import-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-h">
+          <h2><span className="modal-icon"><IconUpload color="#6366f1" /></span>
+            {mergeMode ? 'Daten zusammenführen' : 'Dokument importieren'}
+          </h2>
+          <button onClick={onClose}>×</button>
+        </div>
+        
+        <div className="modal-b">
+          {mergeMode && parsedData?.mergeData ? (
+            renderMergeView()
+          ) : !parsedData ? (
+            <>
+              {existingImmo && (
+                <div className="import-target-info">
+                  <span className="import-target-icon"><IconObjekt color="#6366f1" /></span>
+                  <div>
+                    <strong>Daten ergänzen für:</strong>
+                    <span>{existingImmo.stammdaten.name}</span>
+                  </div>
+                </div>
+              )}
+              
+              <div 
+                className={`upload-zone ${files.length > 0 ? 'has-file' : ''}`}
+                onDrop={handleDrop}
+                onDragOver={(e) => e.preventDefault()}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp"
+                  onChange={handleFileSelect}
+                  multiple
+                  style={{ display: 'none' }}
+                />
+                {preview ? (
+                  <img src={preview} alt="Preview" className="upload-preview" />
+                ) : files.length > 0 ? (
+                  <>
+                    <div className="upload-icon"><IconSteuer color="#6366f1" /></div>
+                    <p>{files.length} Dokument{files.length > 1 ? 'e' : ''} ausgewählt</p>
+                    <small>{files.map(f => f.name).join(', ')}</small>
+                  </>
+                ) : (
+                  <>
+                    <div className="upload-icon"><IconUpload color="#6366f1" /></div>
+                    <p>Dokumente hierher ziehen oder klicken</p>
+                    <small>PDF, PNG, JPG • Mehrere Dateien möglich (z.B. Exposé + Darlehensvertrag)</small>
+                  </>
+                )}
               </div>
-            )}
-            
-            {/* Feedback Message */}
-            {voiceFeedback && (
-              <div style={{
-                background: voiceFeedback.startsWith('✓') 
-                  ? 'rgba(70, 240, 210, 0.2)' 
-                  : voiceFeedback.startsWith('✗') 
-                    ? 'rgba(255, 107, 138, 0.2)'
-                    : 'rgba(255, 171, 94, 0.2)',
-                borderRadius: '12px',
-                padding: '12px 16px',
-                marginBottom: '16px',
-              }}>
-                <p style={{ 
-                  fontSize: '14px', 
-                  color: voiceFeedback.startsWith('✓') 
-                    ? colors.mint 
-                    : voiceFeedback.startsWith('✗')
-                      ? colors.coral
-                      : colors.orange,
-                  fontWeight: '500',
-                }}>
-                  {voiceFeedback}
-                </p>
-              </div>
-            )}
-            
-            {/* Error Message */}
-            {voiceError && (
-              <div style={{
-                background: 'rgba(255, 107, 138, 0.2)',
-                borderRadius: '12px',
-                padding: '12px 16px',
-                marginBottom: '16px',
-              }}>
-                <p style={{ fontSize: '14px', color: colors.coral }}>
-                  {voiceError}
-                </p>
-              </div>
-            )}
-            
-            {/* Command Examples */}
-            {!isListening && !voiceFeedback && (
-              <div style={{ textAlign: 'left', marginTop: '16px' }}>
-                <p style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '8px', fontWeight: '600' }}>
-                  Beispiel-Befehle:
-                </p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  {[
-                    '"Neue Aufgabe: Bericht schreiben"',
-                    '"Erledigt: Angebot senden"',
-                    '"Zeige Aufgaben von @Name"',
-                    '"Kritische Aufgaben"',
-                    '"Suche Budget"',
-                  ].map((example, i) => (
-                    <p key={i} style={{ fontSize: '12px', color: theme.textMuted }}>
-                      • {example}
-                    </p>
+              
+              {files.length > 0 && (
+                <div className="files-list">
+                  {files.map((f, i) => (
+                    <div key={i} className={`file-item ${i === currentFileIndex ? 'current' : ''} ${i < currentFileIndex || (i === currentFileIndex && processingStatus === 'done') ? 'done' : ''}`}>
+                      <span className="file-status">
+                        {i < currentFileIndex || (i === currentFileIndex && processingStatus === 'done') ? '✓' : 
+                         i === currentFileIndex && parsing ? '⟳' : 
+                         (i + 1)}
+                      </span>
+                      <span className="file-name">{f.name}</span>
+                      <span className="file-size">{(f.size / 1024).toFixed(0)} KB</span>
+                    </div>
                   ))}
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'6px',padding:'0 2px'}}>
+                    <span style={{fontSize:'11px',color:'var(--text-muted)'}}>Tipp: weitere Dokumente einfach zusätzlich reinziehen oder per ⌘+Klick mehrere auswählen.</span>
+                    {allParsedData.length === 0 && !parsing && (
+                      <button onClick={clearFiles} style={{background:'transparent',border:'1px solid var(--border)',color:'var(--text-muted)',borderRadius:'5px',fontSize:'11px',padding:'3px 8px',cursor:'pointer'}}>Liste leeren</button>
+                    )}
+                  </div>
+                </div>
+              )}
+              
+              {error && <div className="import-error">❌ {error}</div>}
+              
+              <div className="import-hint">
+                <strong><span className="hint-icon"><IconAI color="#6366f1" /></span>KI-gestützte Analyse</strong>
+                {existingImmo 
+                  ? 'Das Dokument wird analysiert. Neue Daten werden ergänzt, bei Abweichungen kannst du entscheiden.'
+                  : 'Das Dokument wird von Claude analysiert. Alle gefundenen Immobiliendaten werden extrahiert und als "zu prüfen" markiert.'
+                }
+              </div>
+              
+              <div className="import-doctype-hint">
+                <strong>Unterstützte Dokumenttypen:</strong>
+                <div className="doctype-list">
+                  <span><span className="doctype-icon"><IconKaufpreis color="#10b981" /></span>Kaufvertrag/Exposé</span>
+                  <span><span className="doctype-icon"><IconMiete color="#ec4899" /></span>Mietvertrag</span>
+                  <span><span className="doctype-icon"><IconFinanz color="#3b82f6" /></span>Darlehensvertrag</span>
+                  <span><span className="doctype-icon"><IconWerbung color="#f59e0b" /></span>Nebenkostenabrechnung</span>
+                  <span><span className="doctype-icon"><IconObjekt color="#8b5cf6" /></span>Grundbuchauszug</span>
+                  <span><span className="doctype-icon"><IconList color="#06b6d4" /></span>Auflistung/Übersicht</span>
                 </div>
               </div>
-            )}
-            
-            {/* Close Button */}
-            <button
-              onClick={() => {
-                if (isListening && recognitionRef.current) {
-                  recognitionRef.current.stop();
-                }
-                setShowVoiceModal(false);
-                setVoiceFeedback(null);
-                setVoiceError(null);
-              }}
-              style={{
-                marginTop: '20px',
-                padding: '12px 24px',
-                borderRadius: '12px',
-                border: 'none',
-                background: 'transparent',
-                color: theme.textMuted,
-                cursor: 'pointer',
-                fontSize: '14px',
-              }}
-            >
-              Schließen
-            </button>
-          </div>
+            </>
+          ) : (
+            <div className="parse-results">
+              <div className="parse-header">
+                <span className="parse-icon-wrap">{getDocTypeIcon(documentType)}</span>
+                <div>
+                  <strong>{getDocTypeName(documentType)}</strong>
+                  <small>{parsedData.dokumentBeschreibung || parsedData.filename}</small>
+                </div>
+              </div>
+              
+              <div className="parse-found-info-bar">
+                <span className="parse-found-count">
+                  <strong>{parsedData.immobilien.length}</strong> Immobilie{parsedData.immobilien.length !== 1 ? 'n' : ''} gefunden
+                  {parsedData.immobilien.some(i => i.darlehen?.length > 0) && (
+                    <span className="parse-darlehen-hint"> (inkl. Darlehen)</span>
+                  )}
+                </span>
+                {parsedData.immobilien.length > 1 && !existingImmo && (
+                  <button 
+                    className="btn-import-all"
+                    onClick={() => {
+                      // Alle Immobilien als Array importieren (mit Darlehen!)
+                      const allImmos = parsedData.immobilien.map(immo => {
+                        const { gefundeneFelder, zuPruefen, quellenDokument, dokumentTyp, lfdNr, darlehen, ...cleanData } = immo;
+                        
+                        // Darlehen separat verarbeiten
+                        const darlehenArray = Array.isArray(darlehen) ? darlehen.map(d => ({
+                          name: d.name || '',
+                          institut: d.institut || '',
+                          kontonummer: d.kontonummer || '',
+                          typ: d.typ || 'annuitaeten',
+                          betrag: d.betrag || 0,
+                          zinssatz: d.zinssatz || 0,
+                          effektivzins: d.effektivzins || 0,
+                          tilgung: d.tilgung || 2,
+                          monatsrate: d.monatsrate || 0,
+                          sondertilgung: d.sondertilgung || 5,
+                          abschluss: d.abschluss || '',
+                          ersteRate: d.ersteRate || '',
+                          laufzeit: d.laufzeit || 0,
+                          zinsbindungJahre: d.zinsbindungJahre || 10,
+                          zinsbindungEnde: d.zinsbindungEnde || '',
+                          restschuld: d.restschuld || 0
+                        })) : [];
+                        
+                        return {
+                          ...createEmpty(),
+                          id: Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                          importiert: true,
+                          zuPruefen: zuPruefen || gefundeneFelder || [],
+                          darlehen: darlehenArray,
+                          stammdaten: {
+                            ...createEmpty().stammdaten,
+                            ...cleanData,
+                          }
+                        };
+                      });
+                      onImport(allImmos);
+                    }}
+                  >
+                    <IconCheck color="#fff" /> Alle {parsedData.immobilien.length} importieren
+                  </button>
+                )}
+                {!existingImmo && ((parsedData.quellenDokumente?.length || 0) > 1 || parsedData.immobilien.length > 1) && (
+                  <button className="btn-import-all" style={{ background: '#6366f1', marginLeft: '8px' }} onClick={importAsGebaeude} title="Alle Dokumente zu einem Gebäude verschmelzen; Wohnungen aus Mieterliste werden als Einheiten angelegt">
+                    🏢 Als 1 Gebäude + Einheiten importieren
+                  </button>
+                )}
+                {existingImmo && existingImmo.isContainer && parsedData.immobilien.length >= 1 && (
+                  <button className="btn-import-all" style={{ background: '#6366f1' }} onClick={importAsEinheiten} title="Die gefundenen Wohnungen als neue Einheiten zu diesem Gebäude hinzufügen">
+                    🏠 Als {parsedData.immobilien.length} Einheit{parsedData.immobilien.length !== 1 ? 'en' : ''} zu diesem Gebäude hinzufügen
+                  </button>
+                )}
+              </div>
+              
+              <div className="parsed-immos-scroll">
+                {parsedData.immobilien.map((immo, idx) => (
+                  <ParsedImmoCard 
+                    key={idx}
+                    immo={immo}
+                    idx={idx}
+                    total={parsedData.immobilien.length}
+                    formatFieldName={formatFieldName}
+                    formatValue={formatValue}
+                    handleImport={existingImmo ? (existingImmo.isContainer ? addOneAsEinheit : prepareMerge) : handleImport}
+                    buttonLabel={existingImmo ? (existingImmo.isContainer ? '+ Als Einheit' : 'Zusammenführen') : 'Importieren'}
+                  />
+                ))}
+              </div>
+              
+              {parsedData.immobilien.length > 1 && !existingImmo && (
+                <div className="parse-multi-hint">
+                  <IconInfo color="#3b82f6" />
+                  <span>Bei "Alle importieren" werden alle Immobilien direkt gespeichert (mit "zu prüfen" Markierung). Die erste wird zur Bearbeitung geöffnet, die anderen findest du in der Übersicht.</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      )}
-
-      {/* Filter View Modal */}
-      {activeTab === 'filter' && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 60,
-          background: darkMode ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.95)',
-          backdropFilter: 'blur(20px)',
-          display: 'flex',
-          flexDirection: 'column',
-          padding: '20px',
-          paddingBottom: '120px',
-          overflowY: 'auto',
-        }}>
-          <div style={{ maxWidth: '430px', margin: '0 auto', width: '100%' }}>
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h2 style={{ fontSize: '24px', fontWeight: '700', color: theme.text }}>Filter</h2>
-              <button
-                onClick={() => setActiveTab('tasks')}
-                style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '50%',
-                  background: darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: theme.text,
-                  fontSize: '18px',
-                }}
-              >✕</button>
-            </div>
-
-            {/* Kategorien */}
-            <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Kategorien</h3>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {allCategories.map(cat => (
-                  <button
-                    key={cat.id}
-                    onClick={() => {
-                      if (selectedCategories.includes(cat.id)) {
-                        setSelectedCategories(selectedCategories.filter(c => c !== cat.id));
-                      } else {
-                        setSelectedCategories([...selectedCategories, cat.id]);
-                      }
-                    }}
-                    style={{
-                      padding: '10px 16px',
-                      borderRadius: '12px',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      background: selectedCategories.includes(cat.id) ? cat.color : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
-                      color: selectedCategories.includes(cat.id) ? '#000' : theme.text,
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {cat.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Status */}
-            <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</h3>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {['Offen', 'In Bearbeitung', 'Auf Rückmeldung', 'Erledigt'].map(status => (
-                  <button
-                    key={status}
-                    onClick={() => {
-                      if (selectedStatusFilter === status) {
-                        setSelectedStatusFilter('Alle Status');
-                        setActiveStatFilter(null);
-                      } else {
-                        setSelectedStatusFilter(status);
-                        setActiveStatFilter('status');
-                      }
-                    }}
-                    style={{
-                      padding: '10px 16px',
-                      borderRadius: '12px',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      background: selectedStatusFilter === status ? colors.mint : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
-                      color: selectedStatusFilter === status ? '#000' : theme.text,
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {status}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Priorität */}
-            <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Priorität</h3>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {priorities.map(prio => (
-                  <button
-                    key={prio.level}
-                    onClick={() => {
-                      if (activeStatFilter === `prio-${prio.level}`) {
-                        setActiveStatFilter(null);
-                      } else {
-                        setActiveStatFilter(`prio-${prio.level}`);
-                      }
-                    }}
-                    style={{
-                      padding: '10px 16px',
-                      borderRadius: '12px',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      background: activeStatFilter === `prio-${prio.level}` ? prio.color : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
-                      color: activeStatFilter === `prio-${prio.level}` ? '#000' : theme.text,
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {prio.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Zeitraum */}
-            <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Zeitraum</h3>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {dateFilterOptions.map(date => (
-                  <button
-                    key={date}
-                    onClick={() => setSelectedDateFilter(date)}
-                    style={{
-                      padding: '10px 16px',
-                      borderRadius: '12px',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      background: selectedDateFilter === date ? colors.skyBlue : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
-                      color: selectedDateFilter === date ? '#000' : theme.text,
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {date}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Personen */}
-            <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Personen</h3>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {allPersons.map(person => (
-                  <button
-                    key={person}
-                    onClick={() => {
-                      if (personFilter === `@${person}`) {
-                        setPersonFilter(null);
-                      } else {
-                        setPersonFilter(`@${person}`);
-                        setMeetingFilter(null);
-                      }
-                    }}
-                    style={{
-                      padding: '10px 16px',
-                      borderRadius: '12px',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      background: personFilter === `@${person}` ? colors.purple : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
-                      color: personFilter === `@${person}` ? '#000' : theme.text,
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    @{person}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Meetings */}
-            <div style={{ marginBottom: '24px' }}>
-              <h3 style={{ fontSize: '14px', fontWeight: '600', color: theme.textMuted, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Meetings</h3>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {allMeetings.map(meeting => (
-                  <button
-                    key={meeting}
-                    onClick={() => {
-                      if (meetingFilter === `#${meeting}`) {
-                        setMeetingFilter(null);
-                      } else {
-                        setMeetingFilter(`#${meeting}`);
-                        setPersonFilter(null);
-                      }
-                    }}
-                    style={{
-                      padding: '10px 16px',
-                      borderRadius: '12px',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      background: meetingFilter === `#${meeting}` ? colors.skyBlue : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
-                      color: meetingFilter === `#${meeting}` ? '#000' : theme.text,
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    #{meeting}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Reset Button */}
-            <button
-              onClick={() => {
-                // Select all available categories
-                setSelectedCategories(allCategories.map(c => c.id));
-                setSelectedStatusFilter('Rückmeldung');
-                setSelectedDateFilter('Heute');
-                setActiveStatFilter(null);
-                setPersonFilter(null);
-                setMeetingFilter(null);
-                setSearchQuery('');
-              }}
-              style={{
-                width: '100%',
-                padding: '14px',
-                borderRadius: '12px',
-                fontSize: '15px',
-                fontWeight: '600',
-                background: 'transparent',
-                color: colors.coral,
-                border: `1px solid ${colors.coral}`,
-                cursor: 'pointer',
-                marginBottom: '16px',
-              }}
-            >
-              Filter zurücksetzen
+        
+        <div className="modal-f">
+          {!parsedData ? (
+            <>
+              <button className="btn-pri" onClick={parseAllDocuments} disabled={files.length === 0 || parsing}>
+                {parsing ? (
+                  <><span className="spinner"></span> Analysiere Dokument {currentFileIndex + 1}/{files.length}...</>
+                ) : (
+                  <><span className="btn-icon-sm"><IconSearch color="#fff" /></span>
+                    {files.length > 1 ? `${files.length} Dokumente analysieren` : 'Dokument analysieren'}
+                  </>
+                )}
+              </button>
+              {processingStatus === 'done' && currentFileIndex < files.length - 1 && (
+                <button className="btn-sec" onClick={processNextFile}>
+                  <span className="btn-icon-sm"><IconArrowLeft color="#fafafa" style={{ transform: 'rotate(180deg)' }} /></span>
+                  Nächstes Dokument ({currentFileIndex + 2}/{files.length})
+                </button>
+              )}
+            </>
+          ) : (
+            <button className="btn-sec" onClick={() => { setParsedData(null); setFiles([]); setCurrentFileIndex(0); setAllParsedData([]); setPreview(null); setBase64Data(null); setProcessingStatus(null); }}>
+              <span className="btn-icon-sm"><IconArrowLeft color="#fafafa" /></span>Andere Dokumente
             </button>
-
-            {/* Apply Button */}
-            <button
-              onClick={() => setActiveTab('tasks')}
-              style={{
-                width: '100%',
-                padding: '14px',
-                borderRadius: '12px',
-                fontSize: '15px',
-                fontWeight: '600',
-                background: colors.mint,
-                color: '#000',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              Filter anwenden
-            </button>
-          </div>
+          )}
         </div>
-      )}
-
-      {/* Bottom Navigation */}
-      <nav className="mindflow-nav" style={{
-        position: 'fixed',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        zIndex: 50,
-        padding: '12px 20px 24px',
-      }}>
-        <div className="mindflow-nav-inner" style={{
-          background: darkMode 
-            ? 'linear-gradient(145deg, rgba(25, 28, 40, 0.95), rgba(25, 28, 40, 0.85))'
-            : 'rgba(255, 255, 255, 0.9)',
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
-          borderRadius: '24px',
-          padding: '8px 16px',
-          display: 'flex',
-          justifyContent: 'space-around',
-          alignItems: 'center',
-          border: `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)'}`,
-          boxShadow: '0 -4px 24px rgba(0,0,0,0.2)',
-        }}>
-          {/* Tasks */}
-          <button 
-            onClick={() => setActiveTab('tasks')}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              padding: '8px 16px',
-              borderRadius: '16px',
-              background: activeTab === 'tasks' 
-                ? (darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.6)')
-                : 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              color: darkMode ? '#6B7280' : '#9ca3af',
-            }}
-          >
-            {Icons.tasks}
-            <span style={{ fontSize: '12px', marginTop: '4px' }}>Aufgaben</span>
-          </button>
-
-          {/* Voice Button */}
-          <button 
-            onClick={toggleVoiceRecognition}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '14px',
-              borderRadius: '50%',
-              background: isListening 
-                ? `linear-gradient(135deg, ${colors.coral} 0%, ${colors.orange} 100%)`
-                : darkMode 
-                  ? `linear-gradient(135deg, ${colors.mint}40 0%, ${colors.skyBlue}40 100%)`
-                  : `linear-gradient(135deg, ${colors.mint}50 0%, ${colors.skyBlue}50 100%)`,
-              border: `2px solid ${isListening ? colors.coral : colors.mint}60`,
-              cursor: 'pointer',
-              color: isListening ? 'white' : colors.mint,
-              marginTop: '-8px',
-              animation: isListening ? 'pulse 1.5s ease-in-out infinite' : 'none',
-            }}>
-            {Icons.mic}
-          </button>
-
-          {/* Filter */}
-          <button 
-            onClick={() => setActiveTab('filter')}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              padding: '8px 16px',
-              borderRadius: '16px',
-              background: activeTab === 'filter' 
-                ? (darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.6)')
-                : 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              color: darkMode ? '#6B7280' : '#9ca3af',
-            }}
-          >
-            {Icons.filter}
-            <span style={{ fontSize: '12px', marginTop: '4px' }}>Filter</span>
-          </button>
-        </div>
-      </nav>
       </div>
     </div>
-    </>
   );
+};
+
+// Tilgungsplan Modal
+const TilgungsplanModal = ({ darlehen, onClose }) => {
+  const [jahre, setJahre] = useState(Math.min(darlehen.laufzeit || darlehen.zinsbindungJahre || 15, 30));
+  
+  const berechne = () => {
+    const betrag = darlehen.betrag || 0;
+    const zinssatz = (darlehen.zinssatz || 0) / 100;
+    const tilgung = (darlehen.tilgung || 2) / 100;
+    
+    let restschuld = darlehen.restschuld || betrag;
+    const monatsrate = darlehen.monatsrate || (betrag * (zinssatz + tilgung) / 12);
+    
+    const plan = [];
+    let gesamtZinsen = 0;
+    let gesamtTilgung = 0;
+    
+    for (let j = 1; j <= jahre; j++) {
+      const zinsenJahr = restschuld * zinssatz;
+      const tilgungJahr = Math.min(monatsrate * 12 - zinsenJahr, restschuld);
+      
+      gesamtZinsen += zinsenJahr;
+      gesamtTilgung += tilgungJahr;
+      restschuld = Math.max(0, restschuld - tilgungJahr);
+      
+      plan.push({
+        jahr: j,
+        zinsen: zinsenJahr,
+        tilgung: tilgungJahr,
+        rate: zinsenJahr + tilgungJahr,
+        restschuld: restschuld
+      });
+      
+      if (restschuld <= 0) break;
+    }
+    
+    return { plan, gesamtZinsen, gesamtTilgung, monatsrate };
+  };
+  
+  const { plan, gesamtZinsen, gesamtTilgung, monatsrate } = berechne();
+  
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal tilgungsplan-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-h">
+          <h2><span className="modal-icon"><IconChart color="#3b82f6" /></span>Tilgungsplan</h2>
+          <button onClick={onClose}>×</button>
+        </div>
+        
+        <div className="modal-b">
+          <div className="tp-header">
+            <div className="tp-info">
+              <strong>{darlehen.name || darlehen.institut || 'Darlehen'}</strong>
+              <span>{fmt(darlehen.betrag)} · {darlehen.zinssatz}% Zins · {darlehen.tilgung}% Tilgung</span>
+            </div>
+            <div className="tp-rate">
+              <span>Monatsrate</span>
+              <strong>{fmt(monatsrate)}</strong>
+            </div>
+          </div>
+          
+          <div className="tp-control">
+            <label>Zeitraum:</label>
+            <input type="range" min="5" max="30" value={jahre} onChange={e => setJahre(parseInt(e.target.value))} />
+            <span>{jahre} Jahre</span>
+          </div>
+          
+          <div className="tp-summary">
+            <div className="tp-sum-item">
+              <span>Gesamtzinsen</span>
+              <b className="neg">{fmt(gesamtZinsen)}</b>
+            </div>
+            <div className="tp-sum-item">
+              <span>Gesamttilgung</span>
+              <b className="pos">{fmt(gesamtTilgung)}</b>
+            </div>
+            <div className="tp-sum-item">
+              <span>Restschuld nach {jahre} J.</span>
+              <b>{fmt(plan[plan.length - 1]?.restschuld || 0)}</b>
+            </div>
+          </div>
+          
+          {/* Grafische Darstellung */}
+          <div className="tp-chart">
+            <div className="tp-chart-bars">
+              {plan.map((p, i) => (
+                <div key={i} className="tp-bar-group" title={`Jahr ${p.jahr}: ${fmt(p.restschuld)} Restschuld`}>
+                  <div className="tp-bar-stack">
+                    <div className="tp-bar-zinsen" style={{ height: `${(p.zinsen / (plan[0]?.rate || 1)) * 100}%` }}></div>
+                    <div className="tp-bar-tilgung" style={{ height: `${(p.tilgung / (plan[0]?.rate || 1)) * 100}%` }}></div>
+                  </div>
+                  {(i === 0 || i === plan.length - 1 || i % 5 === 4) && <span className="tp-bar-label">{p.jahr}</span>}
+                </div>
+              ))}
+            </div>
+            <div className="tp-chart-legend">
+              <span><span className="tp-dot zinsen"></span>Zinsen</span>
+              <span><span className="tp-dot tilgung"></span>Tilgung</span>
+            </div>
+          </div>
+          
+          {/* Tabelle */}
+          <div className="tp-table-wrap">
+            <table className="tp-table">
+              <thead>
+                <tr>
+                  <th>Jahr</th>
+                  <th>Zinsen</th>
+                  <th>Tilgung</th>
+                  <th>Rate</th>
+                  <th>Restschuld</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plan.map(p => (
+                  <tr key={p.jahr}>
+                    <td>{p.jahr}</td>
+                    <td className="neg">{fmt(p.zinsen)}</td>
+                    <td className="pos">{fmt(p.tilgung)}</td>
+                    <td>{fmt(p.rate)}</td>
+                    <td><strong>{fmt(p.restschuld)}</strong></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        
+        <div className="modal-f">
+          <button className="btn-sec" onClick={onClose}>Schließen</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Anschlussfinanzierung-Rechner Modal
+const AnschlussfinanzierungModal = ({ darlehen, onClose }) => {
+  const [neuerZins, setNeuerZins] = useState(darlehen.zinssatz + 1);
+  const [neueTilgung, setNeueTilgung] = useState(darlehen.tilgung || 2);
+  const [sondertilgung, setSondertilgung] = useState(0);
+  
+  const restschuld = darlehen.restschuld || darlehen.betrag * 0.8;
+  const restschuldNachSonder = restschuld - sondertilgung;
+  
+  const berechneRate = (betrag, zins, tilg) => betrag * ((zins + tilg) / 100) / 12;
+  
+  const alteRate = berechneRate(restschuld, darlehen.zinssatz, darlehen.tilgung || 2);
+  const neueRate = berechneRate(restschuldNachSonder, neuerZins, neueTilgung);
+  const differenz = neueRate - alteRate;
+  
+  // Szenarien
+  const szenarien = [
+    { name: 'Optimistisch', zins: darlehen.zinssatz },
+    { name: 'Moderat', zins: darlehen.zinssatz + 1 },
+    { name: 'Pessimistisch', zins: darlehen.zinssatz + 2 },
+    { name: 'Worst Case', zins: darlehen.zinssatz + 3 },
+  ];
+  
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal anschluss-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-h">
+          <h2><span className="modal-icon"><IconFinanz color="#f59e0b" /></span>Anschlussfinanzierung</h2>
+          <button onClick={onClose}>×</button>
+        </div>
+        
+        <div className="modal-b">
+          <div className="anschluss-info">
+            <div className="anschluss-info-row">
+              <span>Aktuelles Darlehen</span>
+              <strong>{darlehen.name || darlehen.institut}</strong>
+            </div>
+            <div className="anschluss-info-row">
+              <span>Restschuld (geschätzt)</span>
+              <strong>{fmt(restschuld)}</strong>
+            </div>
+            <div className="anschluss-info-row">
+              <span>Zinsbindung endet</span>
+              <strong>{darlehen.zinsbindungEnde ? new Date(darlehen.zinsbindungEnde).toLocaleDateString('de-DE') : 'Nicht angegeben'}</strong>
+            </div>
+          </div>
+          
+          <div className="anschluss-inputs">
+            <h4>Neue Konditionen simulieren</h4>
+            <div className="anschluss-input-row">
+              <label>Sondertilgung vor Ablauf</label>
+              <NumInput value={sondertilgung} onChange={setSondertilgung} /> €
+            </div>
+            <div className="anschluss-input-row">
+              <label>Neuer Zinssatz</label>
+              <NumInput value={neuerZins} onChange={setNeuerZins} /> %
+            </div>
+            <div className="anschluss-input-row">
+              <label>Neue Tilgung</label>
+              <NumInput value={neueTilgung} onChange={setNeueTilgung} /> %
+            </div>
+          </div>
+          
+          <div className="anschluss-result">
+            <div className="anschluss-result-item">
+              <span>Neue Restschuld</span>
+              <b>{fmt(restschuldNachSonder)}</b>
+            </div>
+            <div className="anschluss-result-item">
+              <span>Alte Rate</span>
+              <b>{fmt(alteRate)}/Mon.</b>
+            </div>
+            <div className="anschluss-result-item highlight">
+              <span>Neue Rate</span>
+              <b className={differenz > 0 ? 'neg' : 'pos'}>{fmt(neueRate)}/Mon.</b>
+            </div>
+            <div className="anschluss-result-item">
+              <span>Differenz</span>
+              <b className={differenz > 0 ? 'neg' : 'pos'}>{differenz > 0 ? '+' : ''}{fmt(differenz)}/Mon.</b>
+            </div>
+          </div>
+          
+          <h4>Szenarien-Vergleich</h4>
+          <div className="anschluss-szenarien">
+            {szenarien.map((s, i) => {
+              const rate = berechneRate(restschuldNachSonder, s.zins, neueTilgung);
+              const diff = rate - alteRate;
+              return (
+                <div key={i} className={`szenario-card ${i === 1 ? 'active' : ''}`}>
+                  <span className="szenario-name">{s.name}</span>
+                  <span className="szenario-zins">{s.zins.toFixed(1)}% Zins</span>
+                  <span className="szenario-rate">{fmt(rate)}/Mon.</span>
+                  <span className={`szenario-diff ${diff > 0 ? 'neg' : 'pos'}`}>{diff > 0 ? '+' : ''}{fmt(diff)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        
+        <div className="modal-f">
+          <button className="btn-sec" onClick={onClose}>Schließen</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Jahresübersicht / Reporting Modal
+const JahresreportModal = ({ immobilien, onClose }) => {
+  const currentYear = new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  
+  // Berechne Jahreswerte
+  const berechneJahr = (year) => {
+    let einnahmen = 0;
+    let darlehenskosten = 0;
+    let nkVorauszahlung = 0;
+    
+    immobilien.forEach(immo => {
+      const s = immo.stammdaten;
+      // Mieteinnahmen
+      const monatsmiete = (s.wohnflaeche || 0) * (s.mieteProQm || 0) + (s.anzahlStellplaetze || 0) * (s.mieteStellplatz || 0);
+      einnahmen += monatsmiete * 12;
+      
+      // Darlehensraten
+      (immo.darlehen || []).forEach(d => {
+        darlehenskosten += (d.monatsrate || 0) * 12;
+      });
+      
+      // NK-Vorauszahlung
+      nkVorauszahlung += (s.nebenkostenVorauszahlung || 0) * 12;
+    });
+    
+    const cashflow = einnahmen - darlehenskosten - nkVorauszahlung;
+    
+    return { year, einnahmen, darlehenskosten, nkVorauszahlung, cashflow };
+  };
+  
+  const years = [currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2];
+  const jahresData = years.map(y => berechneJahr(y));
+  const selectedData = berechneJahr(selectedYear);
+  
+  const maxValue = Math.max(...jahresData.map(d => Math.max(d.einnahmen, d.darlehenskosten + d.nkVorauszahlung)));
+  
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal jahresreport-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-h">
+          <h2><span className="modal-icon"><IconChart color="#10b981" /></span>Jahresübersicht</h2>
+          <button onClick={onClose}>×</button>
+        </div>
+        
+        <div className="modal-b">
+          <div className="jr-year-selector">
+            {years.map(y => (
+              <button key={y} className={`jr-year-btn ${y === selectedYear ? 'active' : ''}`} onClick={() => setSelectedYear(y)}>
+                {y}
+              </button>
+            ))}
+          </div>
+          
+          <div className="jr-summary">
+            <div className="jr-sum-card pos">
+              <span>Mieteinnahmen</span>
+              <b>{fmt(selectedData.einnahmen)}</b>
+              <small>{fmt(selectedData.einnahmen / 12)}/Monat</small>
+            </div>
+            <div className="jr-sum-card neg">
+              <span>Darlehenskosten</span>
+              <b>{fmt(selectedData.darlehenskosten)}</b>
+              <small>{fmt(selectedData.darlehenskosten / 12)}/Monat</small>
+            </div>
+            <div className="jr-sum-card neutral">
+              <span>NK-Vorauszahlung</span>
+              <b>{fmt(selectedData.nkVorauszahlung)}</b>
+              <small>{fmt(selectedData.nkVorauszahlung / 12)}/Monat</small>
+            </div>
+            <div className={`jr-sum-card ${selectedData.cashflow >= 0 ? 'pos' : 'neg'} highlight`}>
+              <span>Cashflow</span>
+              <b>{fmt(selectedData.cashflow)}</b>
+              <small>{fmt(selectedData.cashflow / 12)}/Monat</small>
+            </div>
+          </div>
+          
+          <h4>Jahresvergleich</h4>
+          <div className="jr-chart">
+            {jahresData.map((d, i) => (
+              <div key={i} className={`jr-chart-col ${d.year === selectedYear ? 'active' : ''}`}>
+                <div className="jr-bars">
+                  <div className="jr-bar einnahmen" style={{ height: `${(d.einnahmen / maxValue) * 100}%` }} title={`Einnahmen: ${fmt(d.einnahmen)}`}></div>
+                  <div className="jr-bar ausgaben" style={{ height: `${((d.darlehenskosten + d.nkVorauszahlung) / maxValue) * 100}%` }} title={`Ausgaben: ${fmt(d.darlehenskosten + d.nkVorauszahlung)}`}></div>
+                </div>
+                <span className="jr-year-label">{d.year}</span>
+                <span className={`jr-cashflow ${d.cashflow >= 0 ? 'pos' : 'neg'}`}>{d.cashflow >= 0 ? '+' : ''}{(d.cashflow / 1000).toFixed(1)}k</span>
+              </div>
+            ))}
+          </div>
+          <div className="jr-legend">
+            <span><span className="jr-dot einnahmen"></span>Einnahmen</span>
+            <span><span className="jr-dot ausgaben"></span>Ausgaben</span>
+          </div>
+          
+          <h4>Aufschlüsselung nach Immobilie</h4>
+          <div className="jr-immo-list">
+            {immobilien.map((immo, i) => {
+              const s = immo.stammdaten;
+              const miete = ((s.wohnflaeche || 0) * (s.mieteProQm || 0) + (s.anzahlStellplaetze || 0) * (s.mieteStellplatz || 0)) * 12;
+              const darlehen = (immo.darlehen || []).reduce((sum, d) => sum + (d.monatsrate || 0) * 12, 0);
+              const cf = miete - darlehen;
+              return (
+                <div key={i} className="jr-immo-row">
+                  <span className="jr-immo-name">{s.name}</span>
+                  <span className="jr-immo-miete pos">+{fmt(miete)}</span>
+                  <span className="jr-immo-darlehen neg">-{fmt(darlehen)}</span>
+                  <span className={`jr-immo-cf ${cf >= 0 ? 'pos' : 'neg'}`}>{cf >= 0 ? '+' : ''}{fmt(cf)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        
+        <div className="modal-f">
+          <button className="btn-sec" onClick={onClose}>Schließen</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Nebenkostenabrechnung
+const NebenkostenSection = ({ immo, onUpdate }) => {
+  const s = immo.stammdaten;
+  const [abrechnungen, setAbrechnungen] = useState(immo.nebenkostenabrechnungen || []);
+  const [showForm, setShowForm] = useState(false);
+  const [newAbr, setNewAbr] = useState({ jahr: new Date().getFullYear() - 1, vorauszahlung: 0, abrechnung: 0, nachzahlung: 0 });
+  
+  const berechneNachzahlung = () => {
+    const voraus = (s.nebenkostenVorauszahlung || 0) * 12;
+    return newAbr.abrechnung - voraus;
+  };
+  
+  const addAbrechnung = () => {
+    const nachzahlung = berechneNachzahlung();
+    const updated = [...abrechnungen, { ...newAbr, vorauszahlung: (s.nebenkostenVorauszahlung || 0) * 12, nachzahlung }];
+    setAbrechnungen(updated);
+    onUpdate({ ...immo, nebenkostenabrechnungen: updated });
+    setShowForm(false);
+    setNewAbr({ jahr: new Date().getFullYear() - 1, vorauszahlung: 0, abrechnung: 0, nachzahlung: 0 });
+  };
+  
+  const removeAbrechnung = (idx) => {
+    const updated = abrechnungen.filter((_, i) => i !== idx);
+    setAbrechnungen(updated);
+    onUpdate({ ...immo, nebenkostenabrechnungen: updated });
+  };
+  
+  return (
+    <div className="nk-section">
+      <p className="hint">Jährliche Nebenkostenabrechnungen erfassen und Nachzahlung/Guthaben berechnen</p>
+      
+      {abrechnungen.length > 0 && (
+        <div className="nk-list">
+          {abrechnungen.sort((a, b) => b.jahr - a.jahr).map((abr, idx) => (
+            <div key={idx} className="nk-item">
+              <span className="nk-jahr">{abr.jahr}</span>
+              <span className="nk-voraus">Voraus: {fmt(abr.vorauszahlung)}</span>
+              <span className="nk-tatsaechlich">Kosten: {fmt(abr.abrechnung)}</span>
+              <span className={`nk-ergebnis ${abr.nachzahlung > 0 ? 'neg' : 'pos'}`}>
+                {abr.nachzahlung > 0 ? 'Nachz.' : 'Guthaben'}: {fmt(Math.abs(abr.nachzahlung))}
+              </span>
+              <button className="btn-del-small" onClick={() => removeAbrechnung(idx)}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {showForm && (
+        <div className="nk-form">
+          <div className="nk-form-row">
+            <label>Jahr</label>
+            <input type="text" inputMode="numeric" value={newAbr.jahr} onChange={e => setNewAbr({ ...newAbr, jahr: parseInt(e.target.value) || new Date().getFullYear() - 1 })} />
+          </div>
+          <div className="nk-form-row">
+            <label>Vorauszahlung (Jahr)</label>
+            <span className="nk-calc">{fmt((s.nebenkostenVorauszahlung || 0) * 12)}</span>
+          </div>
+          <div className="nk-form-row">
+            <label>Tatsächliche Kosten</label>
+            <NumInput value={newAbr.abrechnung} onChange={v => setNewAbr({ ...newAbr, abrechnung: v })} /> €
+          </div>
+          <div className="nk-form-row result">
+            <label>{berechneNachzahlung() > 0 ? 'Nachzahlung' : 'Guthaben'}</label>
+            <span className={berechneNachzahlung() > 0 ? 'neg' : 'pos'}>{fmt(Math.abs(berechneNachzahlung()))}</span>
+          </div>
+          <div className="nk-form-buttons">
+            <button className="btn-add" onClick={addAbrechnung}>Speichern</button>
+            <button className="btn-cancel" onClick={() => setShowForm(false)}>Abbrechen</button>
+          </div>
+        </div>
+      )}
+      
+      {!showForm && (
+        <button className="btn-add" onClick={() => setShowForm(true)}>+ Abrechnung hinzufügen</button>
+      )}
+    </div>
+  );
+};
+
+// Mieter-Verwaltung
+// Toast Notification Component
+const Toast = ({ toast }) => {
+  if (!toast) return null;
+  
+  return (
+    <div className={`toast toast-${toast.type}`}>
+      <span className="toast-icon">
+        {toast.type === 'success' && <IconCheck color="#fff" />}
+        {toast.type === 'warning' && <IconInfo color="#fff" />}
+        {toast.type === 'error' && <IconClose color="#fff" />}
+      </span>
+      <span className="toast-message">{toast.message}</span>
+    </div>
+  );
+};
+
+// Darlehen Import Modal
+// Miethistorie Import Modal
+const MiethistorieImportModal = ({ onClose, onImport }) => {
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [base64Data, setBase64Data] = useState(null);
+  const [parsing, setParsing] = useState(false);
+  const [parsedMiethistorie, setParsedMiethistorie] = useState(null);
+  const [error, setError] = useState(null);
+  const fileInputRef = React.useRef(null);
+
+  const handleFileSelect = (e) => {
+    const selectedFile = e.target.files[0];
+    if (selectedFile) processFile(selectedFile);
+  };
+
+  const processFile = async (selectedFile) => {
+    setFile(selectedFile);
+    setError(null);
+    setParsedMiethistorie(null);
+    
+    try {
+      const prepared = await prepareFileForUpload(selectedFile);
+      setBase64Data(prepared.base64);
+      
+      if (selectedFile.type.startsWith('image/')) {
+        setPreview('data:' + (prepared.mimeType || selectedFile.type) + ';base64,' + prepared.base64);
+      } else {
+        setPreview(null);
+      }
+    } catch (err) {
+      setError('Fehler beim Verarbeiten der Datei: ' + err.message);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const droppedFile = e.dataTransfer.files[0];
+    if (droppedFile) processFile(droppedFile);
+  };
+
+  const getMediaType = () => {
+    if (!file) return null;
+    if (file.type === 'application/pdf') return 'application/pdf';
+    if (file.type.startsWith('image/')) return file.type;
+    return file.type;
+  };
+
+  const parseDocument = async () => {
+    if (!file || !base64Data) return;
+    setParsing(true);
+    setError(null);
+    
+    const mediaType = getMediaType();
+    const isPDF = mediaType === 'application/pdf';
+    
+    const systemPrompt = `Du bist ein Experte für die Analyse von Mietverträgen.
+Extrahiere die Mietdaten aus dem Dokument für die Miethistorie.
+
+Antworte NUR mit einem validen JSON-Objekt. Keine Erklärungen, kein Markdown.
+
+Format:
+{
+  "miethistorie": [{
+    "von": "2020-01-01",
+    "bis": "2024-12-31",
+    "kaltmiete": 800,
+    "nebenkosten": 200,
+    "stellplatz": 50,
+    "sonstiges": 0,
+    "grund": "Mieter: Familie Müller"
+  }]
+}
+
+Wichtig:
+- Extrahiere Mietbeginn (von) und Mietende (bis) wenn vorhanden
+- kaltmiete = Grundmiete/Nettokaltmiete pro Monat
+- nebenkosten = NK-Vorauszahlung/Betriebskosten pro Monat
+- stellplatz = Miete für Stellplatz/Garage pro Monat
+- sonstiges = Sonstige Mietbestandteile (z.B. Küche, Möbel) pro Monat
+- grund = Mieter-Name oder Anmerkungen zum Mietverhältnis
+- Zahlen als Nummern, nicht als Strings
+- Datumsformat: YYYY-MM-DD
+- Bei unklaren Werten 0 oder leer lassen`;
+
+    try {
+      const fullPrompt = systemPrompt + "\n\nExtrahiere die Mietdaten aus diesem Mietvertrag für die Miethistorie. Antworte nur mit JSON.";
+
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: base64Data,
+          mimeType: mediaType,
+          systemPrompt: fullPrompt
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `API Fehler: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const textContent = data.text || '';
+      
+      let jsonStr = textContent.trim();
+      if (jsonStr.includes('```')) {
+        jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+      }
+      
+      const parsed = JSON.parse(jsonStr);
+      if (parsed.miethistorie && parsed.miethistorie.length > 0) {
+        setParsedMiethistorie(parsed.miethistorie);
+      } else {
+        setError('Keine Mietdaten im Dokument gefunden');
+      }
+    } catch (err) {
+      setError(`Fehler: ${err.message}`);
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const handleImportAll = () => {
+    if (parsedMiethistorie) {
+      onImport(parsedMiethistorie);
+      onClose();
+    }
+  };
+
+  const handleImportSingle = (eintrag) => {
+    onImport([eintrag]);
+    onClose();
+  };
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal modal-import" onClick={e => e.stopPropagation()}>
+        <div className="modal-h">
+          <h2><span className="modal-icon"><IconHistory color="#ec4899" /></span>Miethistorie importieren</h2>
+          <button onClick={onClose}>×</button>
+        </div>
+        
+        <div className="modal-b">
+          {!parsedMiethistorie ? (
+            <>
+              <div 
+                className={`upload-zone ${file ? 'has-file' : ''}`}
+                onDrop={handleDrop}
+                onDragOver={(e) => e.preventDefault()}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp"
+                  onChange={handleFileSelect}
+                  style={{ display: 'none' }}
+                />
+                {preview ? (
+                  <img src={preview} alt="Preview" className="upload-preview" />
+                ) : file ? (
+                  <>
+                    <div className="upload-icon"><IconHistory color="#ec4899" /></div>
+                    <p>{file.name}</p>
+                    <small>Bereit zur Analyse</small>
+                  </>
+                ) : (
+                  <>
+                    <div className="upload-icon"><IconUpload color="#ec4899" /></div>
+                    <p>Alten Mietvertrag hierher ziehen</p>
+                    <small>PDF, PNG, JPG • Mietvertrag, Mieterhöhung, Nachtrag</small>
+                  </>
+                )}
+              </div>
+              
+              {error && <div className="import-error">❌ {error}</div>}
+              
+              <div className="import-hint" style={{ borderColor: 'rgba(236,72,153,0.3)', background: 'rgba(236,72,153,0.05)' }}>
+                <strong><span className="hint-icon"><IconAI color="#ec4899" /></span>KI-Analyse</strong>
+                Das Dokument wird analysiert und die Mietdaten für die Historie extrahiert.
+              </div>
+            </>
+          ) : (
+            <div className="parsed-darlehen">
+              <div className="parsed-darlehen-header" style={{ background: 'rgba(236,72,153,0.1)' }}>
+                <span className="parsed-icon"><IconCheck color="#22c55e" /></span>
+                <span>{parsedMiethistorie.length} Mietperiode{parsedMiethistorie.length !== 1 ? 'n' : ''} gefunden</span>
+              </div>
+              
+              <div className="parsed-darlehen-list">
+                {parsedMiethistorie.map((m, i) => {
+                  const warmmiete = (m.kaltmiete || 0) + (m.nebenkosten || 0) + (m.stellplatz || 0) + (m.sonstiges || 0);
+                  return (
+                    <div key={i} className="parsed-darlehen-card" style={{ borderColor: 'rgba(236,72,153,0.3)' }}>
+                      <div className="pdc-header">
+                        <strong>{m.grund || `Mietperiode ${i + 1}`}</strong>
+                        <small>{m.von ? formatDateDE(m.von) : '?'} – {m.bis ? formatDateDE(m.bis) : 'offen'}</small>
+                      </div>
+                      <div className="pdc-details">
+                        {m.kaltmiete > 0 && <span><b>Kaltmiete:</b> {fmt(m.kaltmiete)}</span>}
+                        {m.nebenkosten > 0 && <span><b>NK:</b> {fmt(m.nebenkosten)}</span>}
+                        {m.stellplatz > 0 && <span><b>Stellplatz:</b> {fmt(m.stellplatz)}</span>}
+                        {m.sonstiges > 0 && <span><b>Sonstiges:</b> {fmt(m.sonstiges)}</span>}
+                        <span><b>Gesamt:</b> {fmt(warmmiete)}/Mon.</span>
+                      </div>
+                      <button className="btn-import-single" style={{ borderColor: '#ec4899', color: '#ec4899' }} onClick={() => handleImportSingle(m)}>
+                        Nur diesen importieren
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+        
+        <div className="modal-f">
+          {!parsedMiethistorie ? (
+            <button className="btn-pri" style={{ background: '#ec4899' }} onClick={parseDocument} disabled={!file || parsing}>
+              {parsing ? (
+                <><span className="spinner"></span> Analysiere...</>
+              ) : (
+                <><span className="btn-icon-sm"><IconSearch color="#fff" /></span>Dokument analysieren</>
+              )}
+            </button>
+          ) : (
+            <>
+              <button className="btn-sec" onClick={() => { setParsedMiethistorie(null); setFile(null); setPreview(null); }}>
+                ← Anderes Dokument
+              </button>
+              <button className="btn-pri" style={{ background: '#ec4899' }} onClick={handleImportAll}>
+                <span className="btn-icon-sm"><IconCheck color="#fff" /></span>
+                Alle {parsedMiethistorie.length} importieren
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const DarlehenImportModal = ({ onClose, onImport }) => {
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [base64Data, setBase64Data] = useState(null);
+  const [parsing, setParsing] = useState(false);
+  const [parsedDarlehen, setParsedDarlehen] = useState(null);
+  const [error, setError] = useState(null);
+  const fileInputRef = React.useRef(null);
+
+  const handleFileSelect = (e) => {
+    const selectedFile = e.target.files[0];
+    if (selectedFile) processFile(selectedFile);
+  };
+
+  const processFile = async (selectedFile) => {
+    setFile(selectedFile);
+    setError(null);
+    setParsedDarlehen(null);
+    
+    try {
+      const prepared = await prepareFileForUpload(selectedFile);
+      setBase64Data(prepared.base64);
+      
+      if (selectedFile.type.startsWith('image/')) {
+        setPreview('data:' + (prepared.mimeType || selectedFile.type) + ';base64,' + prepared.base64);
+      } else {
+        setPreview(null);
+      }
+    } catch (err) {
+      setError('Fehler beim Verarbeiten der Datei: ' + err.message);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const droppedFile = e.dataTransfer.files[0];
+    if (droppedFile) processFile(droppedFile);
+  };
+
+  const getMediaType = () => {
+    if (!file) return null;
+    if (file.type === 'application/pdf') return 'application/pdf';
+    if (file.type.startsWith('image/')) return file.type;
+    return file.type;
+  };
+
+  const parseDocument = async () => {
+    if (!file || !base64Data) return;
+    setParsing(true);
+    setError(null);
+    
+    const mediaType = getMediaType();
+    const isPDF = mediaType === 'application/pdf';
+    
+    const systemPrompt = `Du bist ein Experte für die Analyse von Darlehensverträgen und Finanzierungsdokumenten.
+Extrahiere alle Darlehen aus dem Dokument.
+
+Antworte NUR mit einem validen JSON-Objekt. Keine Erklärungen, kein Markdown.
+
+Format:
+{
+  "darlehen": [{
+    "name": "Bezeichnung des Darlehens",
+    "institut": "Name der Bank/des Instituts",
+    "kontonummer": "Darlehenskontonummer falls vorhanden",
+    "typ": "annuitaeten|tilgung|endfaellig|kfw|bauspar|privat|forward|sonstig",
+    "betrag": 200000,
+    "zinssatz": 3.5,
+    "effektivzins": 3.65,
+    "tilgung": 2,
+    "monatsrate": 916.67,
+    "sondertilgung": 5,
+    "abschluss": "2024-01-15",
+    "ersteRate": "2024-03-01",
+    "laufzeit": 30,
+    "zinsbindungJahre": 10,
+    "zinsbindungEnde": "2034-01-15",
+    "restschuld": 180000
+  }]
+}
+
+Wichtig:
+- Extrahiere ALLE Darlehen die im Dokument gefunden werden
+- Zahlen als Nummern, nicht als Strings
+- Datumsformat: YYYY-MM-DD
+- Bei unklaren Werten weglassen
+- typ: annuitaeten (Standard), tilgung, endfaellig, kfw, bauspar, privat, forward, sonstig`;
+
+    try {
+      const fullPrompt = systemPrompt + "\n\nExtrahiere alle Darlehen aus diesem Dokument. Antworte nur mit JSON.";
+
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: base64Data,
+          mimeType: mediaType,
+          systemPrompt: fullPrompt
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `API Fehler: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const textContent = data.text || '';
+      
+      let jsonStr = textContent.trim();
+      if (jsonStr.includes('```')) {
+        jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+      }
+      
+      const result = JSON.parse(jsonStr);
+      const darlehenArray = result.darlehen || (Array.isArray(result) ? result : [result]);
+      
+      if (darlehenArray.length === 0) {
+        setError('Keine Darlehen im Dokument gefunden.');
+        setParsing(false);
+        return;
+      }
+
+      setParsedDarlehen(darlehenArray);
+      
+    } catch (err) {
+      console.error('Parse error:', err);
+      setError(`Fehler beim Analysieren: ${err.message}`);
+    }
+    
+    setParsing(false);
+  };
+
+  const handleImportAll = () => {
+    if (parsedDarlehen) {
+      onImport(parsedDarlehen);
+    }
+  };
+
+  const handleImportSingle = (darlehen) => {
+    onImport([darlehen]);
+  };
+
+  const formatValue = (key, value) => {
+    if (value === undefined || value === null || value === '') return '–';
+    if (['betrag', 'monatsrate', 'restschuld'].includes(key)) return fmt(value);
+    if (['zinssatz', 'effektivzins', 'tilgung', 'sondertilgung'].includes(key)) return `${value}%`;
+    if (['laufzeit', 'zinsbindungJahre'].includes(key)) return `${value} J.`;
+    return String(value);
+  };
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal darlehen-import-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-h">
+          <h2><span className="modal-icon"><IconBank color="#3b82f6" /></span>Darlehen importieren</h2>
+          <button onClick={onClose}>×</button>
+        </div>
+        
+        <div className="modal-b">
+          {!parsedDarlehen ? (
+            <>
+              <div 
+                className={`upload-zone ${file ? 'has-file' : ''}`}
+                onDrop={handleDrop}
+                onDragOver={(e) => e.preventDefault()}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp"
+                  onChange={handleFileSelect}
+                  style={{ display: 'none' }}
+                />
+                {preview ? (
+                  <img src={preview} alt="Preview" className="upload-preview" />
+                ) : file ? (
+                  <>
+                    <div className="upload-icon"><IconBank color="#3b82f6" /></div>
+                    <p>{file.name}</p>
+                    <small>Bereit zur Analyse</small>
+                  </>
+                ) : (
+                  <>
+                    <div className="upload-icon"><IconUpload color="#3b82f6" /></div>
+                    <p>Darlehensvertrag hierher ziehen</p>
+                    <small>PDF, PNG, JPG • Darlehensvertrag, Konditionenangebot, Finanzierungsübersicht</small>
+                  </>
+                )}
+              </div>
+              
+              {error && <div className="import-error">❌ {error}</div>}
+              
+              <div className="import-hint">
+                <strong><span className="hint-icon"><IconAI color="#3b82f6" /></span>KI-Analyse</strong>
+                Das Dokument wird analysiert und alle Darlehen automatisch extrahiert.
+              </div>
+            </>
+          ) : (
+            <div className="parsed-darlehen">
+              <div className="parsed-darlehen-header">
+                <span className="parsed-icon"><IconCheck color="#22c55e" /></span>
+                <span>{parsedDarlehen.length} Darlehen gefunden</span>
+              </div>
+              
+              <div className="parsed-darlehen-list">
+                {parsedDarlehen.map((d, i) => (
+                  <div key={i} className="parsed-darlehen-card">
+                    <div className="pdc-header">
+                      <strong>{d.name || d.institut || `Darlehen ${i + 1}`}</strong>
+                      {d.institut && d.name && <small>{d.institut}</small>}
+                    </div>
+                    <div className="pdc-details">
+                      {d.betrag > 0 && <span><b>Betrag:</b> {fmt(d.betrag)}</span>}
+                      {d.zinssatz > 0 && <span><b>Zins:</b> {d.zinssatz}%</span>}
+                      {d.tilgung > 0 && <span><b>Tilgung:</b> {d.tilgung}%</span>}
+                      {d.monatsrate > 0 && <span><b>Rate:</b> {fmt(d.monatsrate)}/Mon.</span>}
+                      {d.zinsbindungJahre > 0 && <span><b>Zinsbindung:</b> {d.zinsbindungJahre} J.</span>}
+                    </div>
+                    <button className="btn-import-single" onClick={() => handleImportSingle(d)}>
+                      Nur dieses importieren
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        
+        <div className="modal-f">
+          {!parsedDarlehen ? (
+            <button className="btn-pri" onClick={parseDocument} disabled={!file || parsing}>
+              {parsing ? (
+                <><span className="spinner"></span> Analysiere...</>
+              ) : (
+                <><span className="btn-icon-sm"><IconSearch color="#fff" /></span>Dokument analysieren</>
+              )}
+            </button>
+          ) : (
+            <>
+              <button className="btn-sec" onClick={() => { setParsedDarlehen(null); setFile(null); setPreview(null); }}>
+                ← Anderes Dokument
+              </button>
+              <button className="btn-pri" onClick={handleImportAll}>
+                <span className="btn-icon-sm"><IconCheck color="#fff" /></span>
+                Alle {parsedDarlehen.length} importieren
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// SMART LOAN IMPORT — Darlehen-Extraktion mit Immobilien-Zuordnung
+// ============================================================================
+
+const slNormalize = (str) => {
+  if (!str) return '';
+  return str.toLowerCase()
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+};
+
+const slExtractLast4 = (str) => {
+  if (!str) return null;
+  const digits = str.replace(/\D/g, '');
+  return digits.length >= 4 ? digits.slice(-4) : (digits.length > 0 ? digits : null);
+};
+
+const slJaccard = (a, b) => {
+  if (!a || !b) return 0;
+  const setA = new Set(a.split(' ')); const setB = new Set(b.split(' '));
+  const inter = new Set([...setA].filter(x => setB.has(x)));
+  const union = new Set([...setA, ...setB]);
+  return union.size === 0 ? 0 : inter.size / union.size;
+};
+
+const SL_CITY_ALIASES = {
+  'muc': ['muenchen','munich'], 'ber': ['berlin'], 'hh': ['hamburg'], 'ffm': ['frankfurt'],
+  'cgn': ['koeln','cologne'], 'dus': ['duesseldorf'], 'stg': ['stuttgart'],
+};
+
+const slBuildProfile = (immo) => {
+  const s = immo.stammdaten || {};
+  const darlehen = immo.darlehen || [];
+  const knownLast4s = darlehen.map(d => slExtractLast4(d.kontonummer)).filter(Boolean);
+  const knownBanks = darlehen.map(d => slNormalize(d.institut)).filter(Boolean);
+  const allTokens = [...new Set([
+    ...slNormalize(s.name || '').split(' ').filter(t => t.length >= 2),
+    ...slNormalize(s.adresse || '').split(' ').filter(t => t.length >= 2),
+    ...slNormalize(s.projekt || '').split(' ').filter(t => t.length >= 2),
+  ])];
+  return { id: immo.id, name: s.name || `Immobilie ${immo.id}`, adresse: s.adresse || '', typ: s.typ || '',
+    knownLast4s, knownBanks, allTokens, existingDarlehen: darlehen,
+    kaufpreis: (s.kaufpreisImmobilie || 0) + (s.kaufpreisStellplatz || 0) + (s.mehrkosten || 0),
+    normalizedName: slNormalize(s.name || ''), normalizedAdresse: slNormalize(s.adresse || '') };
+};
+
+const slComputeMatch = (loan, profile) => {
+  let confidence = 0; const reasons = [];
+  if (loan.accountLast4 && profile.knownLast4s.includes(loan.accountLast4)) {
+    confidence += 0.6; reasons.push(`Kontonummer-Last4 "${loan.accountLast4}" stimmt überein`);
+  }
+  if (loan.accountNumber) {
+    const l4 = slExtractLast4(loan.accountNumber);
+    if (l4 && profile.knownLast4s.includes(l4) && !reasons.length) {
+      confidence += 0.15; reasons.push('Kontonummer-Endziffern passen');
+    }
+  }
+  if (loan.lender) {
+    const nl = slNormalize(loan.lender);
+    for (const bank of profile.knownBanks) {
+      if (bank && nl && (nl.includes(bank) || bank.includes(nl))) {
+        confidence += 0.1; reasons.push(`Bank "${loan.lender}" passt`); break;
+      }
+    }
+  }
+  const normLabel = slNormalize(loan.rawLabel || loan.normalizedLabel || '');
+  for (const token of profile.allTokens) {
+    if (token.length >= 3 && normLabel.includes(token)) {
+      confidence += 0.15; reasons.push(`Label enthält "${token}"`); break;
+    }
+  }
+  const jacc = slJaccard(normLabel, profile.normalizedName);
+  if (jacc > 0.3) { confidence += jacc * 0.2; reasons.push(`Textähnlichkeit: ${(jacc*100).toFixed(0)}%`); }
+  for (const [alias, exps] of Object.entries(SL_CITY_ALIASES)) {
+    if (normLabel.includes(alias)) {
+      for (const exp of exps) {
+        if (profile.normalizedAdresse.includes(exp)) {
+          confidence += 0.12; reasons.push(`Stadt-Alias "${alias}"`); break;
+        }
+      }
+    }
+  }
+  if (loan.balance > 0) {
+    for (const ed of profile.existingDarlehen) {
+      const eb = ed.restschuld || ed.betrag || 0;
+      if (eb > 0 && Math.min(loan.balance, eb) / Math.max(loan.balance, eb) > 0.85) {
+        confidence += 0.1; reasons.push(`Restschuld ähnlich (${eb.toLocaleString('de-DE')}€)`); break;
+      }
+    }
+  }
+  // Starke Orts-/Namens-Übereinstimmung (z.B. Stadt-/Straßenname im Darlehenslabel)
+  const SL_STOP = new Set(['bank','gmbh','objektfinanzierung','finanzierung','objekt','darlehen','kredit','immobilie','immobilien','eigentumswohnung','wohnung','gewerbe','clever','fit','sparkasse','volksbank','raiffeisen','strasse','weg','etw','neubau','bestand','und','der','die','das','fuer','vom']);
+  const loanText = slNormalize([loan.rawLabel, loan.normalizedLabel, loan.propertyHint].filter(Boolean).join(' '));
+  const loanTokens = new Set(loanText.split(' ').filter(t => t.length >= 4 && !SL_STOP.has(t)));
+  const strongOverlap = profile.allTokens.filter(t => t.length >= 4 && !SL_STOP.has(t) && loanTokens.has(t));
+  if (strongOverlap.length > 0) {
+    confidence += Math.min(0.5, 0.35 * strongOverlap.length);
+    reasons.push(`Ort/Name passt: ${strongOverlap.join(', ')}`);
+  }
+  // Darlehensbetrag passt zum Kaufpreis des Objekts
+  const loanAmt = loan.originalAmount || loan.balance || 0;
+  if (loanAmt > 0 && profile.kaufpreis > 0 && Math.min(loanAmt, profile.kaufpreis) / Math.max(loanAmt, profile.kaufpreis) > 0.85) {
+    confidence += 0.2; reasons.push(`Darlehensbetrag passt zum Kaufpreis (${profile.kaufpreis.toLocaleString('de-DE')}€)`);
+  }
+  return { confidence: Math.min(confidence, 1.0), reasons };
+};
+
+const slMatchLoan = (loan, profiles) => {
+  if (profiles.length === 0) return { status: 'unassigned', propertyId: null, financingId: null, candidates: [] };
+  const scored = profiles.map(pr => {
+    const { confidence, reasons } = slComputeMatch(loan, pr);
+    return { propertyId: String(pr.id), financingId: null, confidence: Math.round(confidence*100)/100, reasons, profileName: pr.name };
+  }).filter(c => c.confidence > 0).sort((a,b) => b.confidence - a.confidence);
+  const top = scored[0];
+  if (top && top.confidence >= 0.6) return { status: 'matched', propertyId: top.propertyId, financingId: null, candidates: scored.slice(0,3) };
+  if (top && top.confidence >= 0.2) return { status: 'suggested', propertyId: top.propertyId, financingId: null, candidates: scored.slice(0,3) };
+  return { status: 'unassigned', propertyId: null, financingId: null, candidates: scored.slice(0,3) };
+};
+
+const slGeneratePrompt = (immobilien) => {
+  let ctx = '';
+  if (immobilien?.length > 0) {
+    const lines = immobilien.map((immo, i) => {
+      const s = immo.stammdaten || {};
+      const dInfo = (immo.darlehen || []).map(d => [d.institut, d.kontonummer, d.betrag ? `${d.betrag}€` : ''].filter(Boolean).join(', ')).filter(Boolean);
+      return `  ${i+1}. "${s.name||'?'}"${s.adresse ? ` · ${s.adresse}` : ''}${dInfo.length ? ` [Darlehen: ${dInfo.join(' | ')}]` : ''}`;
+    });
+    ctx = `\n\nVorhandene Immobilien:\n${lines.join('\n')}`;
+  }
+  return `Du bist ein Experte für die Extraktion von Darlehens-/Kreditdaten aus Screenshots und Dokumenten.
+Extrahiere ALLE Darlehen / Kreditpositionen. Trenne strikt nach Zeilen/Blöcken.
+Deutsche Zahlenformate: "1.234,56" → 1234.56. Erfinde KEINE Werte.
+Beträge als Dezimalzahlen, Zinssätze als Dezimalzahl (z.B. 3.5), Datum YYYY-MM-DD.
+
+WICHTIG - diese Felder besonders sorgfältig suchen (deutsche Begriffe):
+- "monthlyPayment" = monatliche Rate / Monatsrate / Annuität (mtl.). Falls nur eine Jahresrate/Annuität genannt ist, durch 12 teilen.
+- "repaymentRate" = anfänglicher Tilgungssatz / Anfangstilgung in % (NICHT Sondertilgung!).
+- "specialRepayment" = Sondertilgung in % p.a. (Sondertilgungsrecht).
+- "startDate" = Abschluss-/Vertragsdatum des Darlehens.
+- "firstPaymentDate" = Termin der ersten Rate / Ratenbeginn / Zahlbeginn.
+- "fixedRateEnd" = Ende der Sollzinsbindung (Datum).${ctx}
+
+Antworte NUR mit validem JSON:
+{
+  "loans": [{
+    "sourceIndex": 1, "rawLabel": "...", "normalizedLabel": "...",
+    "balance": 123456.78, "currency": "EUR", "accountNumber": "..." | null,
+    "lender": "..." | null, "interestRate": 3.5 | null, "effectiveRate": 3.65 | null,
+    "repaymentRate": 2.0 | null, "monthlyPayment": 1234.56 | null,
+    "originalAmount": 200000 | null, "maturityDate": "YYYY-MM-DD" | null,
+    "fixedRateEnd": "YYYY-MM-DD" | null, "fixedRateYears": 10 | null,
+    "loanType": "annuitaeten|tilgung|endfaellig|kfw|bauspar|privat|forward|sonstig" | null,
+    "specialRepayment": 5.0 | null, "startDate": "YYYY-MM-DD" | null,
+    "firstPaymentDate": "YYYY-MM-DD" | null, "uncertainFields": [],
+    "propertyHint": "..." | null
+  }],
+  "documentNotes": []
+}`;
+};
+
+const slTransform = (aiLoans, immobilien) => {
+  const profiles = immobilien.map(slBuildProfile);
+  return aiLoans.map((loan, idx) => {
+    const accountLast4 = slExtractLast4(loan.accountNumber);
+    const match = slMatchLoan({ ...loan, accountLast4 }, profiles);
+    return {
+      sourceIndex: loan.sourceIndex || idx+1,
+      rawLabel: loan.rawLabel || null, normalizedLabel: loan.normalizedLabel || null,
+      balance: loan.balance || null, currency: loan.currency || 'EUR',
+      accountNumber: loan.accountNumber || null, accountLast4: accountLast4 || null,
+      lender: loan.lender || null, interestRate: loan.interestRate || null,
+      monthlyPayment: loan.monthlyPayment || null, maturityDate: loan.maturityDate || null,
+      uncertainFields: loan.uncertainFields || [],
+      _importData: {
+        name: loan.normalizedLabel || loan.rawLabel || `Darlehen ${idx+1}`,
+        institut: loan.lender || '', kontonummer: loan.accountNumber || '',
+        typ: loan.loanType || 'annuitaeten',
+        betrag: loan.originalAmount || loan.balance || 0,
+        zinssatz: loan.interestRate || 0, effektivzins: loan.effectiveRate || 0,
+        tilgung: loan.repaymentRate || 0, monatsrate: loan.monthlyPayment || 0,
+        sondertilgung: loan.specialRepayment || 5,
+        abschluss: loan.startDate || '', ersteRate: loan.firstPaymentDate || '',
+        laufzeit: 0, zinsbindungJahre: loan.fixedRateYears || 0,
+        zinsbindungEnde: loan.fixedRateEnd || '', restschuld: loan.balance || 0,
+      },
+      match,
+    };
+  });
+};
+
+const SL_STATUS = {
+  matched: { bg: 'rgba(34,197,94,0.15)', border: '#22c55e', text: '#22c55e', label: '✓ Zugeordnet' },
+  suggested: { bg: 'rgba(245,158,11,0.15)', border: '#f59e0b', text: '#f59e0b', label: '? Vorschlag' },
+  unassigned: { bg: 'rgba(148,163,184,0.15)', border: '#94a3b8', text: '#94a3b8', label: '○ Offen' },
+};
+
+const SmartLoanImportModal = ({ immobilien = [], onClose, onImport }) => {
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [base64Data, setBase64Data] = useState(null);
+  const [parsing, setParsing] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+  const [step, setStep] = useState('upload');
+  const [selectedLoans, setSelectedLoans] = useState(new Set());
+  const [manualAssignments, setManualAssignments] = useState({});
+  const fileInputRef = useRef(null);
+
+  const handleFileSelect = (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    setFile(f); setError(null); setResult(null);
+    if (f.type.startsWith('image/')) setPreview(URL.createObjectURL(f)); else setPreview(null);
+    const reader = new FileReader();
+    reader.onload = () => setBase64Data(reader.result.split(',')[1]);
+    reader.readAsDataURL(f);
+  };
+
+  const startAnalysis = async () => {
+    if (!file || !base64Data) return;
+    setParsing(true); setStep('analyzing'); setError(null);
+    const mediaType = file.type;
+    const sysPrompt = slGeneratePrompt(immobilien);
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64Data, mimeType: mediaType,
+          systemPrompt: sysPrompt + '\n\nAnalysiere dieses Dokument. Antworte nur mit JSON.' }),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `API Fehler: ${res.status}`); }
+      const data = await res.json();
+      let jsonStr = (data.text || '').trim();
+      if (jsonStr.includes('```')) jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+      const aiResult = JSON.parse(jsonStr);
+      const aiLoans = aiResult.loans || aiResult.darlehen || (Array.isArray(aiResult) ? aiResult : []);
+      if (aiLoans.length === 0) throw new Error('Keine Darlehen im Dokument gefunden.');
+      const transformed = slTransform(aiLoans, immobilien);
+      setResult({ extractedLoans: transformed, notes: aiResult.documentNotes || [] });
+      setSelectedLoans(new Set(transformed.map(l => l.sourceIndex)));
+      setStep('review');
+    } catch (err) {
+      console.error('Smart Import error:', err);
+      setError(`Fehler: ${err.message}`); setStep('upload');
+    }
+    setParsing(false);
+  };
+
+  const handleImportAll = () => {
+    if (!result) return;
+    const finalLoans = result.extractedLoans.filter(l => selectedLoans.has(l.sourceIndex)).map(loan => {
+      const manId = manualAssignments[loan.sourceIndex];
+      if (manId !== undefined) return { ...loan, match: { ...loan.match, status: manId ? 'matched' : 'unassigned', propertyId: manId || null } };
+      return loan;
+    });
+    onImport(finalLoans);
+  };
+
+  const slst = { // inline styles
+    overlay: { position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',backdropFilter:'blur(4px)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999,padding:'16px' },
+    modal: { background:'#111118',border:'1px solid #2a2a3a',borderRadius:'16px',width:'100%',maxWidth:'680px',maxHeight:'90vh',display:'flex',flexDirection:'column',boxShadow:'0 24px 48px rgba(0,0,0,0.5)' },
+    header: { display:'flex',alignItems:'center',justifyContent:'space-between',padding:'16px 20px',borderBottom:'1px solid #2a2a3a' },
+    body: { flex:1,overflow:'auto',padding:'20px' },
+    footer: { display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 20px',borderTop:'1px solid #2a2a3a',gap:'8px' },
+  };
+
+  return (
+    <div style={slst.overlay} onClick={onClose}>
+      <div style={slst.modal} onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div style={slst.header}>
+          <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
+            <div style={{width:'36px',height:'36px',borderRadius:'8px',background:'rgba(59,130,246,0.1)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+            </div>
+            <div>
+              <h2 style={{color:'#fff',fontSize:'16px',fontWeight:'600',margin:0}}>Smart Darlehen-Import</h2>
+              <p style={{color:'#888',fontSize:'12px',margin:0}}>
+                {step === 'upload' && 'Screenshot oder PDF hochladen'}
+                {step === 'analyzing' && 'Wird analysiert...'}
+                {step === 'review' && `${result?.extractedLoans?.length || 0} Darlehen gefunden`}
+              </p>
+            </div>
+          </div>
+          <button style={{background:'none',border:'none',color:'#888',fontSize:'24px',cursor:'pointer'}} onClick={onClose}>×</button>
+        </div>
+
+        {/* Body */}
+        <div style={slst.body}>
+
+          {/* UPLOAD */}
+          {step === 'upload' && (<>
+            <div style={{border:'2px dashed #2a2a3a',borderRadius:'12px',padding:'32px',textAlign:'center',cursor:'pointer',background: file ? 'rgba(59,130,246,0.05)' : '#0d0d14', borderColor: file ? '#3b82f6' : '#2a2a3a'}}
+              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if(f) handleFileSelect({target:{files:[f]}}); }}
+              onDragOver={e => e.preventDefault()} onClick={() => fileInputRef.current?.click()}>
+              <input ref={fileInputRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" onChange={handleFileSelect} style={{display:'none'}} />
+              {preview ? <img src={preview} alt="Preview" style={{maxWidth:'100%',maxHeight:'200px',borderRadius:'8px'}} />
+               : file ? (<><div style={{fontSize:'32px',marginBottom:'8px'}}>📄</div><p style={{color:'#fff',fontSize:'14px'}}>{file.name}</p><small style={{color:'#888'}}>Bereit zur Analyse</small></>)
+               : (<><div style={{marginBottom:'12px'}}><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div>
+                  <p style={{color:'#ccc',fontSize:'14px'}}>Darlehensübersicht hier ablegen</p>
+                  <small style={{color:'#666',fontSize:'12px'}}>PDF, PNG, JPG · Banking-App, Finanzierungsübersicht, Kontoauszug</small></>)}
+            </div>
+            {error && <div style={{marginTop:'12px',padding:'10px 14px',background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.2)',borderRadius:'8px',color:'#ef4444',fontSize:'13px'}}>❌ {error}</div>}
+            <div style={{marginTop:'16px',padding:'12px',background:'rgba(59,130,246,0.08)',border:'1px solid rgba(59,130,246,0.2)',borderRadius:'8px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'6px',color:'#3b82f6',fontSize:'13px',marginBottom:'4px'}}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                <strong>KI-Analyse mit Zuordnung</strong>
+              </div>
+              <p style={{color:'#999',fontSize:'12px',margin:0}}>
+                Darlehen werden extrahiert und {immobilien.length > 0 ? `${immobilien.length} vorhandenen Immobilien zugeordnet.` : 'als neue Positionen importiert.'}
+              </p>
+            </div>
+            {immobilien.length > 0 && (
+              <div style={{marginTop:'12px'}}>
+                <small style={{color:'#666',fontSize:'11px'}}>Portfolio ({immobilien.length} Immobilien):</small>
+                <div style={{display:'flex',flexWrap:'wrap',gap:'6px',marginTop:'6px'}}>
+                  {immobilien.slice(0,8).map(immo => (
+                    <span key={immo.id} style={{padding:'4px 10px',background:'#1a1a24',border:'1px solid #2a2a3a',borderRadius:'6px',color:'#ccc',fontSize:'11px',display:'flex',alignItems:'center',gap:'4px'}}>
+                      {immo.stammdaten?.name || `#${immo.id}`}
+                      {(immo.darlehen?.length||0) > 0 && <span style={{background:'rgba(59,130,246,0.2)',color:'#3b82f6',padding:'1px 4px',borderRadius:'3px',fontSize:'10px'}}>{immo.darlehen.length}×</span>}
+                    </span>
+                  ))}
+                  {immobilien.length > 8 && <span style={{padding:'4px 10px',background:'#1a1a24',border:'1px solid #2a2a3a',borderRadius:'6px',color:'#666',fontSize:'11px'}}>+{immobilien.length-8}</span>}
+                </div>
+              </div>
+            )}
+          </>)}
+
+          {/* ANALYZING */}
+          {step === 'analyzing' && (
+            <div style={{textAlign:'center',padding:'48px 0'}}>
+              <div style={{width:'32px',height:'32px',border:'3px solid #2a2a3a',borderTopColor:'#3b82f6',borderRadius:'50%',animation:'spin 0.8s linear infinite',margin:'0 auto 16px'}} />
+              <p style={{color:'#fff',fontSize:'14px'}}>Darlehen werden extrahiert...</p>
+              <small style={{color:'#666',fontSize:'12px'}}>Bezeichnungen, Beträge, Kontonummern, Zinssätze</small>
+            </div>
+          )}
+
+          {/* REVIEW */}
+          {step === 'review' && result && (<>
+            {/* Summary */}
+            <div style={{display:'flex',gap:'12px',padding:'12px',background:'#0d0d14',borderRadius:'10px',marginBottom:'16px',flexWrap:'wrap'}}>
+              {[
+                { n: result.extractedLoans.length, l: 'Darlehen', c: '#fff' },
+                { n: result.extractedLoans.filter(l=>l.match.status==='matched').length, l: 'Zugeordnet', c: '#22c55e' },
+                { n: result.extractedLoans.filter(l=>l.match.status==='suggested').length, l: 'Vorschläge', c: '#f59e0b' },
+                { n: result.extractedLoans.filter(l=>l.match.status==='unassigned').length, l: 'Offen', c: '#94a3b8' },
+              ].map((it,i) => (
+                <div key={i} style={{flex:1,minWidth:'60px',textAlign:'center'}}>
+                  <span style={{display:'block',color:it.c,fontSize:'18px',fontWeight:'700'}}>{it.n}</span>
+                  <span style={{color:'#666',fontSize:'10px',textTransform:'uppercase',letterSpacing:'0.5px'}}>{it.l}</span>
+                </div>
+              ))}
+              <div style={{flex:1,minWidth:'80px',textAlign:'center'}}>
+                <span style={{display:'block',color:'#fff',fontSize:'14px',fontWeight:'700'}}>{fmt(result.extractedLoans.reduce((s,l)=>s+(l.balance||0),0))}</span>
+                <span style={{color:'#666',fontSize:'10px',textTransform:'uppercase'}}>Gesamt</span>
+              </div>
+            </div>
+
+            {/* Notes (informative Zusatzinfos aus dem Dokument, KEINE Fehler) */}
+            {result.notes?.length > 0 && <div style={{marginBottom:'12px'}}>
+              <div style={{fontSize:'12px',fontWeight:'600',color:'var(--text-muted)',marginBottom:'6px'}}>ℹ️ Zusätzliche Infos aus dem Dokument <span style={{fontWeight:'400'}}>(zur Kenntnis – keine Fehler; werden nicht automatisch in Felder übernommen)</span></div>
+              {result.notes.map((n,i) => <div key={i} style={{padding:'8px 12px',background:'rgba(99,102,241,0.08)',border:'1px solid rgba(99,102,241,0.2)',borderRadius:'6px',color:'var(--text)',fontSize:'12px',marginBottom:'4px'}}>{n}</div>)}
+            </div>}
+
+            {/* Loans */}
+            <div style={{display:'flex',flexDirection:'column',gap:'12px'}}>
+              {result.extractedLoans.map(loan => {
+                const st = SL_STATUS[loan.match.status];
+                const isSel = selectedLoans.has(loan.sourceIndex);
+                const curAssign = manualAssignments[loan.sourceIndex] !== undefined ? manualAssignments[loan.sourceIndex] : loan.match.propertyId;
+                const assignedImmo = curAssign ? immobilien.find(i => String(i.id) === String(curAssign)) : null;
+                return (
+                  <div key={loan.sourceIndex} style={{background:'#1a1a24',border:`1px solid ${isSel ? st.border : '#2a2a3a'}`,borderRadius:'10px',padding:'14px',opacity:isSel?1:0.5,transition:'all 0.2s'}}>
+                    {/* Header */}
+                    <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'10px'}}>
+                      <label style={{display:'flex',alignItems:'center',gap:'6px',cursor:'pointer'}}>
+                        <input type="checkbox" checked={isSel} onChange={() => { setSelectedLoans(prev => { const n = new Set(prev); n.has(loan.sourceIndex) ? n.delete(loan.sourceIndex) : n.add(loan.sourceIndex); return n; }); }} />
+                        <span style={{color:'#666',fontSize:'11px'}}>#{loan.sourceIndex}</span>
+                      </label>
+                      <div style={{flex:1}}>
+                        <strong style={{color:'#fff',fontSize:'13px',display:'block'}}>{loan.normalizedLabel || loan.rawLabel || `Darlehen ${loan.sourceIndex}`}</strong>
+                        {loan.lender && <small style={{color:'#888',fontSize:'11px'}}>{loan.lender}</small>}
+                      </div>
+                      <span style={{padding:'3px 8px',borderRadius:'6px',fontSize:'11px',fontWeight:'600',border:'1px solid',background:st.bg,borderColor:st.border,color:st.text,whiteSpace:'nowrap'}}>{st.label}</span>
+                    </div>
+                    {/* Details */}
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(120px,1fr))',gap:'8px',marginBottom:'10px'}}>
+                      {loan.balance != null && <div style={{background:'#0d0d14',borderRadius:'6px',padding:'6px 10px'}}><span style={{display:'block',color:'#666',fontSize:'10px',textTransform:'uppercase'}}>Restschuld</span><span style={{color:'#fff',fontSize:'13px',fontWeight:'500'}}>{fmt(loan.balance)}</span></div>}
+                      {loan.interestRate != null && <div style={{background:'#0d0d14',borderRadius:'6px',padding:'6px 10px'}}><span style={{display:'block',color:'#666',fontSize:'10px',textTransform:'uppercase'}}>Zinssatz</span><span style={{color:'#fff',fontSize:'13px',fontWeight:'500'}}>{loan.interestRate}%</span></div>}
+                      {loan.monthlyPayment != null && <div style={{background:'#0d0d14',borderRadius:'6px',padding:'6px 10px'}}><span style={{display:'block',color:'#666',fontSize:'10px',textTransform:'uppercase'}}>Rate/Mon.</span><span style={{color:'#fff',fontSize:'13px',fontWeight:'500'}}>{fmt(loan.monthlyPayment)}</span></div>}
+                      {loan.accountNumber && <div style={{background:'#0d0d14',borderRadius:'6px',padding:'6px 10px'}}><span style={{display:'block',color:'#666',fontSize:'10px',textTransform:'uppercase'}}>Konto</span><span style={{color:'#fff',fontSize:'13px',fontWeight:'500'}}>{loan.accountNumber}</span></div>}
+                    </div>
+                    {/* Uncertain */}
+                    {loan.uncertainFields?.length > 0 && <div style={{padding:'6px 10px',background:'rgba(245,158,11,0.08)',borderRadius:'6px',color:'#fbbf24',fontSize:'11px',marginBottom:'10px'}}>⚠️ Unsicher: {loan.uncertainFields.join(', ')}</div>}
+                    {/* Assignment Dropdown */}
+                    <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'8px'}}>
+                      <span style={{color:'#888',fontSize:'12px',whiteSpace:'nowrap'}}>Immobilie:</span>
+                      <select value={curAssign || ''} onChange={e => setManualAssignments(prev => ({...prev, [loan.sourceIndex]: e.target.value || null}))}
+                        style={{flex:1,padding:'6px 10px',background:'#0d0d14',border:'1px solid #2a2a3a',borderRadius:'6px',color:'#fff',fontSize:'12px'}}>
+                        <option value="">— Nicht zugeordnet —</option>
+                        {immobilien.map(immo => <option key={immo.id} value={String(immo.id)}>{immo.stammdaten?.name || `#${immo.id}`}{immo.stammdaten?.adresse ? ` (${immo.stammdaten.adresse})` : ''}</option>)}
+                      </select>
+                    </div>
+                    {/* Candidates */}
+                    {loan.match.candidates?.length > 0 && (
+                      <div style={{borderTop:'1px solid #2a2a3a',paddingTop:'8px'}}>
+                        <small style={{color:'#666',fontSize:'10px',textTransform:'uppercase',letterSpacing:'0.3px'}}>Matching-Kandidaten:</small>
+                        {loan.match.candidates.map((c,ci) => (
+                          <div key={ci} style={{padding:'6px 8px',borderRadius:'6px',marginTop:'4px',cursor:'pointer'}}
+                            onClick={() => setManualAssignments(prev => ({...prev, [loan.sourceIndex]: c.propertyId}))}>
+                            <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                              <span style={{color:'#ccc',fontSize:'12px',flex:1}}>{c.profileName}</span>
+                              <div style={{width:'48px',height:'4px',background:'#2a2a3a',borderRadius:'2px',overflow:'hidden'}}>
+                                <div style={{height:'100%',borderRadius:'2px',width:`${c.confidence*100}%`,background:c.confidence>=0.6?'#22c55e':c.confidence>=0.3?'#f59e0b':'#94a3b8'}} />
+                              </div>
+                              <span style={{color:'#888',fontSize:'11px',width:'28px',textAlign:'right'}}>{(c.confidence*100).toFixed(0)}%</span>
+                            </div>
+                            <div style={{marginTop:'2px',paddingLeft:'4px'}}>
+                              {c.reasons.map((r,ri) => <small key={ri} style={{display:'block',color:'#666',fontSize:'10px',lineHeight:1.4}}>• {r}</small>)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>)}
+        </div>
+
+        {/* Footer */}
+        <div style={slst.footer}>
+          {step === 'upload' && (<>
+            <button className="btn" onClick={onClose} style={{background:'#1a1a24',border:'1px solid #2a2a3a'}}>Abbrechen</button>
+            <button className="btn" onClick={startAnalysis} disabled={!file} style={{background:'#3b82f6',border:'none',opacity:file?1:0.5,cursor:file?'pointer':'not-allowed'}}>🔍 Analysieren</button>
+          </>)}
+          {step === 'analyzing' && <button className="btn" onClick={() => { setParsing(false); setStep('upload'); }} style={{background:'#1a1a24',border:'1px solid #2a2a3a'}}>Abbrechen</button>}
+          {step === 'review' && (<>
+            <button className="btn" onClick={() => { setStep('upload'); setResult(null); }} style={{background:'#1a1a24',border:'1px solid #2a2a3a'}}>← Zurück</button>
+            <div style={{display:'flex',gap:'8px'}}>
+              <button className="btn" onClick={() => {
+                const out = { extractedLoans: result.extractedLoans.filter(l => selectedLoans.has(l.sourceIndex)).map(({_importData,...rest}) => rest), notes: result.notes || [] };
+                navigator.clipboard?.writeText(JSON.stringify(out, null, 2));
+              }} style={{background:'none',border:'1px solid #2a2a3a',color:'#888',fontSize:'12px'}}>📋 JSON</button>
+              <button className="btn" onClick={handleImportAll} disabled={selectedLoans.size===0} style={{background:'#3b82f6',border:'none',opacity:selectedLoans.size>0?1:0.5}}>✓ {selectedLoans.size} importieren</button>
+            </div>
+          </>)}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// PDF EXPORT FUNCTIONS
+// ============================================================================
+
+const exportPrintCSS = `
+  @media print { body{-webkit-print-color-adjust:exact;print-color-adjust:exact} }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:11px;color:#1a1a2e;line-height:1.5;padding:24px}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #6366f1;padding-bottom:12px;margin-bottom:20px}
+  .header h1{font-size:18px;color:#1a1a2e;font-weight:700} .header .sub{color:#666;font-size:11px;margin-top:2px}
+  .header .logo{font-size:10px;color:#6366f1;font-weight:600;letter-spacing:1px}
+  .header .date{font-size:9px;color:#999}
+  .section{margin-bottom:16px;break-inside:avoid} .section h2{font-size:13px;color:#6366f1;border-bottom:1px solid #e5e7eb;padding-bottom:4px;margin-bottom:8px}
+  table{width:100%;border-collapse:collapse;font-size:11px} td,th{padding:4px 8px;text-align:left;border-bottom:1px solid #f3f4f6}
+  th{background:#f8f9fa;font-weight:600;color:#374151;font-size:10px;text-transform:uppercase;letter-spacing:0.3px}
+  .val{text-align:right;font-variant-numeric:tabular-nums} .hl{font-weight:600;background:#f0f0ff} .hl td{border-top:1px solid #6366f1}
+  .pos{color:#059669} .neg{color:#dc2626} .dim{color:#999}
+  .badge{display:inline-block;padding:2px 6px;border-radius:3px;font-size:9px;font-weight:600}
+  .badge-green{background:#d1fae5;color:#065f46} .badge-blue{background:#dbeafe;color:#1e40af} .badge-gray{background:#f3f4f6;color:#374151}
+  .summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:20px}
+  .summary-card{background:#f8f9fa;border:1px solid #e5e7eb;border-radius:6px;padding:10px;text-align:center}
+  .summary-card .label{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:0.3px} .summary-card .value{font-size:16px;font-weight:700;color:#1a1a2e}
+  .summary-card .sub{font-size:9px;color:#999}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .footer{margin-top:24px;padding-top:8px;border-top:1px solid #e5e7eb;text-align:center;color:#999;font-size:9px}
+  .dl-card{background:#f8f9fa;border:1px solid #e5e7eb;border-radius:6px;padding:10px;margin-bottom:8px;break-inside:avoid}
+  .dl-card h3{font-size:12px;color:#1a1a2e;margin-bottom:4px} .dl-card .dl-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .dl-card .dl-item{} .dl-card .dl-item .lbl{font-size:9px;color:#666;text-transform:uppercase} .dl-card .dl-item .val{font-size:11px;font-weight:500}
+`;
+
+const openPrintWindow = (html, title) => {
+  const w = window.open('', '_blank', 'width=900,height=700');
+  if (!w) { alert('Popup blockiert – bitte Popup-Blocker deaktivieren.'); return; }
+  w.document.write(`<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>${title}</title><style>${exportPrintCSS}</style></head><body>${html}</body></html>`);
+  w.document.close();
+  setTimeout(() => w.print(), 400);
+};
+
+const f$ = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v || 0);
+const f$2 = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v || 0);
+const fP$ = (v) => new Intl.NumberFormat('de-DE', { style: 'percent', minimumFractionDigits: 2 }).format(v || 0);
+const fD$ = (d) => { if (!d) return '—'; const p = d.split('-'); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d; };
+
+const exportSingleImmobilie = (p, c) => {
+  const s = p.stammdaten;
+  const darlehen = p.darlehen || [];
+  const mh = p.miethistorie || [];
+  const sa = s.sonderausstattung || [];
+  const gwg = (s.grundstueckGroesse || 0) * (s.bodenrichtwert || 0);
+  const ga = s.erbbaurecht ? 0 : (s.eigentumsart === 'gesamt' ? gwg : (s.teileigentumsanteil > 0 ? (s.teileigentumsanteil / 10000) * gwg : 0));
+  const restschuld = darlehen.reduce((sum, d) => sum + (d.restschuld || d.betrag || 0), 0);
+  const monatsrate = darlehen.reduce((sum, d) => sum + (d.monatsrate || 0), 0);
+
+  const row = (label, val, cls) => val != null && val !== '' && val !== 0 ? `<tr><td>${label}</td><td class="val ${cls||''}">${val}</td></tr>` : '';
+  const typLabel = TYP_LABELS[s.typ] || s.typ?.toUpperCase() || '—';
+  const blName = BUNDESLAENDER[s.bundesland]?.name || s.bundesland || '—';
+
+  let html = `
+  <div class="header">
+    <div><h1>${s.name || 'Immobilie'}</h1><div class="sub">${typLabel} · ${s.adresse || 'Keine Adresse'}${s.eigentuemer ? ` · ${s.eigentuemer}` : ''}</div></div>
+    <div style="text-align:right"><div class="logo">IMMOHUB</div><div class="date">${new Date().toLocaleDateString('de-DE')} · Datenexport</div></div>
+  </div>
+
+  <div class="summary-grid">
+    <div class="summary-card"><div class="label">Kaufpreis</div><div class="value">${f$(c.kp)}</div><div class="sub">+ ${f$(c.nk)} NK</div></div>
+    <div class="summary-card"><div class="label">Jahresmiete</div><div class="value pos">${f$(c.jm)}</div><div class="sub">${f$(c.mm)}/Mon.</div></div>
+    <div class="summary-card"><div class="label">Rendite</div><div class="value">${fP$(c.rendite)}</div><div class="sub">Brutto</div></div>
+    <div class="summary-card"><div class="label">Verbindlichkeiten</div><div class="value">${f$(restschuld)}</div><div class="sub">${darlehen.length} Darlehen</div></div>
+    <div class="summary-card"><div class="label">AfA</div><div class="value">${f$(c.afaGes)}</div><div class="sub">pro Jahr</div></div>
+    <div class="summary-card"><div class="label">Fläche</div><div class="value">${s.wohnflaeche || 0} qm</div><div class="sub">${s.wohnflaeche > 0 ? f$(c.kp / s.wohnflaeche) + '/qm' : '—'}</div></div>
+  </div>
+
+  <div class="two-col">
+    <div class="section"><h2>Objektdaten</h2><table>
+      ${row('Name', s.name)}${row('Typ', typLabel)}${row('Adresse', s.adresse)}
+      ${row('Projekt', s.projekt)}${row('Eigentümer', s.eigentuemer)}
+      ${row('Nutzung', s.nutzung === 'vermietet' ? 'Vermietet' : 'Eigengenutzt')}
+      ${row('Status', s.objektstatus === 'neubau' ? 'Neubau' : 'Bestand')}
+      ${row('Bundesland', blName)}${row('Kaufdatum', fD$(s.kaufdatum))}${row('Baujahr', s.baujahr)}
+      ${row('Wohnungs-Nr.', s.wohnungsNr)}${row('Etage', s.etage)}${row('Vermietete Fläche', s.wohnflaeche ? s.wohnflaeche + ' qm' : null)}
+    </table></div>
+
+    <div class="section"><h2>Kaufpreis & Anschaffungskosten</h2><table>
+      ${row('Kaufpreis Immobilie', f$(s.kaufpreisImmobilie))}
+      ${row('Mehrkosten', f$(s.mehrkosten))}
+      ${row('Kaufpreis Stellplatz', f$(s.kaufpreisStellplatz))}
+      <tr class="hl"><td><b>= Kaufpreis</b></td><td class="val"><b>${f$(c.kp)}</b></td></tr>
+      ${row('Makler', f$(s.maklerProvision))}
+      ${row('Grunderwerbsteuer', f$(s.grunderwerbsteuer))}
+      ${row('Notar', f$(s.notarkosten))}
+      <tr class="hl"><td><b>= Anschaffungskosten</b></td><td class="val"><b>${f$(c.ak)}</b></td></tr>
+      ${row('Verkehrswert', s.verkehrswert ? f$(s.verkehrswert) : null)}
+      ${row('Bewertungsdatum', fD$(s.verkehrswertDatum))}
+    </table></div>
+  </div>
+
+  <div class="two-col">
+    <div class="section"><h2>Grundstück & AfA</h2><table>
+      ${row('Grundstücksgröße', s.grundstueckGroesse ? s.grundstueckGroesse + ' qm' : null)}
+      ${row('Bodenrichtwert', s.bodenrichtwert ? f$(s.bodenrichtwert) + '/qm' : null)}
+      ${row('Grundstückswert', gwg > 0 ? f$(gwg) : null)}
+      ${row('TEA', s.teileigentumsanteil ? s.teileigentumsanteil + '/10.000' : null)}
+      ${row('Grundstücksanteil', ga > 0 ? f$(ga) : null)}
+      ${row('AfA-Basis (Gebäude)', f$(c.afaBasis))}
+      ${row('AfA-Satz', s.afaSatz ? s.afaSatz + '%' : null)}
+      ${row('AfA Gebäude', f$(c.afaGeb))}
+      ${sa.length > 0 ? row('AfA Sonderausst.', f$(c.afaSA)) : ''}
+      <tr class="hl"><td><b>AfA Gesamt</b></td><td class="val"><b>${f$(c.afaGes)}/Jahr</b></td></tr>
+    </table></div>
+
+    <div class="section"><h2>Mietdaten</h2><table>
+      ${s.nutzung === 'eigengenutzt' ? '<tr><td colspan="2"><em>Eigengenutzt</em></td></tr>' : `
+        ${row('Mieter', s.mieterName)}
+        ${row('Status', s.mietstatusAktiv === false ? '<span class="badge badge-gray">Leerstand</span>' : '<span class="badge badge-green">Vermietet</span>')}
+        ${row('Mietbeginn', fD$(s.mietbeginn))}${row('Mietende', fD$(s.mietende))}
+        ${row('Kaltmiete', s.kaltmiete ? f$(s.kaltmiete) + '/Mon.' : null)}
+        ${row('NK-Vorauszahlung', s.nebenkostenVorauszahlung ? f$(s.nebenkostenVorauszahlung) + '/Mon.' : null)}
+        ${row('Stellplatz', s.mieteStellplatz ? f$(s.mieteStellplatz) + '/Mon.' : null)}
+        ${row('Sonderausst.', s.mieteSonderausstattung ? f$(s.mieteSonderausstattung) + '/Mon.' : null)}
+        <tr class="hl"><td><b>Gesamtmiete</b></td><td class="val pos"><b>${f$((s.kaltmiete||0)+(s.nebenkostenVorauszahlung||0)+(s.mieteStellplatz||0)+(s.mieteSonderausstattung||0))}/Mon.</b></td></tr>
+        <tr class="hl"><td><b>Jahres-Kaltmiete</b></td><td class="val pos"><b>${f$(c.jm)}</b></td></tr>
+        ${s.wohnflaeche > 0 ? row('→ pro qm', f$2(((s.kaltmiete||0)+(s.mieteStellplatz||0)+(s.mieteSonderausstattung||0)) / s.wohnflaeche) + '/qm', 'pos') : ''}
+      `}
+    </table></div>
+  </div>`;
+
+  // Finanzierung / EK
+  html += `<div class="section"><h2>Finanzierung</h2><table>
+    ${row('Eigenkapitalanteil', s.eigenkapitalAnteil ? s.eigenkapitalAnteil + '%' : null)}
+    ${row('EK-Betrag', s.eigenkapitalBetrag ? f$(s.eigenkapitalBetrag) : null)}
+    ${row('Eigenleistung', s.eigenleistung ? f$(s.eigenleistung) : null)}
+    ${row('KfW-Zuschuss', s.kfwZuschuss ? f$(s.kfwZuschuss) : null)}
+    ${row('BAFA-Förderung', s.bafaFoerderung ? f$(s.bafaFoerderung) : null)}
+  </table></div>`;
+
+  // Darlehen
+  if (darlehen.length > 0) {
+    html += `<div class="section"><h2>Darlehen (${darlehen.length})</h2>`;
+    for (const d of darlehen) {
+      html += `<div class="dl-card"><h3>${d.name || 'Darlehen'}${d.institut ? ` · ${d.institut}` : ''}</h3><div class="dl-grid">
+        ${d.betrag ? `<div class="dl-item"><div class="lbl">Darlehensbetrag</div><div class="val">${f$(d.betrag)}</div></div>` : ''}
+        ${d.restschuld ? `<div class="dl-item"><div class="lbl">Restschuld</div><div class="val">${f$(d.restschuld)}</div></div>` : ''}
+        ${d.zinssatz ? `<div class="dl-item"><div class="lbl">Zinssatz</div><div class="val">${d.zinssatz}%</div></div>` : ''}
+        ${d.tilgung ? `<div class="dl-item"><div class="lbl">Tilgung</div><div class="val">${d.tilgung}%</div></div>` : ''}
+        ${d.monatsrate ? `<div class="dl-item"><div class="lbl">Monatsrate</div><div class="val">${f$(d.monatsrate)}</div></div>` : ''}
+        ${d.zinsbindungEnde ? `<div class="dl-item"><div class="lbl">Zinsbindung bis</div><div class="val">${fD$(d.zinsbindungEnde)}</div></div>` : ''}
+        ${d.kontonummer ? `<div class="dl-item"><div class="lbl">Kontonummer</div><div class="val">${d.kontonummer}</div></div>` : ''}
+        ${d.sondertilgung ? `<div class="dl-item"><div class="lbl">Sondertilgung</div><div class="val">${d.sondertilgung}%</div></div>` : ''}
+        ${d.abschluss ? `<div class="dl-item"><div class="lbl">Abschluss</div><div class="val">${fD$(d.abschluss)}</div></div>` : ''}
+      </div></div>`;
+    }
+    html += `<table><tr class="hl"><td><b>Gesamt Restschuld</b></td><td class="val"><b>${f$(restschuld)}</b></td></tr>
+      <tr class="hl"><td><b>Gesamt Monatsrate</b></td><td class="val"><b>${f$(monatsrate)}</b></td></tr></table></div>`;
+  }
+
+  // Sonderausstattung
+  if (sa.length > 0 && sa.some(i => i.bezeichnung || i.betrag)) {
+    html += `<div class="section"><h2>Sonderausstattung</h2><table><tr><th>Bezeichnung</th><th class="val">Betrag</th><th class="val">AfA (10%)</th></tr>`;
+    for (const item of sa) { if (item.bezeichnung || item.betrag) html += `<tr><td>${item.bezeichnung || '—'}</td><td class="val">${f$(item.betrag)}</td><td class="val">${f$((item.betrag||0)*0.1)}/J.</td></tr>`; }
+    html += `</table></div>`;
+  }
+
+  // Miethistorie
+  if (mh.length > 0) {
+    html += `<div class="section"><h2>Miethistorie</h2><table><tr><th>Mieter</th><th>Von</th><th>Bis</th><th class="val">Miete</th><th>Grund</th></tr>`;
+    for (const m of mh) { html += `<tr><td>${m.mieter || '—'}</td><td>${fD$(m.von)}</td><td>${fD$(m.bis) || '—'}</td><td class="val">${f$(m.miete)}/Mon.</td><td>${m.grund || '—'}</td></tr>`; }
+    html += `</table></div>`;
+  }
+
+  html += `<div class="footer">Erstellt mit ImmoHub · ${new Date().toLocaleDateString('de-DE')} · Alle Angaben ohne Gewähr</div>`;
+  openPrintWindow(html, `ImmoHub – ${s.name || 'Immobilie'}`);
+};
+
+const exportPortfolio = (filtered, totals, avgRendite) => {
+  const f = f$, fp = fP$;
+  let html = `
+  <div class="header">
+    <div><h1>Portfolio-Übersicht</h1><div class="sub">${filtered.length} Immobilien · Stand ${new Date().toLocaleDateString('de-DE')}</div></div>
+    <div style="text-align:right"><div class="logo">IMMOHUB</div><div class="date">Datenexport</div></div>
+  </div>
+
+  <div class="summary-grid">
+    <div class="summary-card"><div class="label">Immobilien</div><div class="value">${filtered.length}</div></div>
+    <div class="summary-card"><div class="label">Kaufpreise</div><div class="value">${f(totals.kp)}</div><div class="sub">Ø ${f(totals.kp / Math.max(filtered.length, 1))}</div></div>
+    <div class="summary-card"><div class="label">Jahresmiete</div><div class="value pos">${f(totals.jm)}</div><div class="sub">${f(totals.jm / 12)}/Mon.</div></div>
+    <div class="summary-card"><div class="label">Ø Rendite</div><div class="value">${fp(avgRendite)}</div><div class="sub">Brutto</div></div>
+    <div class="summary-card"><div class="label">Verbindlichkeiten</div><div class="value">${f(totals.fk)}</div></div>
+    <div class="summary-card"><div class="label">AfA Gesamt</div><div class="value">${f(totals.afaGes)}</div><div class="sub">pro Jahr</div></div>
+    <div class="summary-card"><div class="label">Gesamtfläche</div><div class="value">${totals.qm.toLocaleString('de-DE')} qm</div><div class="sub">Ø ${f(totals.kp / Math.max(totals.qm, 1))}/qm</div></div>
+  </div>
+
+  <div class="section">
+    <h2>Immobilien im Überblick</h2>
+    <table>
+      <tr><th>Name</th><th>Typ</th><th>Adresse</th><th class="val">Fläche</th><th class="val">Kaufpreis</th><th class="val">Jahresmiete</th><th class="val">Rendite</th><th class="val">Verbindl.</th><th class="val">AfA/Jahr</th></tr>`;
+
+  for (const i of filtered) {
+    const s = i.stammdaten;
+    const typLabel = TYP_LABELS[s.typ] || s.typ?.toUpperCase() || '—';
+    html += `<tr>
+      <td><b>${s.name || '—'}</b></td>
+      <td><span class="badge badge-blue">${typLabel}</span></td>
+      <td>${s.adresse || '—'}</td>
+      <td class="val">${i.wohnflaeche || 0} qm</td>
+      <td class="val">${f(i.kp)}</td>
+      <td class="val pos">${f(i.jm)}</td>
+      <td class="val">${fp(i.rendite)}</td>
+      <td class="val">${f(i.fk)}</td>
+      <td class="val">${f(i.afaGes)}</td>
+    </tr>`;
+  }
+
+  html += `<tr class="hl">
+    <td><b>Gesamt (${filtered.length})</b></td><td></td><td></td>
+    <td class="val"><b>${totals.qm.toLocaleString('de-DE')} qm</b></td>
+    <td class="val"><b>${f(totals.kp)}</b></td>
+    <td class="val pos"><b>${f(totals.jm)}</b></td>
+    <td class="val"><b>${fp(avgRendite)}</b></td>
+    <td class="val"><b>${f(totals.fk)}</b></td>
+    <td class="val"><b>${f(totals.afaGes)}</b></td>
+  </tr></table></div>`;
+
+  // Einzelübersicht pro Immobilie
+  html += `<div class="section"><h2>Detailübersicht</h2>`;
+  for (const i of filtered) {
+    const s = i.stammdaten;
+    const dl = i.darlehen || [];
+    const rs = dl.reduce((sum, d) => sum + (d.restschuld || d.betrag || 0), 0);
+    html += `<div class="dl-card"><h3>${s.name || '—'}${s.adresse ? ` · ${s.adresse}` : ''}</h3><div class="dl-grid">
+      <div class="dl-item"><div class="lbl">Kaufpreis</div><div class="val">${f(i.kp)}</div></div>
+      <div class="dl-item"><div class="lbl">Jahresmiete</div><div class="val pos">${f(i.jm)}</div></div>
+      <div class="dl-item"><div class="lbl">Rendite</div><div class="val">${fp(i.rendite)}</div></div>
+      <div class="dl-item"><div class="lbl">Fläche</div><div class="val">${i.wohnflaeche || 0} qm</div></div>
+      <div class="dl-item"><div class="lbl">Verbindlichkeiten</div><div class="val">${f(rs)}</div></div>
+      <div class="dl-item"><div class="lbl">AfA/Jahr</div><div class="val">${f(i.afaGes)}</div></div>
+      ${s.mieterName ? `<div class="dl-item"><div class="lbl">Mieter</div><div class="val">${s.mieterName}</div></div>` : ''}
+      ${dl.length > 0 ? `<div class="dl-item"><div class="lbl">Darlehen</div><div class="val">${dl.length}× · ${f(dl.reduce((s,d) => s + (d.monatsrate||0), 0))}/Mon.</div></div>` : ''}
+      ${s.nutzung ? `<div class="dl-item"><div class="lbl">Nutzung</div><div class="val">${s.nutzung === 'vermietet' ? 'Vermietet' : 'Eigengenutzt'}</div></div>` : ''}
+    </div></div>`;
+  }
+  html += `</div>`;
+
+  html += `<div class="footer">Erstellt mit ImmoHub · ${new Date().toLocaleDateString('de-DE')} · Alle Angaben ohne Gewähr</div>`;
+  openPrintWindow(html, 'ImmoHub – Portfolio-Übersicht');
+};
+
+// Stammdaten
+// Aggregation: Werte eines Gebäudes automatisch aus seinen Einheiten
+const cmUnit = (immo) => {
+  const s = (immo && immo.stammdaten) || {}; const darlehen = (immo && immo.darlehen) || [];
+  const kp = (s.kaufpreisImmobilie||0)+(s.mehrkosten||0)+(s.kaufpreisStellplatz||0);
+  const nk = (s.maklerProvision||0)+(s.grunderwerbsteuer||0)+(s.notarkosten||0);
+  const jm = ((s.kaltmiete||0)+(s.mieteStellplatz||0)+(s.mieteSonderausstattung||0))*12;
+  const gwg = (s.grundstueckGroesse||0)*(s.bodenrichtwert||0);
+  const ga = s.erbbaurecht ? 0 : (s.eigentumsart==='gesamt' ? gwg : (s.teileigentumsanteil>0 ? (s.teileigentumsanteil/10000)*gwg : 0));
+  const afaGeb = ((kp+nk)-ga)*((s.afaSatz||3)/100);
+  const saSumme = (s.sonderausstattung||[]).reduce((a,i)=>a+(i.betrag||0),0);
+  const afaSA = saSumme*0.1;
+  const afaGes = afaGeb + afaSA + (s.degressiveAfa||0);
+  const fk = darlehen.reduce((a,d)=>a+(d.restschuld||d.betrag||0),0);
+  const rate = darlehen.reduce((a,d)=>a+(d.monatsrate>0?d.monatsrate:(d.betrag>0&&d.zinssatz>0?d.betrag*((d.zinssatz+(d.tilgung||0))/100)/12:0)),0);
+  return {kp,nk,jm,wohnflaeche:(s.wohnflaeche||0),afaGeb,afaSA,afaGes,fk,rate,saSumme,saCount:(s.sonderausstattung||[]).length};
+};
+const cmAgg = (container, children) => {
+  const own = cmUnit(container);
+  const acc = children.reduce((a,u)=>{const m=cmUnit(u);a.kp+=m.kp;a.nk+=m.nk;a.jm+=m.jm;a.wohnflaeche+=m.wohnflaeche;a.afaGeb+=m.afaGeb;a.afaSA+=m.afaSA;a.afaGes+=m.afaGes;a.fk+=m.fk;a.rate+=m.rate;a.saSumme+=m.saSumme;a.saCount+=m.saCount;return a;},{kp:0,nk:0,jm:0,wohnflaeche:0,afaGeb:0,afaSA:0,afaGes:0,fk:0,rate:0,saSumme:0,saCount:0});
+  const kp = own.kp+acc.kp, nk = own.nk+acc.nk, ak = kp+nk, jm = own.jm+acc.jm;
+  return {kp,nk,ak,jm,mm:jm/12,rendite:kp>0?jm/kp:0,kaufpreisfaktor:jm>0?kp/jm:0,afaGeb:own.afaGeb+acc.afaGeb,afaSA:own.afaSA+acc.afaSA,afaGes:own.afaGes+acc.afaGes,wohnflaeche:own.wohnflaeche+acc.wohnflaeche,fk:own.fk+acc.fk,rate:own.rate+acc.rate,saSumme:own.saSumme+acc.saSumme,saCount:own.saCount+acc.saCount,ga:0};
+};
+
+const Stamm = ({ p, upd, c, onSave, saved, onOpenImport, onDelete, onDiscard, validationErrors = {}, beteiligte = [], immobilien = [], onSmartImport, onAddEinheit, onSelectEinheit, onAssignEinheit, onDetachEinheit, onDeleteUnit, onUpdateUnit, onSplitToUnit, onConvertToContainer }) => {
+  const [sec, setSec] = useState(null);
+  const [secExpanded, setSecExpanded] = useState(false);
+  const [darlehenImportModal, setDarlehenImportModal] = useState(false);
+  const [smartImportModal, setSmartImportModal] = useState(false);
+  const [tilgungsplanDarlehen, setTilgungsplanDarlehen] = useState(null);
+  const [mhistOpen, setMhistOpen] = useState(false);
+  const [mhistImportModal, setMhistImportModal] = useState(false);
+  const [archiveConfirm, setArchiveConfirm] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
+  const [detachConfirmId, setDetachConfirmId] = useState(null);
+  const [kpUnitOpen, setKpUnitOpen] = useState(null);
+  const [mieteUnitOpen, setMieteUnitOpen] = useState(null);
+  const [finUnitOpen, setFinUnitOpen] = useState(null);
+  const [afaUnitOpen, setAfaUnitOpen] = useState(null);
+  const [saUnitOpen, setSaUnitOpen] = useState(null);
+  const [betUnitOpen, setBetUnitOpen] = useState(null);
+  const [dokUnitOpen, setDokUnitOpen] = useState(null);
+  const [resetConfirm, setResetConfirm] = useState(null); // 'objekt' | 'kaufpreis' | 'miete' | etc.
+  const s = p.stammdaten;
+  const einheiten = (immobilien || []).filter(x => x.parentId === p.id);
+  const parentGebaeude = p.parentId ? (immobilien || []).find(x => x.id === p.parentId) : null;
+  const zuordenbar = (immobilien || []).filter(x => !x.isContainer && !x.parentId && x.id !== p.id && x.saved);
+  const isCont = p.isContainer && einheiten.length > 0;
+  const cc = isCont ? cmAgg(p, einheiten) : c;
+  const darlehenModus = p.darlehenModus || 'objekt';
+  const zuPruefen = p.zuPruefen || [];
+  const istImportiert = p.importiert && zuPruefen.length > 0;
+  
+  const markAsReviewed = () => {
+    upd({ ...p, zuPruefen: [], importiert: false });
+  };
+  
+  // Funktion zur Prüfung von Zeitraum-Überschneidungen
+  const checkOverlap = (von, bis, historie) => {
+    if (!von) return null;
+    const vonDate = new Date(von);
+    const bisDate = bis ? new Date(bis) : new Date();
+    
+    for (const eintrag of historie) {
+      if (!eintrag.von) continue;
+      const eVon = new Date(eintrag.von);
+      const eBis = eintrag.bis ? new Date(eintrag.bis) : new Date();
+      
+      // Überschneidung prüfen: (Start1 <= Ende2) && (Start2 <= Ende1)
+      if (vonDate <= eBis && eVon <= bisDate) {
+        return {
+          von: eintrag.von,
+          bis: eintrag.bis,
+          grund: eintrag.grund
+        };
+      }
+    }
+    return null;
+  };
+  
+  // Überschneidung berechnen für Anzeige
+  const overlap = React.useMemo(() => {
+    return checkOverlap(s.mietbeginn, s.mietende, p.miethistorie || []);
+  }, [s.mietbeginn, s.mietende, p.miethistorie]);
+  
+  // Funktion zum Archivieren des aktuellen Mieters in die Historie
+  const archiveMieter = () => {
+    const neuerHistorieEintrag = {
+      von: s.mietbeginn || '',
+      bis: s.mietende || new Date().toISOString().split('T')[0],
+      kaltmiete: s.kaltmiete || 0,
+      nebenkosten: s.nebenkostenVorauszahlung || 0,
+      stellplatz: s.mieteStellplatz || 0,
+      sonstiges: s.mieteSonderausstattung || 0,
+      grund: s.mieterName ? `Mieter: ${s.mieterName}` : ''
+    };
+    
+    // Zur Historie hinzufügen und aktuelle Daten leeren
+    const neueHistorie = [...(p.miethistorie || []), neuerHistorieEintrag];
+    upd({
+      ...p,
+      miethistorie: neueHistorie,
+      stammdaten: {
+        ...s,
+        mieterName: '',
+        mietbeginn: '',
+        mietende: '',
+        kaltmiete: 0,
+        nebenkostenVorauszahlung: 0,
+        mieteStellplatz: 0,
+        mieteSonderausstattung: 0,
+        mietstatusAktiv: false
+      }
+    });
+    setArchiveConfirm(false);
+    setMhistOpen(true); // Historie öffnen um den neuen Eintrag zu zeigen
+  };
+  
+  const set = (f, v) => {
+    const n = { ...s, [f]: v };
+    if (['bundesland', 'kaufpreisImmobilie', 'kaufpreisStellplatz', 'mehrkosten'].includes(f)) {
+      const bl = f === 'bundesland' ? v : s.bundesland;
+      const kp = (f === 'kaufpreisImmobilie' ? v : s.kaufpreisImmobilie) + (f === 'mehrkosten' ? v : (s.mehrkosten || 0)) + (f === 'kaufpreisStellplatz' ? v : s.kaufpreisStellplatz);
+      n.grunderwerbsteuer = kp * ((BUNDESLAENDER[bl]?.grest || 6) / 100);
+    }
+    upd({ ...p, stammdaten: n });
+  };
+  const addSA = () => set('sonderausstattung', [...s.sonderausstattung, { bezeichnung: '', betrag: 0 }]);
+  const updSA = (i, f, v) => { const a = [...s.sonderausstattung]; a[i] = { ...a[i], [f]: f === 'betrag' ? parseFloat(v) || 0 : v }; set('sonderausstattung', a); };
+  const delSA = i => set('sonderausstattung', s.sonderausstattung.filter((_, x) => x !== i));
+  const canSave = s.name?.trim().length > 0;
+  const hasErrors = Object.keys(validationErrors).length > 0;
+
+  return (
+    <div className="mod">
+      {!saved && (
+        <div className="draft-bar">
+          <div><span className="draft-icon"><IconSave color="#f59e0b" /></span><strong>Entwurf</strong> – Noch nicht gespeichert</div>
+          <div className="draft-bar-actions">
+            <button onClick={onSave} disabled={!canSave || hasErrors}>Speichern</button>
+            <button className="draft-close" onClick={onDiscard} title="Entwurf verwerfen">×</button>
+          </div>
+        </div>
+      )}
+      {hasErrors && (
+        <div className="validation-banner">
+          <span className="validation-banner-icon"><IconWarning color="#ef4444" /></span>
+          <span>Bitte korrigiere die markierten Felder</span>
+        </div>
+      )}
+      {istImportiert && (
+        <div className="review-banner">
+          <div className="review-banner-icon"><IconReview color="#f59e0b" /></div>
+          <div className="review-banner-text">
+            <strong>Importierte Daten – Bitte prüfen</strong>
+            <span>{zuPruefen.length} Felder wurden aus dem Dokument übernommen und sollten überprüft werden.</span>
+          </div>
+          <div className="review-banner-actions">
+            <button className="btn-review-done" onClick={markAsReviewed}><span className="btn-icon-xs"><IconCheck color="#fff" /></span>Geprüft</button>
+            <button className="btn-review-delete" onClick={onDelete}><span className="btn-icon-xs"><IconTrash color="#fff" /></span>Löschen</button>
+          </div>
+        </div>
+      )}
+      <div className="kpi-bar">
+        <div className="kpi"><span>Kaufpreis</span><b>{fmt(cc.kp)}</b></div>
+        <div className="kpi"><span>+ Nebenkosten</span><b>{fmt(cc.nk)}</b></div>
+        <div className="kpi"><span>= Anschaffung</span><b className="acc">{fmt(cc.ak)}</b></div>
+        <div className="kpi"><span>Jahres-Kaltmiete</span><b className="pos">{fmt(cc.jm)}</b></div>
+        <div className="kpi"><span>Rendite</span><b className="acc">{fmtP(cc.rendite)}</b></div>
+        <div className="kpi"><span>Faktor</span><b>{cc.kaufpreisfaktor ? cc.kaufpreisfaktor.toFixed(1) : '–'}</b></div>
+        <div className="kpi"><span>AfA p.a.</span><b>{fmt(cc.afaGes)}</b></div>
+      </div>
+      <div className="accs">
+        <Acc icon={<IconObjekt color="#6366f1" />} title="Objekt" sum={(p.isContainer ? '🏢 Gebäude · ' : '') + (s.name || 'Name eingeben...')} open={sec === 'obj'} toggle={() => setSec(sec === 'obj' ? null : 'obj')} color="#6366f1" onImport={onOpenImport}>
+          {/* === Hierarchie: Einheit-Navigation oder Gebäude-Toggle === */}
+          {parentGebaeude ? (
+            <div onClick={() => onSelectEinheit && onSelectEinheit(parentGebaeude)} style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 12px',marginBottom:'12px',background:'rgba(99,102,241,0.08)',border:'1px solid rgba(99,102,241,0.25)',borderRadius:'8px',cursor:'pointer'}}>
+              <span style={{fontSize:'16px'}}>←</span>
+              <span style={{fontSize:'13px'}}>Einheit in <b>🏢 {parentGebaeude.stammdaten?.name || 'Gebäude'}</b> · zurück zum Gebäude</span>
+            </div>
+          ) : (
+            <div className="container-toggle" style={{display:'flex',gap:'8px',padding:'10px',marginBottom:'12px',background:'rgba(99,102,241,0.05)',border:'1px solid rgba(99,102,241,0.2)',borderRadius:'8px'}}>
+              <label style={{flex:1,display:'flex',alignItems:'center',gap:'8px',padding:'8px 10px',background:!p.isContainer?'rgba(99,102,241,0.15)':'transparent',border:`1px solid ${!p.isContainer?'#6366f1':'var(--border)'}`,borderRadius:'6px',cursor:'pointer'}}>
+                <input type="radio" name="immo-typ" checked={!p.isContainer} onChange={() => upd({...p, isContainer: false})} style={{accentColor:'#6366f1'}}/>
+                <span style={{fontSize:'13px',fontWeight:!p.isContainer?'600':'400'}}>Eigenständige Einheit</span>
+              </label>
+              <label style={{flex:1,display:'flex',alignItems:'center',gap:'8px',padding:'8px 10px',background:p.isContainer?'rgba(99,102,241,0.15)':'transparent',border:`1px solid ${p.isContainer?'#6366f1':'var(--border)'}`,borderRadius:'6px',cursor:'pointer'}}>
+                <input type="radio" name="immo-typ" checked={!!p.isContainer} onChange={() => onConvertToContainer ? onConvertToContainer() : upd({...p, isContainer: true})} style={{accentColor:'#6366f1'}}/>
+                <span style={{fontSize:'13px',fontWeight:p.isContainer?'600':'400'}}>🏢 Gebäude mit Einheiten</span>
+              </label>
+            </div>
+          )}
+          {p.isContainer && (
+            <div style={{marginBottom:'14px'}}>
+              <div style={{marginBottom:'10px'}}>
+                <div style={{fontSize:'12px',fontWeight:'600',marginBottom:'6px'}}>Art des Gebäudes</div>
+                <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+                  <label style={{display:'flex',alignItems:'flex-start',gap:'8px',padding:'8px 10px',background:s.eigentumsart==='gesamt'?'rgba(99,102,241,0.15)':'transparent',border:`1px solid ${s.eigentumsart==='gesamt'?'#6366f1':'var(--border)'}`,borderRadius:'6px',cursor:'pointer'}}>
+                    <input type="radio" name="geb-eigentumsart" checked={s.eigentumsart==='gesamt'} onChange={() => set('eigentumsart','gesamt')} style={{accentColor:'#6366f1',marginTop:'2px'}}/>
+                    <span style={{fontSize:'12px'}}><b>Ein Objekt mit mehreren Wohnungen</b><br/><span style={{color:'var(--text-muted)'}}>Kein Teileigentum · ein Grundbuchblatt · keine Teilungserklärung (z.B. klassisches MFH)</span></span>
+                  </label>
+                  <label style={{display:'flex',alignItems:'flex-start',gap:'8px',padding:'8px 10px',background:s.eigentumsart==='weg'?'rgba(99,102,241,0.15)':'transparent',border:`1px solid ${s.eigentumsart==='weg'?'#6366f1':'var(--border)'}`,borderRadius:'6px',cursor:'pointer'}}>
+                    <input type="radio" name="geb-eigentumsart" checked={s.eigentumsart==='weg'} onChange={() => set('eigentumsart','weg')} style={{accentColor:'#6366f1',marginTop:'2px'}}/>
+                    <span style={{fontSize:'12px'}}><b>Mehrere Eigentumswohnungen</b><br/><span style={{color:'var(--text-muted)'}}>WEG · Teilungserklärung · je Wohnung eigenes Grundbuch & Teileigentumsanteil</span></span>
+                  </label>
+                </div>
+                <p style={{fontSize:'11px',color:'var(--text-muted)',margin:'6px 2px 0'}}>Neu angelegte Einheiten übernehmen diese Eigentumsart automatisch (lässt sich je Wohnung ändern).</p>
+              </div>
+              <div style={{padding:'8px 12px',marginBottom:'10px',background:'rgba(99,102,241,0.08)',borderRadius:'6px',fontSize:'11px',color:'var(--text-muted)'}}>
+                ℹ️ Die Wohnflächen-/Wertfelder hier beziehen sich auf das <b>gesamte Gebäude</b>. Die einzelnen Wohnungen pflegst du im eigenen Abschnitt <b>Einheiten</b> direkt unter Objekt.
+              </div>
+            </div>
+          )}
+          <div className="field-with-btn">
+            <Input label="Name *" value={s.name} onChange={v => set('name', v)} type="text" ph={p.isContainer ? "z.B. MFH Marburger Str. 12" : "z.B. ETW Marburg"} error={validationErrors.name} />
+            <button 
+              className="auto-gen-btn" 
+              onClick={() => {
+                const typ = TYP_LABELS[s.typ] || s.typ?.toUpperCase() || '';
+                const parts = [s.projekt, typ, s.wohnungsNr].filter(Boolean);
+                if (parts.length > 0) set('name', parts.join(' '));
+              }}
+              title="Name automatisch generieren aus Projekt, Typ und Wohnungs-Nr."
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1M5.6 18.4l2.1-2.1m8.6-8.6l2.1-2.1"/>
+              </svg>
+              Auto
+            </button>
+          </div>
+          <Input label="Eigentümer" value={s.eigentuemer} onChange={v => set('eigentuemer', v)} type="text" ph="z.B. Max Mustermann" />
+          <Input label="Adresse" value={s.adresse} onChange={v => set('adresse', v)} type="text" ph="Straße, PLZ Ort" />
+          <Input label="Projekt" value={s.projekt} onChange={v => set('projekt', v)} type="text" ph="z.B. Neubauprojekt Marburg" />
+          <Select label="Typ" value={s.typ} onChange={v => set('typ', v)} options={[{ v: 'etw', l: 'ETW' }, { v: 'mfh', l: 'MFH' }, { v: 'efh', l: 'EFH' }, { v: 'gewerbe', l: 'Gewerbe' }, { v: 'grundstueck', l: 'Grundstück' }]} />
+          <Select label="Neubau/Bestand" value={s.objektstatus} onChange={v => set('objektstatus', v)} options={[{ v: 'neubau', l: 'Neubau' }, { v: 'bestand', l: 'Bestand' }]} />
+          <Select label="Nutzung" value={s.nutzung} onChange={v => set('nutzung', v)} options={[{ v: 'vermietet', l: 'Vermietet' }, { v: 'eigengenutzt', l: 'Eigengenutzt' }]} />
+          <Select label="Bundesland" value={s.bundesland} onChange={v => set('bundesland', v)} options={Object.entries(BUNDESLAENDER).map(([k, v]) => ({ v: k, l: `${v.name} (${v.grest}%)` }))} />
+          <Input label="Kaufdatum" value={s.kaufdatum} onChange={v => set('kaufdatum', v)} type="date" />
+          <Input label="Baujahr" value={s.baujahr} onChange={v => set('baujahr', v)} type="year" />
+          <div className="field-row-2">
+            <Input label="Wohnungs-Nr." value={s.wohnungsNr} onChange={v => set('wohnungsNr', v)} type="text" ph="z.B. 12" />
+            <Input label="Etage" value={s.etage} onChange={v => set('etage', v)} type="text" ph="z.B. 3. OG" />
+          </div>
+          <Input label="Vermietete Fläche" value={s.wohnflaeche} onChange={v => set('wohnflaeche', v)} suffix="qm" step={0.5} />
+          {!p.isContainer && <Select label="Eigentumsart" value={s.eigentumsart || 'weg'} onChange={v => set('eigentumsart', v)} options={[{ v: 'weg', l: 'WEG / Teileigentum (aufgeteilt)' }, { v: 'gesamt', l: 'Gesamteigentum (nicht aufgeteilt)' }]} />}
+          {!p.isContainer && s.eigentumsart === 'gesamt' && <p className="hint-small">Gesamteigentum = ganzes Gebäude in einem Grundbuchblatt, kein Miteigentumsanteil pro Wohnung. Kein TEA, AfA-Basis ohne Teileigentumsanteil.</p>}
+          <hr />
+          <div className="field-group-label">Energieausweis</div>
+          <Select label="Energieträger" value={s.energietraeger || ''} onChange={v => set('energietraeger', v)} options={[{ v: '', l: '– bitte wählen –' }, { v: 'gas', l: 'Gas' }, { v: 'oel', l: 'Öl' }, { v: 'fernwaerme', l: 'Fernwärme' }, { v: 'waermepumpe', l: 'Wärmepumpe' }, { v: 'strom', l: 'Strom' }, { v: 'pellets', l: 'Pellets / Holz' }, { v: 'sonstige', l: 'Sonstige' }]} />
+          <Select label="Ausweis-Art" value={s.energieausweisArt || ''} onChange={v => set('energieausweisArt', v)} options={[{ v: '', l: '– bitte wählen –' }, { v: 'verbrauch', l: 'Verbrauchsausweis' }, { v: 'bedarf', l: 'Bedarfsausweis' }]} />
+          <Input label="Energiekennwert" value={s.energiekennwert} onChange={v => set('energiekennwert', v)} suffix="kWh/m²a" />
+          <Input label="Effizienzklasse" value={s.energieeffizienzklasse} onChange={v => set('energieeffizienzklasse', v)} type="text" ph="z.B. D" />
+          <Input label="Ausweis gültig bis" value={s.energieausweisGueltigBis} onChange={v => set('energieausweisGueltigBis', v)} type="date" />
+          <hr />
+          <div className="field-group-label">Ausbaureserve / Entwicklungspotenzial</div>
+          <Input label="Potenzialfläche" value={s.ausbaureserveFlaeche} onChange={v => set('ausbaureserveFlaeche', v)} suffix="qm" />
+          <Input label="Beschreibung" value={s.ausbaureserveBeschreibung} onChange={v => set('ausbaureserveBeschreibung', v)} type="text" ph="z.B. DG-Ausbau ca. 146 qm möglich" />
+          <hr />
+          <button 
+            className="btn-reset-section" 
+            onClick={() => setResetConfirm('objekt')}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            Felder zurücksetzen
+          </button>
+        </Acc>
+        {p.isContainer && (
+          <Acc icon={<IconObjekt color="#6366f1" />} title="Einheiten" sum={`${einheiten.length} Einheit${einheiten.length !== 1 ? 'en' : ''}`} open={sec === 'einheiten'} toggle={() => setSec(sec === 'einheiten' ? null : 'einheiten')} color="#6366f1">
+            <div style={{padding:'8px 12px',marginBottom:'10px',background:'rgba(99,102,241,0.08)',borderRadius:'6px',fontSize:'11px',color:'var(--text-muted)'}}>
+              ℹ️ Hier verwaltest du die einzelnen Wohnungen dieses Gebäudes. Allgemeine Gebäudedaten gehören in die Abschnitte oben; jede Einheit hat ihre eigenen Werte (Fläche, Miete, ggf. eigenes Darlehen).
+            </div>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'8px'}}>
+                <span style={{fontSize:'13px',fontWeight:'600'}}>🏠 Enthaltene Einheiten ({einheiten.length})</span>
+                {p.saved ? (
+                  <div style={{display:'flex',gap:'6px'}}>
+                    <button onClick={() => setShowAssign(v => !v)} style={{display:'flex',alignItems:'center',gap:'4px',padding:'6px 10px',background:'transparent',color:'#6366f1',border:'1px solid #6366f1',borderRadius:'6px',fontSize:'12px',cursor:'pointer'}}>Bestehende zuordnen</button>
+                    <button onClick={() => onAddEinheit && onAddEinheit(p.id)} style={{display:'flex',alignItems:'center',gap:'4px',padding:'6px 10px',background:'#6366f1',color:'#fff',border:'none',borderRadius:'6px',fontSize:'12px',cursor:'pointer'}}>+ Neue Einheit</button>
+                  </div>
+                ) : (
+                  <span style={{fontSize:'11px',color:'var(--text-muted)'}}>Erst Gebäude speichern</span>
+                )}
+              </div>
+              {showAssign && p.saved && (
+                <div style={{marginBottom:'10px',padding:'10px',border:'1px solid #6366f1',borderRadius:'8px',background:'rgba(99,102,241,0.05)'}}>
+                  <div style={{fontSize:'12px',fontWeight:'600',marginBottom:'6px'}}>Bestehendes Objekt als Einheit zuordnen</div>
+                  {zuordenbar.length === 0 ? (
+                    <div style={{fontSize:'11px',color:'var(--text-muted)'}}>Keine zuordenbaren Objekte. Es werden nur eigenständige, gespeicherte Objekte angezeigt — keine Gebäude und keine bereits zugeordneten Einheiten.</div>
+                  ) : (
+                    <div style={{display:'flex',flexDirection:'column',gap:'4px',maxHeight:'180px',overflowY:'auto'}}>
+                      {zuordenbar.map(o => (
+                        <div key={o.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 8px',background:'rgba(255,255,255,0.03)',borderRadius:'6px'}}>
+                          <span style={{fontSize:'12px'}}>{o.stammdaten?.name || 'Unbenannt'}<span style={{color:'var(--text-muted)'}}>{o.stammdaten?.wohnflaeche>0 ? ' · '+Number(o.stammdaten.wohnflaeche).toLocaleString('de-DE', { maximumFractionDigits: 2 })+' m²' : ''}</span></span>
+                          <button onClick={() => onAssignEinheit && onAssignEinheit(o.id, p.id)} style={{padding:'4px 8px',background:'#6366f1',color:'#fff',border:'none',borderRadius:'5px',fontSize:'11px',cursor:'pointer'}}>+ zuordnen</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {einheiten.length === 0 ? (
+                <div style={{padding:'12px',textAlign:'center',fontSize:'12px',color:'var(--text-muted)',border:'1px dashed var(--border)',borderRadius:'8px'}}>Noch keine Einheiten. {p.saved ? 'Lege die erste Wohnung an.' : 'Speichere das Gebäude, dann kannst du Wohnungen hinzufügen.'}</div>
+              ) : (
+                <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+                  {einheiten.map(u => (
+                    <div key={u.id} onClick={() => onSelectEinheit && onSelectEinheit(u)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 12px',background:'rgba(255,255,255,0.03)',border:'1px solid var(--border)',borderRadius:'8px',cursor:'pointer'}}>
+                      <div style={{display:'flex',flexDirection:'column'}}>
+                        <span style={{fontSize:'13px',fontWeight:'500'}}>{u.stammdaten?.name || 'Unbenannte Einheit'}</span>
+                        <span style={{fontSize:'11px',color:'var(--text-muted)'}}>{[u.stammdaten?.wohnungsNr && ('Nr. '+u.stammdaten.wohnungsNr), u.stammdaten?.etage, u.stammdaten?.wohnflaeche>0 && (Number(u.stammdaten.wohnflaeche).toLocaleString('de-DE', { maximumFractionDigits: 2 })+' m²'), u.stammdaten?.kaltmiete>0 && (fmt(u.stammdaten.kaltmiete)+'/Mon.')].filter(Boolean).join(' · ') || 'Keine Details erfasst'}</span>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:'8px'}} onClick={e => e.stopPropagation()}>
+                        {detachConfirmId === u.id ? (
+                          <>
+                            <span style={{fontSize:'11px',color:'var(--text-muted)'}}>Wirklich lösen?</span>
+                            <button onClick={() => { onDetachEinheit && onDetachEinheit(u.id); setDetachConfirmId(null); }} style={{padding:'3px 9px',background:'#6366f1',color:'#fff',border:'none',borderRadius:'5px',fontSize:'11px',cursor:'pointer'}}>Ja</button>
+                            <button onClick={() => setDetachConfirmId(null)} style={{padding:'3px 9px',background:'transparent',color:'var(--text-muted)',border:'1px solid var(--border)',borderRadius:'5px',fontSize:'11px',cursor:'pointer'}}>Nein</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => onDeleteUnit && onDeleteUnit(u.id)} title="Einheit endgültig löschen" style={{padding:'3px 7px',background:'transparent',color:'#ef4444',border:'1px solid rgba(239,68,68,0.4)',borderRadius:'5px',fontSize:'11px',cursor:'pointer'}}>löschen</button>
+                            <button onClick={() => setDetachConfirmId(u.id)} title="Aus Gebäude lösen (wird wieder eigenständiges Objekt)" style={{padding:'3px 7px',background:'transparent',color:'var(--text-muted)',border:'1px solid var(--border)',borderRadius:'5px',fontSize:'11px',cursor:'pointer'}}>lösen</button>
+                            <span style={{fontSize:'14px',color:'var(--text-muted)'}}>›</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+          </Acc>
+        )}
+        <Acc icon={<IconKaufpreis color="#10b981" />} title="Kaufpreis und Verkehrswert" badge={isCont ? 'Summe der Einheiten' : undefined} sum={`${fmt(cc.kp)} + ${fmt(cc.nk)} NK`} open={sec === 'kp'} toggle={() => setSec(sec === 'kp' ? null : 'kp')} color="#10b981">
+          {isCont ? (() => {
+            const f = einheiten.reduce((a, u) => { const us = u.stammdaten || {}; a.kpi += us.kaufpreisImmobilie || 0; a.mk += us.mehrkosten || 0; a.sp += us.kaufpreisStellplatz || 0; a.mkl += us.maklerProvision || 0; a.gr += us.grunderwerbsteuer || 0; a.no += us.notarkosten || 0; a.vw += us.verkehrswert || 0; return a; }, { kpi:0, mk:0, sp:0, mkl:0, gr:0, no:0, vw:0 });
+            const dates = [...new Set(einheiten.map(u => u.stammdaten?.verkehrswertDatum).filter(Boolean))];
+            const commonDate = dates.length === 1 ? dates[0] : '';
+            return (
+              <>
+                <div className="res"><span>Kaufpreis Immobilie (Σ Einheiten)</span><span>{fmt(f.kpi)}</span></div>
+                {f.mk > 0 && <div className="res"><span>Mehrkosten</span><span>{fmt(f.mk)}</span></div>}
+                {f.sp > 0 && <div className="res"><span>Kaufpreis Stellplatz</span><span>{fmt(f.sp)}</span></div>}
+                <div className="res hl"><span>= Kaufpreis</span><span>{fmt(cc.kp)}</span></div>
+                <hr />
+                {f.mkl > 0 && <div className="res"><span>Makler</span><span>{fmt(f.mkl)}</span></div>}
+                {f.gr > 0 && <div className="res"><span>Grunderwerbsteuer</span><span>{fmt(f.gr)}</span></div>}
+                {f.no > 0 && <div className="res"><span>Notar</span><span>{fmt(f.no)}</span></div>}
+                <div className="res hl"><span>= Anschaffungskosten</span><span>{fmt(cc.ak)}</span></div>
+                <hr />
+                <div className="field-group-label">Aktueller Verkehrswert</div>
+                <div className="res"><span>Verkehrswert (Σ Einheiten)</span><span>{fmt(f.vw)}</span></div>
+                {commonDate ? <div className="res"><span>Bewertungsdatum</span><span>{commonDate}</span></div> : (dates.length > 1 && <div className="res"><span>Bewertungsdatum</span><span style={{color:'var(--text-muted)'}}>unterschiedlich</span></div>)}
+                <p style={{fontSize:'11px',color:'var(--text-muted)',marginTop:'6px'}}>Automatisch aus den Einheiten summiert. Einzelwerte bearbeitest du unten je Einheit.</p>
+              </>
+            );
+          })() : (
+            <>
+              <Input label="Kaufpreis Immobilie" value={s.kaufpreisImmobilie} onChange={v => set('kaufpreisImmobilie', v)} suffix="€" step={1000} error={validationErrors.kaufpreisImmobilie} />
+              <Input label="Mehrkosten" value={s.mehrkosten} onChange={v => set('mehrkosten', v)} suffix="€" />
+              <Input label="Kaufpreis Stellplatz" value={s.kaufpreisStellplatz} onChange={v => set('kaufpreisStellplatz', v)} suffix="€" error={validationErrors.kaufpreisStellplatz} />
+              <div className="res"><span>= Kaufpreis</span><span>{fmt(c.kp)}</span></div>
+              <hr />
+              <Input label="Makler" value={s.maklerProvision} onChange={v => set('maklerProvision', v)} suffix="€" />
+              <Input label="Grunderwerbsteuer" value={s.grunderwerbsteuer} onChange={v => set('grunderwerbsteuer', v)} suffix="€" />
+              <Input label="Notar" value={s.notarkosten} onChange={v => set('notarkosten', v)} suffix="€" />
+              <div className="res hl"><span>= Anschaffungskosten</span><span>{fmt(c.ak)}</span></div>
+              <hr />
+              <div className="field-group-label">Aktueller Verkehrswert</div>
+              <Input label="Verkehrswert" value={s.verkehrswert} onChange={v => set('verkehrswert', v)} suffix="€" error={validationErrors.verkehrswert} />
+              <Input label="Bewertungsdatum" value={s.verkehrswertDatum} onChange={v => set('verkehrswertDatum', v)} type="date" />
+            </>
+          )}
+          {p.isContainer && einheiten.length > 0 && (
+            <div style={{marginTop:'16px',paddingTop:'12px',borderTop:'1px solid var(--border)'}}>
+              <div style={{fontSize:'12px',fontWeight:'600',marginBottom:'8px'}}>🏠 Kaufpreis je Einheit ({einheiten.length})</div>
+              <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+                {einheiten.map(u => {
+                  const us = u.stammdaten || {};
+                  const ukp = (us.kaufpreisImmobilie || 0) + (us.mehrkosten || 0) + (us.kaufpreisStellplatz || 0);
+                  const open = kpUnitOpen === u.id;
+                  return (
+                    <div key={u.id} style={{border:'1px solid var(--border)',borderRadius:'8px',overflow:'hidden'}}>
+                      <div onClick={() => setKpUnitOpen(open ? null : u.id)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 12px',cursor:'pointer',background:'rgba(255,255,255,0.02)'}}>
+                        <span style={{fontSize:'13px',fontWeight:'500'}}>{us.name || 'Einheit'}{us.wohnungsNr ? ` · Nr. ${us.wohnungsNr}` : ''}</span>
+                        <span style={{display:'flex',alignItems:'center',gap:'10px'}}><b style={{fontSize:'13px'}}>{fmt(ukp)}</b><span style={{color:'var(--text-muted)'}}>{open ? '▾' : '▸'}</span></span>
+                      </div>
+                      {open && (
+                        <div style={{padding:'10px 12px',borderTop:'1px solid var(--border)'}}>
+                          <Input label="Kaufpreis Immobilie" value={us.kaufpreisImmobilie} onChange={v => onUpdateUnit && onUpdateUnit(u.id, { kaufpreisImmobilie: v })} suffix="€" step={1000} />
+                          <Input label="Mehrkosten" value={us.mehrkosten} onChange={v => onUpdateUnit && onUpdateUnit(u.id, { mehrkosten: v })} suffix="€" />
+                          <Input label="Kaufpreis Stellplatz" value={us.kaufpreisStellplatz} onChange={v => onUpdateUnit && onUpdateUnit(u.id, { kaufpreisStellplatz: v })} suffix="€" />
+                          <div className="res"><span>= Kaufpreis</span><span>{fmt(ukp)}</span></div>
+                          <hr />
+                          <Input label="Verkehrswert" value={us.verkehrswert} onChange={v => onUpdateUnit && onUpdateUnit(u.id, { verkehrswert: v })} suffix="€" />
+                          <Input label="Bewertungsdatum" value={us.verkehrswertDatum} onChange={v => onUpdateUnit && onUpdateUnit(u.id, { verkehrswertDatum: v })} type="date" />
+                          <div style={{marginTop:'8px'}}><button onClick={() => onSelectEinheit && onSelectEinheit(u)} style={{padding:'5px 10px',background:'transparent',color:'#6366f1',border:'1px solid #6366f1',borderRadius:'6px',fontSize:'11px',cursor:'pointer'}}>Komplette Einheit öffnen →</button></div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          <hr />
+          <button className="btn-reset-section" onClick={() => setResetConfirm('kaufpreis')}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            Felder zurücksetzen
+          </button>
+        </Acc>
+        <Acc icon={<IconAfa color="#f59e0b" />} title="Grundstück & AfA" badge={isCont ? 'Summe der Einheiten' : undefined} sum={`AfA: ${fmt(isCont ? cc.afaGes : (c.afaGeb + (s.degressiveAfa || 0)))}/Jahr`} open={sec === 'afa'} toggle={() => setSec(sec === 'afa' ? null : 'afa')} color="#f59e0b">
+          {/* === Eigentum am Grundstück / Erbbaurecht (v7.7) === */}
+          <div className="field-group-label">Eigentum am Grundstück</div>
+          <div className="mietstatus-checkboxes">
+            <label className="mietstatus-option">
+              <input type="radio" name="erbbau" checked={!s.erbbaurecht} onChange={() => set('erbbaurecht', false)} />
+              <span className="mietstatus-label">Grundstück im Eigentum</span>
+            </label>
+            <label className="mietstatus-option">
+              <input type="radio" name="erbbau" checked={!!s.erbbaurecht} onChange={() => set('erbbaurecht', true)} />
+              <span className="mietstatus-label">🏛 Erbbaurecht</span>
+            </label>
+          </div>
+          {s.erbbaurecht && (<>
+            <Input label="Erbbauzins p.a." value={s.erbbauzins} onChange={v => set('erbbauzins', v)} suffix="€/Jahr" />
+            <Input label="Laufzeit bis" value={s.erbbauLaufzeitEnde} onChange={v => set('erbbauLaufzeitEnde', v)} type="date" />
+            <p className="hint-small">Der Erbbauzins ist als Werbungskosten absetzbar. Da das Grundstück nicht im Eigentum ist, fließt kein Bodenwert-Anteil in die AfA-Basis – die gesamten Anschaffungskosten gelten als Gebäude.</p>
+          </>)}
+          <hr />
+          <Input label="Grundstücksgröße" value={s.grundstueckGroesse} onChange={v => set('grundstueckGroesse', v)} suffix="qm" />
+          {!s.erbbaurecht && <Input label="Bodenrichtwert" value={s.bodenrichtwert} onChange={v => set('bodenrichtwert', v)} suffix="€/qm" />}
+          {s.eigentumsart === 'weg' && !s.erbbaurecht && <Input label="TEA (WEG)" value={s.teileigentumsanteil} onChange={v => set('teileigentumsanteil', v)} suffix="/10.000" />}
+          <div className="res"><span>Grundstückswert</span><span>{fmt(c.gwg)}</span></div>
+          <div className="res"><span>./. Anteil</span><span>{fmt(c.ga)}</span></div>
+          <hr />
+          <Input label="AfA-Satz (linear)" value={s.afaSatz} onChange={v => set('afaSatz', v)} suffix="%" step={0.5} />
+          <div className="res hl"><span>AfA-Basis</span><span>{fmt(c.afaBasis)}</span></div>
+          <div className="res hl"><span>Lineare AfA p.a.</span><span>{fmt(c.afaGeb)}</span></div>
+          <hr />
+          <div className="field-group-label">Degressive AfA (§7 Abs. 5a EStG)</div>
+          <p className="hint-small">Für Neubauten ab 2023: 5% p.a. vom Restwert, max. 5 Jahre, dann Wechsel zur linearen AfA</p>
+          <Input label="Degressive AfA" value={s.degressiveAfa} onChange={v => set('degressiveAfa', v)} suffix="€/Jahr" />
+          {(s.degressiveAfa > 0) && (
+            <div className="res hl"><span>Gesamt-AfA p.a.</span><span>{fmt(c.afaGeb + (s.degressiveAfa || 0))}</span></div>
+          )}
+          {p.isContainer && einheiten.length > 0 && (() => {
+            const unitAfa = (us) => {
+              const kp = (us.kaufpreisImmobilie || 0) + (us.mehrkosten || 0) + (us.kaufpreisStellplatz || 0);
+              const nk = (us.maklerProvision || 0) + (us.grunderwerbsteuer || 0) + (us.notarkosten || 0);
+              const gwg = (us.grundstueckGroesse || 0) * (us.bodenrichtwert || 0);
+              const ga = us.erbbaurecht ? 0 : (us.eigentumsart === 'gesamt' ? gwg : (us.teileigentumsanteil > 0 ? (us.teileigentumsanteil / 10000) * gwg : 0));
+              return ((kp + nk) - ga) * ((us.afaSatz || 3) / 100) + (us.degressiveAfa || 0);
+            };
+            const sumFlaeche = einheiten.reduce((a, u) => a + ((u.stammdaten || {}).grundstueckGroesse || 0), 0);
+            const sumAfa = einheiten.reduce((a, u) => a + unitAfa(u.stammdaten || {}), 0);
+            const gebAfa = c.afaGeb + (s.degressiveAfa || 0);
+            return (
+              <div style={{marginTop:'16px',paddingTop:'12px',borderTop:'1px solid var(--border)'}}>
+                <div style={{padding:'12px',marginBottom:'10px',border:'1px solid #f59e0b',borderRadius:'8px',background:'rgba(245,158,11,0.06)'}}>
+                  <div style={{fontSize:'13px',fontWeight:'600',marginBottom:'8px'}}>📊 AfA gesamt</div>
+                  <div style={{display:'flex',flexDirection:'column',gap:'4px',fontSize:'12px'}}>
+                    <div style={{display:'flex',justifyContent:'space-between'}}><span style={{color:'var(--text-muted)'}}>AfA/Jahr Einheiten</span><b>{fmt(sumAfa)}</b></div>
+                    <div style={{display:'flex',justifyContent:'space-between'}}><span style={{color:'var(--text-muted)'}}>AfA/Jahr Gebäude (gemeinsam)</span><b>{fmt(gebAfa)}</b></div>
+                    <div style={{display:'flex',justifyContent:'space-between'}}><span style={{color:'var(--text-muted)'}}>AfA/Jahr gesamt</span><b>{fmt(gebAfa + sumAfa)}</b></div>
+                    <div style={{display:'flex',justifyContent:'space-between'}}><span style={{color:'var(--text-muted)'}}>Grundstücksfläche Einheiten</span><b>{Number(sumFlaeche).toLocaleString('de-DE', { maximumFractionDigits: 2 })} qm</b></div>
+                  </div>
+                </div>
+                <div style={{fontSize:'12px',fontWeight:'600',marginBottom:'8px'}}>🏠 Grundstück & AfA je Einheit ({einheiten.length})</div>
+                <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+                  {einheiten.map(u => {
+                    const us = u.stammdaten || {};
+                    const open = afaUnitOpen === u.id;
+                    return (
+                      <div key={u.id} style={{border:'1px solid var(--border)',borderRadius:'8px',overflow:'hidden'}}>
+                        <div onClick={() => setAfaUnitOpen(open ? null : u.id)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 12px',cursor:'pointer',background:'rgba(255,255,255,0.02)'}}>
+                          <span style={{fontSize:'13px',fontWeight:'500'}}>{us.name || 'Einheit'}{us.wohnungsNr ? ` · Nr. ${us.wohnungsNr}` : ''}</span>
+                          <span style={{display:'flex',alignItems:'center',gap:'10px'}}><b style={{fontSize:'13px'}}>{fmt(unitAfa(us))}/J.</b><span style={{color:'var(--text-muted)'}}>{open ? '▾' : '▸'}</span></span>
+                        </div>
+                        {open && (
+                          <div style={{padding:'10px 12px',borderTop:'1px solid var(--border)'}}>
+                            <Input label="Grundstücksgröße" value={us.grundstueckGroesse} onChange={v => onUpdateUnit && onUpdateUnit(u.id, { grundstueckGroesse: v })} suffix="qm" />
+                            <Input label="Bodenrichtwert" value={us.bodenrichtwert} onChange={v => onUpdateUnit && onUpdateUnit(u.id, { bodenrichtwert: v })} suffix="€/qm" />
+                            <Input label="AfA-Satz (linear)" value={us.afaSatz} onChange={v => onUpdateUnit && onUpdateUnit(u.id, { afaSatz: v })} suffix="%" step={0.5} />
+                            <div className="res hl"><span>Lineare AfA p.a.</span><span>{fmt(unitAfa(us))}</span></div>
+                            <div style={{marginTop:'8px'}}><button onClick={() => onSelectEinheit && onSelectEinheit(u)} style={{padding:'5px 10px',background:'transparent',color:'#f59e0b',border:'1px solid #f59e0b',borderRadius:'6px',fontSize:'11px',cursor:'pointer'}}>Komplette Einheit öffnen →</button></div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+          <hr />
+          <button className="btn-reset-section" onClick={() => setResetConfirm('afa')}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            Felder zurücksetzen
+          </button>
+        </Acc>
+        <Acc icon={<IconSonder color="#8b5cf6" />} title="Sonderausstattung" badge={isCont ? 'Summe der Einheiten' : undefined} sum={(isCont ? cc.saCount : s.sonderausstattung.length) > 0 ? `${isCont ? cc.saCount : s.sonderausstattung.length}x, ${fmt(isCont ? cc.saSumme : c.saSumme)}` : 'Keine'} open={sec === 'sa'} toggle={() => setSec(sec === 'sa' ? null : 'sa')} color="#8b5cf6">
+          <p className="hint">z.B. Küche – 10% AfA über 10 Jahre</p>
+          {s.sonderausstattung.map((x, i) => (
+            <div key={i} className="sa-row">
+              <input value={x.bezeichnung} onChange={e => updSA(i, 'bezeichnung', e.target.value)} placeholder="Bezeichnung" />
+              <NumInput value={x.betrag} onChange={v => updSA(i, 'betrag', v)} placeholder="€" />
+              <button onClick={() => delSA(i)}>×</button>
+            </div>
+          ))}
+          <button className="btn-add" onClick={addSA}>+ Hinzufügen</button>
+          {c.saSumme > 0 && <div className="res hl"><span>AfA SA p.a.</span><span>{fmt(c.afaSA)}</span></div>}
+          {p.isContainer && einheiten.length > 0 && (() => {
+            const usSum = (us) => (us.sonderausstattung || []).reduce((a, x) => a + (x.betrag || 0), 0);
+            const totalSum = einheiten.reduce((a, u) => a + usSum(u.stammdaten || {}), 0);
+            const totalCount = einheiten.reduce((a, u) => a + ((u.stammdaten?.sonderausstattung || []).length), 0);
+            return (
+              <div style={{marginTop:'16px',paddingTop:'12px',borderTop:'1px solid var(--border)'}}>
+                <div style={{padding:'12px',marginBottom:'10px',border:'1px solid #8b5cf6',borderRadius:'8px',background:'rgba(139,92,246,0.06)'}}>
+                  <div style={{fontSize:'13px',fontWeight:'600',marginBottom:'8px'}}>📊 Sonderausstattung der Einheiten gesamt</div>
+                  <div style={{display:'flex',flexDirection:'column',gap:'4px',fontSize:'12px'}}>
+                    <div style={{display:'flex',justifyContent:'space-between'}}><span style={{color:'var(--text-muted)'}}>Positionen</span><b>{totalCount}</b></div>
+                    <div style={{display:'flex',justifyContent:'space-between'}}><span style={{color:'var(--text-muted)'}}>Wert gesamt</span><b>{fmt(totalSum)}</b></div>
+                    <div style={{display:'flex',justifyContent:'space-between'}}><span style={{color:'var(--text-muted)'}}>AfA SA p.a. (10%)</span><b>{fmt(totalSum * 0.1)}</b></div>
+                  </div>
+                </div>
+                <div style={{fontSize:'12px',fontWeight:'600',marginBottom:'8px'}}>🏠 Sonderausstattung je Einheit ({einheiten.length})</div>
+                <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+                  {einheiten.map(u => {
+                    const us = u.stammdaten || {};
+                    const list = us.sonderausstattung || [];
+                    const open = saUnitOpen === u.id;
+                    return (
+                      <div key={u.id} style={{border:'1px solid var(--border)',borderRadius:'8px',overflow:'hidden'}}>
+                        <div onClick={() => setSaUnitOpen(open ? null : u.id)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 12px',cursor:'pointer',background:'rgba(255,255,255,0.02)'}}>
+                          <span style={{fontSize:'13px',fontWeight:'500'}}>{us.name || 'Einheit'}{us.wohnungsNr ? ` · Nr. ${us.wohnungsNr}` : ''} · {list.length} Pos.</span>
+                          <span style={{display:'flex',alignItems:'center',gap:'10px'}}><b style={{fontSize:'13px'}}>{fmt(usSum(us))}</b><span style={{color:'var(--text-muted)'}}>{open ? '▾' : '▸'}</span></span>
+                        </div>
+                        {open && (
+                          <div style={{padding:'10px 12px',borderTop:'1px solid var(--border)',fontSize:'12px'}}>
+                            {list.length === 0 ? (
+                              <div style={{color:'var(--text-muted)'}}>Keine Sonderausstattung erfasst.</div>
+                            ) : list.map((x, xi) => (
+                              <div key={xi} style={{display:'flex',justifyContent:'space-between',padding:'2px 0'}}><span style={{color:'var(--text-muted)'}}>{x.bezeichnung || 'Position'}</span><span>{fmt(x.betrag || 0)}</span></div>
+                            ))}
+                            <div style={{marginTop:'6px'}}><button onClick={() => onSelectEinheit && onSelectEinheit(u)} style={{padding:'4px 9px',background:'transparent',color:'#8b5cf6',border:'1px solid #8b5cf6',borderRadius:'6px',fontSize:'11px',cursor:'pointer'}}>Sonderausstattung dieser Einheit bearbeiten →</button></div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+          <hr />
+          <button className="btn-reset-section" onClick={() => setResetConfirm('sonderausstattung')}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            Felder zurücksetzen
+          </button>
+        </Acc>
+        <Acc 
+          icon={<IconMiete color={s.nutzung === 'eigengenutzt' ? 'var(--text-dim)' : '#ec4899'} />} 
+          title="Miete" 
+          badge={isCont ? 'Summe der Einheiten' : undefined}
+          sum={s.nutzung === 'eigengenutzt' ? 'Eigengenutzt' : `${fmt(cc.mm)}/Monat`} 
+          open={sec === 'miete' && s.nutzung !== 'eigengenutzt'} 
+          toggle={() => s.nutzung !== 'eigengenutzt' && setSec(sec === 'miete' ? null : 'miete')} 
+          color={s.nutzung === 'eigengenutzt' ? 'var(--text-dim)' : '#ec4899'}
+          disabled={s.nutzung === 'eigengenutzt'}
+          onImport={onOpenImport}
+        >
+          {p.isContainer && einheiten.length > 0 && (
+            <div style={{marginBottom:'14px'}}>
+              <div style={{fontSize:'12px',fontWeight:'600',marginBottom:'8px'}}>🏠 Miete je Einheit ({einheiten.length})</div>
+              <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+                {einheiten.map(u => {
+                  const us = u.stammdaten || {};
+                  const open = mieteUnitOpen === u.id;
+                  return (
+                    <div key={u.id} style={{border:'1px solid var(--border)',borderRadius:'8px',overflow:'hidden'}}>
+                      <div onClick={() => setMieteUnitOpen(open ? null : u.id)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 12px',cursor:'pointer',background:'rgba(255,255,255,0.02)'}}>
+                        <span style={{fontSize:'13px',fontWeight:'500'}}>{us.name || 'Einheit'}{us.wohnungsNr ? ` · Nr. ${us.wohnungsNr}` : ''}{us.mieterName ? ` · ${us.mieterName}` : ''}</span>
+                        <span style={{display:'flex',alignItems:'center',gap:'10px'}}><b className="pos" style={{fontSize:'13px'}}>{fmt(us.kaltmiete || 0)}/Mon.</b><span style={{color:'var(--text-muted)'}}>{open ? '▾' : '▸'}</span></span>
+                      </div>
+                      {open && (
+                        <div style={{padding:'10px 12px',borderTop:'1px solid var(--border)'}}>
+                          <Input label="Name Mieter" value={us.mieterName} onChange={v => onUpdateUnit && onUpdateUnit(u.id, { mieterName: v })} type="text" ph="z.B. Familie Müller" />
+                          <Input label="Anzahl Personen" value={us.personenzahl} onChange={v => onUpdateUnit && onUpdateUnit(u.id, { personenzahl: v })} suffix="Pers." />
+                          <Input label="Kaltmiete" value={us.kaltmiete} onChange={v => onUpdateUnit && onUpdateUnit(u.id, { kaltmiete: v })} suffix="€/Mon." />
+                          <Input label="NK-Vorauszahlung" value={us.nebenkostenVorauszahlung} onChange={v => onUpdateUnit && onUpdateUnit(u.id, { nebenkostenVorauszahlung: v })} suffix="€/Mon." />
+                          <Input label="Stellplatz" value={us.mieteStellplatz} onChange={v => onUpdateUnit && onUpdateUnit(u.id, { mieteStellplatz: v })} suffix="€/Mon." />
+                          <div style={{marginTop:'8px'}}><button onClick={() => onSelectEinheit && onSelectEinheit(u)} style={{padding:'5px 10px',background:'transparent',color:'#6366f1',border:'1px solid #6366f1',borderRadius:'6px',fontSize:'11px',cursor:'pointer'}}>Komplette Einheit öffnen →</button></div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {!p.isContainer && (<>
+          <div className="field-group-label">Aktueller Mieter</div>
+          <Input label="Name Mieter" value={s.mieterName} onChange={v => set('mieterName', v)} type="text" ph="z.B. Familie Müller" />
+          <Input label="Anzahl Personen" value={s.personenzahl} onChange={v => set('personenzahl', v)} suffix="Pers." />
+          
+          <div className="mietstatus-checkboxes">
+            <label className="mietstatus-option">
+              <input 
+                type="radio" 
+                name="mietstatus" 
+                checked={s.mietstatusAktiv !== false} 
+                onChange={() => set('mietstatusAktiv', true)}
+              />
+              <span className="mietstatus-label">Vermietet</span>
+            </label>
+            <label className="mietstatus-option">
+              <input 
+                type="radio" 
+                name="mietstatus" 
+                checked={s.mietstatusAktiv === false} 
+                onChange={() => set('mietstatusAktiv', false)}
+              />
+              <span className="mietstatus-label">Leerstand</span>
+            </label>
+            <button 
+              className="btn-archive-mieter"
+              onClick={() => setArchiveConfirm(true)}
+              disabled={!s.mieterName && !s.kaltmiete}
+              title="Aktuellen Mieter in Historie übernehmen"
+            >
+              <IconHistory color="#ec4899" /> In Historie übernehmen
+            </button>
+          </div>
+          
+          {/* Bestätigungsdialog für Archivierung */}
+          {archiveConfirm && (
+            <div className="archive-confirm">
+              <div className="archive-confirm-content">
+                <p><strong>Mieter in Historie übernehmen?</strong></p>
+                <p>Die aktuellen Mietdaten werden in die Miethistorie verschoben und die Felder geleert.</p>
+                
+                {/* Warnung bei Zeitraum-Überschneidung */}
+                {overlap && (
+                  <div className="archive-overlap-warning">
+                    <span className="warning-icon">⚠️</span>
+                    <div>
+                      <strong>Zeitraum-Überschneidung erkannt!</strong>
+                      <p>Der Zeitraum überschneidet sich mit einem bestehenden Eintrag:</p>
+                      <p className="overlap-details">
+                        {formatDateDE(overlap.von)} – {overlap.bis ? formatDateDE(overlap.bis) : 'heute'}
+                        {overlap.grund && ` (${overlap.grund})`}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="archive-preview-list">
+                  {s.mieterName && <span className="archive-preview">Mieter: {s.mieterName}</span>}
+                  {s.mietbeginn && <span className="archive-preview">Von: {formatDateDE(s.mietbeginn)}</span>}
+                  {s.mietende && <span className="archive-preview">Bis: {formatDateDE(s.mietende)}</span>}
+                  {!s.mietende && <span className="archive-preview">Bis: {new Date().toLocaleDateString('de-DE')} (heute)</span>}
+                  {(s.kaltmiete > 0 || s.nebenkostenVorauszahlung > 0 || s.mieteStellplatz > 0 || s.mieteSonderausstattung > 0) && 
+                    <span className="archive-preview">Gesamtmiete: {fmt((s.kaltmiete || 0) + (s.nebenkostenVorauszahlung || 0) + (s.mieteStellplatz || 0) + (s.mieteSonderausstattung || 0))}/Mon.</span>
+                  }
+                </div>
+                <div className="archive-confirm-buttons">
+                  <button className={`btn-confirm ${overlap ? 'btn-warning' : ''}`} onClick={archiveMieter}>
+                    {overlap ? 'Trotzdem übernehmen' : 'Ja, übernehmen'}
+                  </button>
+                  <button className="btn-cancel" onClick={() => setArchiveConfirm(false)}>Abbrechen</button>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          <hr />
+          <div className="field-group-label">Mietkonditionen</div>
+          <div className="miet-datum-row">
+            <div className="miet-datum-field">
+              <label>Von</label>
+              <DateInput value={s.mietbeginn} onChange={v => set('mietbeginn', v)} />
+            </div>
+            <div className="miet-datum-field">
+              <label>Bis</label>
+              <DateInput value={s.mietende} onChange={v => set('mietende', v)} />
+            </div>
+          </div>
+          <Input label="Kaltmiete" value={s.kaltmiete} onChange={v => set('kaltmiete', v)} suffix="€/Mon." />
+          <Input label="NK-Vorauszahlung" value={s.nebenkostenVorauszahlung} onChange={v => set('nebenkostenVorauszahlung', v)} suffix="€/Mon." />
+          <Input label="Stellplatz" value={s.mieteStellplatz} onChange={v => set('mieteStellplatz', v)} suffix="€/Mon." />
+          <Input label="Miete Sonderausst." value={s.mieteSonderausstattung} onChange={v => set('mieteSonderausstattung', v)} suffix="€/Mon." />
+          <div className="res hl gesamtmiete-row">
+            <span>Gesamtmiete</span>
+            <span className="pos">{fmt((s.kaltmiete || 0) + (s.nebenkostenVorauszahlung || 0) + (s.mieteStellplatz || 0) + (s.mieteSonderausstattung || 0))}/Mon.</span>
+          </div>
+          <div className="res"><span>Jahres-Kaltmiete</span><span className="pos">{fmt(((s.kaltmiete || 0) + (s.mieteStellplatz || 0) + (s.mieteSonderausstattung || 0)) * 12)} (mtl. {fmt((s.kaltmiete || 0) + (s.mieteStellplatz || 0) + (s.mieteSonderausstattung || 0))})</span></div>
+          {(s.wohnflaeche || 0) > 0 && <div className="res"><span>→ pro qm</span><span className="pos">{fmtPlain((((s.kaltmiete || 0) + (s.mieteStellplatz || 0) + (s.mieteSonderausstattung || 0)) / s.wohnflaeche))} €/qm</span></div>}
+          
+          <hr />
+          {/* Geplante Mieterhöhungen */}
+          <div className="field-group-label">Geplante Mieterhöhungen</div>
+          <p className="hint">Staffelmiete, Indexmiete oder geplante Anpassungen</p>
+          {(p.mieterhöhungen || []).length > 0 && (
+            <div className="miet-erhoehungen-list">
+              {(p.mieterhöhungen || []).map((m, i) => (
+                <div key={i} className="miet-erhoehung-row">
+                  <div className="miet-erhoehung-datum">
+                    <DateInput 
+                      value={m.datum || ''} 
+                      onChange={v => {
+                        const newM = [...(p.mieterhöhungen || [])];
+                        newM[i] = { ...newM[i], datum: v };
+                        upd({ ...p, mieterhöhungen: newM });
+                      }}
+                    />
+                  </div>
+                  <div className="miet-erhoehung-betrag">
+                    <NumInput 
+                      value={m.neueKaltmiete || ''} 
+                      onChange={v => {
+                        const newM = [...(p.mieterhöhungen || [])];
+                        newM[i] = { ...newM[i], neueKaltmiete: v };
+                        upd({ ...p, mieterhöhungen: newM });
+                      }}
+                      placeholder="Neue Kaltmiete"
+                    />
+                    <span>€</span>
+                  </div>
+                  <select 
+                    value={m.grund || 'staffel'} 
+                    onChange={e => {
+                      const newM = [...(p.mieterhöhungen || [])];
+                      newM[i] = { ...newM[i], grund: e.target.value };
+                      upd({ ...p, mieterhöhungen: newM });
+                    }}
+                    className="miet-erhoehung-grund"
+                  >
+                    <option value="staffel">Staffelmiete</option>
+                    <option value="index">Indexmiete</option>
+                    <option value="mietspiegel">Mietspiegel</option>
+                    <option value="modernisierung">Modernisierung</option>
+                    <option value="sonstige">Sonstige</option>
+                  </select>
+                  <button className="miet-erhoehung-del" onClick={() => {
+                    const newM = (p.mieterhöhungen || []).filter((_, x) => x !== i);
+                    upd({ ...p, mieterhöhungen: newM });
+                  }}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <button className="btn-add" onClick={() => upd({ ...p, mieterhöhungen: [...(p.mieterhöhungen || []), { datum: '', neueKaltmiete: 0, grund: 'staffel' }] })}>+ Mieterhöhung planen</button>
+          
+          {/* Zusammenfassung geplante Erhöhungen */}
+          {(p.mieterhöhungen || []).length > 0 && (() => {
+            const zukunft = (p.mieterhöhungen || []).filter(m => m.datum && new Date(m.datum) > new Date()).sort((a, b) => new Date(a.datum) - new Date(b.datum));
+            if (zukunft.length === 0) return null;
+            const naechste = zukunft[0];
+            return (
+              <div className="res hl" style={{ marginTop: '12px' }}>
+                <span>Nächste Erhöhung: {formatDateDE(naechste.datum)}</span>
+                <span>{fmt(naechste.neueKaltmiete)}</span>
+              </div>
+            );
+          })()}
+          
+          <hr />
+          <div className="field-group-label">Kaution</div>
+          <Input label="Kautionsbetrag" value={s.kaution} onChange={v => set('kaution', v)} suffix="€" />
+          <div className="mietstatus-checkboxes">
+            <label className="mietstatus-option">
+              <input 
+                type="checkbox" 
+                checked={s.kautionErhalten || false} 
+                onChange={e => set('kautionErhalten', e.target.checked)} 
+              />
+              <span className="mietstatus-label">Erhalten</span>
+            </label>
+            <label className="mietstatus-option">
+              <input 
+                type="checkbox" 
+                checked={s.kautionZurueckgezahlt || false} 
+                onChange={e => set('kautionZurueckgezahlt', e.target.checked)} 
+              />
+              <span className="mietstatus-label">Zurückgezahlt</span>
+            </label>
+          </div>
+          
+          {/* Miethistorie - ausklappbar */}
+          <div className="mhist-toggle" onClick={() => setMhistOpen(!mhistOpen)}>
+            <span className="mhist-toggle-icon">{mhistOpen ? '−' : '+'}</span>
+            <span>Miethistorie</span>
+            <span className="mhist-toggle-count">{(p.miethistorie || []).length > 0 ? `${(p.miethistorie || []).length} Eintrag${(p.miethistorie || []).length !== 1 ? 'e' : ''}` : 'Keine Einträge'}</span>
+            {mhistOpen && (
+              <button 
+                className="mhist-import-btn" 
+                onClick={(e) => { e.stopPropagation(); setMhistImportModal(true); }}
+                title="Aus altem Mietvertrag importieren"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <span>Importieren</span>
+              </button>
+            )}
+          </div>
+          {mhistOpen && (
+            <div className="mhist-content">
+              <p className="hint">Mietverträge mit Zeitraum, Kaltmiete und Nebenkosten dokumentieren</p>
+              <div className="mhist-list">
+                {(p.miethistorie || []).map((m, i) => {
+                  const warmmiete = (m.kaltmiete || 0) + (m.nebenkosten || 0) + (m.stellplatz || 0) + (m.sonstiges || 0);
+                  return (
+                    <div key={i} className="mhist-row">
+                      <div className="mhist-dates">
+                        <div className="mhist-date-field">
+                          <label>Von</label>
+                          <DateInput 
+                            value={m.von || ''} 
+                            onChange={v => {
+                              const newM = [...(p.miethistorie || [])];
+                              newM[i] = { ...newM[i], von: v };
+                              upd({ ...p, miethistorie: newM });
+                            }}
+                          />
+                        </div>
+                        <div className="mhist-date-field">
+                          <label>Bis</label>
+                          <DateInput 
+                            value={m.bis || ''} 
+                            onChange={v => {
+                              const newM = [...(p.miethistorie || [])];
+                              newM[i] = { ...newM[i], bis: v };
+                              upd({ ...p, miethistorie: newM });
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="mhist-values">
+                        <div className="mhist-field">
+                          <label>Kaltmiete</label>
+                          <NumInput 
+                            value={m.kaltmiete || ''} 
+                            onChange={v => {
+                              const newM = [...(p.miethistorie || [])];
+                              newM[i] = { ...newM[i], kaltmiete: v };
+                              upd({ ...p, miethistorie: newM });
+                            }}
+                            placeholder="0"
+                          />
+                          <span>€</span>
+                        </div>
+                        <div className="mhist-field">
+                          <label>NK</label>
+                          <NumInput 
+                            value={m.nebenkosten || ''} 
+                            onChange={v => {
+                              const newM = [...(p.miethistorie || [])];
+                              newM[i] = { ...newM[i], nebenkosten: v };
+                              upd({ ...p, miethistorie: newM });
+                            }}
+                            placeholder="0"
+                          />
+                          <span>€</span>
+                        </div>
+                        <div className="mhist-field">
+                          <label>Stellplatz</label>
+                          <NumInput 
+                            value={m.stellplatz || ''} 
+                            onChange={v => {
+                              const newM = [...(p.miethistorie || [])];
+                              newM[i] = { ...newM[i], stellplatz: v };
+                              upd({ ...p, miethistorie: newM });
+                            }}
+                            placeholder="0"
+                          />
+                          <span>€</span>
+                        </div>
+                        <div className="mhist-field">
+                          <label>Sonstiges</label>
+                          <NumInput 
+                            value={m.sonstiges || ''} 
+                            onChange={v => {
+                              const newM = [...(p.miethistorie || [])];
+                              newM[i] = { ...newM[i], sonstiges: v };
+                              upd({ ...p, miethistorie: newM });
+                            }}
+                            placeholder="0"
+                          />
+                          <span>€</span>
+                        </div>
+                        <div className="mhist-field mhist-gesamt">
+                          <label>Gesamtmiete</label>
+                          <span className="mhist-gesamt-value">{fmt(warmmiete)}</span>
+                        </div>
+                      </div>
+                      <input 
+                        type="text" 
+                        value={m.grund || ''} 
+                        onChange={e => {
+                          const newM = [...(p.miethistorie || [])];
+                          newM[i] = { ...newM[i], grund: e.target.value };
+                          upd({ ...p, miethistorie: newM });
+                        }}
+                        placeholder="Grund / Anmerkung"
+                        className="mhist-grund"
+                      />
+                      <button className="mhist-del" onClick={() => {
+                        const newM = (p.miethistorie || []).filter((_, x) => x !== i);
+                        upd({ ...p, miethistorie: newM });
+                      }}>×</button>
+                    </div>
+                  );
+                })}
+              </div>
+              <button className="btn-add" onClick={() => upd({ ...p, miethistorie: [...(p.miethistorie || []), { von: '', bis: '', kaltmiete: 0, nebenkosten: 0, stellplatz: 0, sonstiges: 0, grund: '' }] })}>+ Mietperiode hinzufügen</button>
+            </div>
+          )}
+          </>)}
+          <hr />
+          <button className="btn-reset-section" onClick={() => setResetConfirm('miete')}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            Felder zurücksetzen
+          </button>
+        </Acc>
+        <Acc icon={<IconFinanz color="#3b82f6" />} title="Finanzierung" badge={isCont ? 'Summe der Einheiten' : undefined} sum={(() => {
+          const darlehen = [...(p.darlehen || []), ...(p.isContainer ? (immobilien || []).filter(x => x.parentId === p.id).flatMap(u => u.darlehen || []) : [])];
+          const foerderungen = (s.kfwZuschuss || 0) + (s.bafaFoerderung || 0) + (s.landesFoerderung || 0) + (s.wohnRiester || 0);
+          if (darlehen.length === 0 && foerderungen === 0) return `${s.eigenkapitalAnteil}% EK`;
+          const summeFK = darlehen.reduce((a, d) => a + (d.betrag || 0), 0);
+          let parts = [];
+          if (summeFK > 0) parts.push(`${fmt(summeFK)} FK`);
+          if (foerderungen > 0) parts.push(`${fmt(foerderungen)} Förderung`);
+          return parts.join(', ') || `${s.eigenkapitalAnteil}% EK`;
+        })()} open={sec === 'fin'} toggle={() => setSec(sec === 'fin' ? null : 'fin')} color="#3b82f6" onImport={() => setSmartImportModal(true)}>
+          
+          {(p.isContainer || parentGebaeude) && (
+            <div style={{padding:'8px 12px',marginBottom:'12px',background:'rgba(59,130,246,0.08)',border:'1px solid rgba(59,130,246,0.2)',borderRadius:'6px',fontSize:'11px',color:'var(--text-muted)'}}>
+              {p.isContainer
+                ? '🏢 Darlehen, die du hier erfasst, gelten für das gesamte Gebäude (alle Einheiten zusammen). Für ein Darlehen einer einzelnen Wohnung öffne die jeweilige Einheit.'
+                : '🏠 Darlehen, die du hier erfasst, gelten nur für diese Einheit. Ein gemeinsames Darlehen für das ganze Gebäude erfasst du beim Gebäude selbst.'}
+            </div>
+          )}
+          {p.isContainer && (() => {
+            const allLoans = [...(p.darlehen || []), ...einheiten.flatMap(u => u.darlehen || [])];
+            const rate = (arr) => arr.reduce((a, d) => a + (d.monatsrate > 0 ? d.monatsrate : (d.betrag > 0 && d.zinssatz > 0 ? d.betrag * ((d.zinssatz + (d.tilgung || 0)) / 100) / 12 : 0)), 0);
+            const sumBetrag = allLoans.reduce((a, d) => a + (d.betrag || 0), 0);
+            const sumRest = allLoans.reduce((a, d) => a + (d.restschuld || d.betrag || 0), 0);
+            return (
+              <div style={{padding:'12px',marginBottom:'14px',border:'1px solid #3b82f6',borderRadius:'8px',background:'rgba(59,130,246,0.06)'}}>
+                <div style={{fontSize:'13px',fontWeight:'600',marginBottom:'8px'}}>📊 Finanzierung gesamt ({allLoans.length} Darlehen)</div>
+                <div style={{display:'flex',gap:'6px',marginBottom:'10px'}}>
+                  <label style={{flex:1,display:'flex',alignItems:'center',gap:'6px',padding:'7px 9px',fontSize:'11px',borderRadius:'6px',cursor:'pointer',border:`1px solid ${darlehenModus==='objekt'?'#3b82f6':'var(--border)'}`,background:darlehenModus==='objekt'?'rgba(59,130,246,0.12)':'transparent'}}>
+                    <input type="radio" name="dl-modus" checked={darlehenModus==='objekt'} onChange={() => upd({...p, darlehenModus:'objekt'})} style={{accentColor:'#3b82f6'}}/>Ein Darlehen fürs Objekt
+                  </label>
+                  <label style={{flex:1,display:'flex',alignItems:'center',gap:'6px',padding:'7px 9px',fontSize:'11px',borderRadius:'6px',cursor:'pointer',border:`1px solid ${darlehenModus==='einheit'?'#3b82f6':'var(--border)'}`,background:darlehenModus==='einheit'?'rgba(59,130,246,0.12)':'transparent'}}>
+                    <input type="radio" name="dl-modus" checked={darlehenModus==='einheit'} onChange={() => upd({...p, darlehenModus:'einheit'})} style={{accentColor:'#3b82f6'}}/>Darlehen je Einheit
+                  </label>
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:'4px',fontSize:'12px'}}>
+                  <div style={{display:'flex',justifyContent:'space-between'}}><span style={{color:'var(--text-muted)'}}>Darlehenssumme</span><b>{fmt(sumBetrag)}</b></div>
+                  <div style={{display:'flex',justifyContent:'space-between'}}><span style={{color:'var(--text-muted)'}}>Restschuld gesamt</span><b>{fmt(sumRest)}</b></div>
+                  <div style={{display:'flex',justifyContent:'space-between'}}><span style={{color:'var(--text-muted)'}}>Monatsrate gesamt</span><b>{fmt(rate(allLoans))}/Mon.</b></div>
+                </div>
+                {einheiten.length > 0 && darlehenModus === 'einheit' && (
+                  <div style={{marginTop:'10px'}}>
+                    <div style={{fontSize:'11px',fontWeight:'600',marginBottom:'6px',color:'var(--text-muted)'}}>Darlehen je Einheit</div>
+                    <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+                      {einheiten.map(u => {
+                        const ul = u.darlehen || [];
+                        const uRest = ul.reduce((a, d) => a + (d.restschuld || d.betrag || 0), 0);
+                        const open = finUnitOpen === u.id;
+                        return (
+                          <div key={u.id} style={{border:'1px solid var(--border)',borderRadius:'8px',overflow:'hidden'}}>
+                            <div onClick={() => setFinUnitOpen(open ? null : u.id)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'9px 11px',cursor:'pointer',background:'rgba(255,255,255,0.02)'}}>
+                              <span style={{fontSize:'12px',fontWeight:'500'}}>{u.stammdaten?.name || 'Einheit'}{u.stammdaten?.wohnungsNr ? ` · Nr. ${u.stammdaten.wohnungsNr}` : ''} · {ul.length} Darlehen</span>
+                              <span style={{display:'flex',alignItems:'center',gap:'8px'}}><b style={{fontSize:'12px'}}>{fmt(uRest)}</b><span style={{color:'var(--text-muted)'}}>{open ? '▾' : '▸'}</span></span>
+                            </div>
+                            {open && (
+                              <div style={{padding:'8px 11px',borderTop:'1px solid var(--border)',fontSize:'12px'}}>
+                                {ul.length === 0 ? (
+                                  <div style={{color:'var(--text-muted)'}}>Kein Darlehen erfasst.</div>
+                                ) : ul.map((d, di) => (
+                                  <div key={di} style={{display:'flex',justifyContent:'space-between',padding:'2px 0'}}><span style={{color:'var(--text-muted)'}}>{d.name || d.institut || 'Darlehen'}</span><span>{fmt(d.restschuld || d.betrag || 0)} · {fmt(d.monatsrate || 0)}/Mon.</span></div>
+                                ))}
+                                <div style={{marginTop:'6px'}}><button onClick={() => onSelectEinheit && onSelectEinheit(u)} style={{padding:'4px 9px',background:'transparent',color:'#3b82f6',border:'1px solid #3b82f6',borderRadius:'6px',fontSize:'11px',cursor:'pointer'}}>Darlehen dieser Einheit bearbeiten →</button></div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                <p style={{fontSize:'11px',color:'var(--text-muted)',margin:'8px 2px 0'}}>Summe über gemeinsame Gebäude-Darlehen (unten) und die Darlehen der einzelnen Einheiten.</p>
+              </div>
+            );
+          })()}
+          {/* Eigenkapital-Details */}
+          <div className="field-group-label">Eigenkapital</div>
+          <Input label="EK-Anteil" value={s.eigenkapitalAnteil} onChange={v => set('eigenkapitalAnteil', v)} suffix="%" step={5} />
+          <Input label="EK-Betrag" value={s.eigenkapitalBetrag} onChange={v => set('eigenkapitalBetrag', v)} suffix="€" step={1000} />
+          <Select label="EK-Herkunft" value={s.eigenkapitalHerkunft || 'ersparnis'} onChange={v => set('eigenkapitalHerkunft', v)} options={[
+            { v: 'ersparnis', l: 'Ersparnis' },
+            { v: 'schenkung', l: 'Schenkung' },
+            { v: 'erbschaft', l: 'Erbschaft' },
+            { v: 'bausparvertrag', l: 'Bausparvertrag' },
+            { v: 'immobilienverkauf', l: 'Immobilienverkauf' },
+            { v: 'wertpapiere', l: 'Wertpapiere/Depot' },
+            { v: 'gemischt', l: 'Gemischt' },
+            { v: 'sonstiges', l: 'Sonstiges' }
+          ]} />
+          <Input label="Eigenleistung" value={s.eigenleistung} onChange={v => set('eigenleistung', v)} suffix="€" step={500} />
+          <p className="hint-small">Eigenleistung = selbst durchgeführte Renovierungen/Arbeiten</p>
+          
+          <hr />
+          
+          {/* Förderungen & Zuschüsse */}
+          <div className="field-group-label">Förderungen & Zuschüsse</div>
+          <div className="foerderung-row">
+            <Input label="KfW-Zuschuss" value={s.kfwZuschuss} onChange={v => set('kfwZuschuss', v)} suffix="€" />
+            <Input label="KfW-Programm" value={s.kfwProgramm} onChange={v => set('kfwProgramm', v)} type="text" ph="z.B. 124, 261" />
+          </div>
+          <Input label="BAFA-Förderung" value={s.bafaFoerderung} onChange={v => set('bafaFoerderung', v)} suffix="€" />
+          <Input label="Landesförderung" value={s.landesFoerderung} onChange={v => set('landesFoerderung', v)} suffix="€" />
+          <Input label="Landesförderung" value={s.landesFoerderung} onChange={v => set('landesFoerderung', v)} suffix="€" />
+          {((s.kfwZuschuss || 0) + (s.bafaFoerderung || 0) + (s.landesFoerderung || 0)) > 0 && (
+            <div className="res"><span>Förderungen gesamt</span><span className="pos">{fmt((s.kfwZuschuss || 0) + (s.bafaFoerderung || 0) + (s.landesFoerderung || 0))}</span></div>
+          )}
+          
+          <hr />
+          
+          {/* Steuersatz */}
+          <div className="field-group-label">Steuer</div>
+          <Input label="Steuersatz" value={s.steuersatz} onChange={v => set('steuersatz', v)} suffix="%" />
+          
+          <hr />
+          
+          {/* Darlehen */}
+          <div className="field-group-label">Darlehen</div>
+          <p className="hint">Bankdarlehen, KfW-Darlehen, Privatdarlehen, etc.</p>
+          {(p.darlehen || []).length === 0 && (
+            <div className="legacy-hint">
+              <small>Alte Felder: {s.zinssatz}% Zins, {s.tilgung}% Tilgung</small>
+            </div>
+          )}
+          {(p.darlehen || []).map((d, i) => (
+            <div key={i} className="darlehen-card">
+              <div className="darlehen-header">
+                <input 
+                  value={d.name || ''} 
+                  onChange={e => {
+                    const newD = [...(p.darlehen || [])];
+                    newD[i] = { ...newD[i], name: e.target.value };
+                    upd({ ...p, darlehen: newD });
+                  }}
+                  placeholder="Bezeichnung (z.B. Hauptdarlehen, KfW 124)"
+                  className="darlehen-name"
+                />
+                <button className="darlehen-del" onClick={() => {
+                  const newD = (p.darlehen || []).filter((_, x) => x !== i);
+                  upd({ ...p, darlehen: newD });
+                }}>×</button>
+              </div>
+              
+              {/* Institut & Konto */}
+              <div className="darlehen-section">
+                <div className="darlehen-section-label">Institut & Konto</div>
+                <div className="darlehen-fields">
+                  <div className="darlehen-field wide">
+                    <label>Institut/Bank</label>
+                    <input type="text" value={d.institut || ''} placeholder="z.B. Sparkasse Marburg" onChange={e => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], institut: e.target.value };
+                      upd({ ...p, darlehen: newD });
+                    }} />
+                  </div>
+                  <div className="darlehen-field">
+                    <label>Kontonummer</label>
+                    <input type="text" value={d.kontonummer || ''} placeholder="Darlehenskonto-Nr." onChange={e => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], kontonummer: e.target.value };
+                      upd({ ...p, darlehen: newD });
+                    }} />
+                  </div>
+                  <div className="darlehen-field">
+                    <label>Darlehensart</label>
+                    <select value={d.typ || 'annuitaeten'} onChange={e => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], typ: e.target.value };
+                      upd({ ...p, darlehen: newD });
+                    }}>
+                      <option value="annuitaeten">Annuitätendarlehen</option>
+                      <option value="tilgung">Tilgungsdarlehen</option>
+                      <option value="endfaellig">Endfälliges Darlehen</option>
+                      <option value="kfw">KfW-Darlehen</option>
+                      <option value="bauspar">Bauspardarlehen</option>
+                      <option value="privat">Privatdarlehen</option>
+                      <option value="forward">Forward-Darlehen</option>
+                      <option value="sonstig">Sonstiges</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Konditionen */}
+              <div className="darlehen-section">
+                <div className="darlehen-section-label">Konditionen</div>
+                <div className="darlehen-fields">
+                  <div className="darlehen-field">
+                    <label>Darlehensbetrag</label>
+                    <div className="ifld"><NumInput value={d.betrag || ''} onChange={v => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], betrag: v };
+                      upd({ ...p, darlehen: newD });
+                    }} /><span>€</span></div>
+                  </div>
+                  <div className="darlehen-field">
+                    <label>Sollzinssatz</label>
+                    <div className="ifld"><NumInput value={d.zinssatz || ''} onChange={v => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], zinssatz: v };
+                      upd({ ...p, darlehen: newD });
+                    }} /><span>%</span></div>
+                  </div>
+                  <div className="darlehen-field">
+                    <label>Effektivzins</label>
+                    <div className="ifld"><NumInput value={d.effektivzins || ''} onChange={v => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], effektivzins: v };
+                      upd({ ...p, darlehen: newD });
+                    }} /><span>%</span></div>
+                  </div>
+                  <div className="darlehen-field">
+                    <label>Anf. Tilgung</label>
+                    <div className="ifld"><NumInput value={d.tilgung || ''} onChange={v => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], tilgung: v };
+                      upd({ ...p, darlehen: newD });
+                    }} /><span>%</span></div>
+                  </div>
+                  <div className="darlehen-field">
+                    <label>Monatsrate</label>
+                    <div className="ifld"><NumInput value={d.monatsrate || ''} onChange={v => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], monatsrate: v };
+                      upd({ ...p, darlehen: newD });
+                    }} /><span>€</span></div>
+                  </div>
+                  <div className="darlehen-field">
+                    <label>Sondertilgung (% p.a.)</label>
+                    <div className="ifld"><NumInput value={d.sondertilgung || ''} onChange={v => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], sondertilgung: v };
+                      upd({ ...p, darlehen: newD });
+                    }} placeholder="p.a." /><span>%</span></div>
+                  </div>
+                  <div className="darlehen-field">
+                    <label>Tilgungsverrechnung</label>
+                    <select value={d.tilgungsrhythmus || 'monatlich'} onChange={e => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], tilgungsrhythmus: e.target.value };
+                      upd({ ...p, darlehen: newD });
+                    }} style={{padding:'8px 10px',background:'var(--bg-input)',border:'1px solid var(--border)',borderRadius:'6px',color:'var(--text)',fontSize:'13px',width:'100%'}}>
+                      <option value="monatlich">monatlich</option>
+                      <option value="quartalsweise">quartalsweise</option>
+                      <option value="jaehrlich">jährlich</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Laufzeit & Termine */}
+              <div className="darlehen-section">
+                <div className="darlehen-section-label">Laufzeit & Termine</div>
+                <div className="darlehen-fields">
+                  <div className="darlehen-field">
+                    <label>Abschlussdatum</label>
+                    <DateInput value={d.abschluss || ''} onChange={v => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], abschluss: v };
+                      upd({ ...p, darlehen: newD });
+                    }} />
+                  </div>
+                  <div className="darlehen-field">
+                    <label>Erste Rate</label>
+                    <DateInput value={d.ersteRate || ''} onChange={v => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], ersteRate: v };
+                      upd({ ...p, darlehen: newD });
+                    }} />
+                  </div>
+                  <div className="darlehen-field">
+                    <label>Laufzeit</label>
+                    <div className="ifld"><input type="text" inputMode="numeric" value={d.laufzeit || ''} onChange={e => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], laufzeit: parseInt(e.target.value) || 0 };
+                      upd({ ...p, darlehen: newD });
+                    }} /><span>Jahre</span></div>
+                  </div>
+                  <div className="darlehen-field">
+                    <label>Zinsbindung</label>
+                    <div className="ifld"><input type="text" inputMode="numeric" value={d.zinsbindungJahre || ''} onChange={e => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], zinsbindungJahre: parseInt(e.target.value) || 0 };
+                      upd({ ...p, darlehen: newD });
+                    }} /><span>Jahre</span></div>
+                  </div>
+                  <div className="darlehen-field">
+                    <label>Zinsbindung bis</label>
+                    <DateInput value={d.zinsbindungEnde || ''} onChange={v => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], zinsbindungEnde: v };
+                      upd({ ...p, darlehen: newD });
+                    }} />
+                  </div>
+                  <div className="darlehen-field">
+                    <label>Restschuld (akt.)</label>
+                    <div className="ifld"><NumInput value={d.restschuld || ''} onChange={v => {
+                      const newD = [...(p.darlehen || [])];
+                      newD[i] = { ...newD[i], restschuld: v };
+                      upd({ ...p, darlehen: newD });
+                    }} /><span>€</span></div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Berechnungen */}
+              {d.betrag > 0 && (d.zinssatz > 0 || d.monatsrate > 0) && (
+                <div className="darlehen-calc">
+                  {d.monatsrate > 0 ? (
+                    <>
+                      <span>Rate: {fmt(d.monatsrate)}/Monat</span>
+                      <span>Jahresbelastung: {fmt(d.monatsrate * 12)}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Annuität: {fmt(d.betrag * ((d.zinssatz + (d.tilgung || 0)) / 100))}/Jahr</span>
+                      <span>≈ {fmt(d.betrag * ((d.zinssatz + (d.tilgung || 0)) / 100) / 12)}/Monat</span>
+                    </>
+                  )}
+                  <span>Zinsen Jahr 1: {fmt(computeYearlyInterest(d))} <span style={{color:'var(--text-muted)',fontSize:'10px'}}>({d.tilgungsrhythmus || 'monatlich'})</span></span>
+                  <button className="btn-tilgungsplan" onClick={() => setTilgungsplanDarlehen(d)} title="Tilgungsplan anzeigen">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2"><rect x="3" y="10" width="4" height="11" rx="1"/><rect x="10" y="6" width="4" height="15" rx="1"/><rect x="17" y="2" width="4" height="19" rx="1"/></svg>
+                    Tilgungsplan
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+          <div className="darlehen-buttons">
+            <button className="btn-add" onClick={() => upd({ ...p, darlehen: [...(p.darlehen || []), { 
+              name: '', institut: '', kontonummer: '', typ: 'annuitaeten',
+              betrag: 0, zinssatz: 0, effektivzins: 0, tilgung: 2, monatsrate: 0, sondertilgung: 5,
+              abschluss: '', ersteRate: '', laufzeit: 0, zinsbindungJahre: 10, zinsbindungEnde: '', restschuld: 0
+            }] })}>+ Darlehen hinzufügen</button>
+          </div>
+          {(p.darlehen || []).length > 0 && (() => {
+            const sumBetrag = (p.darlehen || []).reduce((a, d) => a + (d.betrag || 0), 0);
+            const sumMonat = (p.darlehen || []).reduce((a, d) => {
+              if (d.monatsrate > 0) return a + d.monatsrate;
+              return a + (d.betrag || 0) * (((d.zinssatz || 0) + (d.tilgung || 0)) / 100) / 12;
+            }, 0);
+            return <div className="res hl"><span>Gesamt FK / Monatsrate</span><span>{fmt(sumBetrag)} / {fmt(sumMonat)}</span></div>;
+          })()}
+          <hr />
+          <button className="btn-reset-section" onClick={() => setResetConfirm('finanzierung')}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            Felder zurücksetzen
+          </button>
+        </Acc>
+        {beteiligte.length > 0 && (
+          <Acc icon={<IconPerson color="#8b5cf6" />} title="Beteiligte" sum={(() => {
+            const bet = p.beteiligungen || [];
+            const aktiveBet = bet.filter(b => b.anteil > 0);
+            if (aktiveBet.length === 0) return 'Keine';
+            const summe = aktiveBet.reduce((a, b) => a + b.anteil, 0);
+            return `${aktiveBet.length} Person${aktiveBet.length !== 1 ? 'en' : ''}, ${summe}%`;
+          })()} open={sec === 'bet'} toggle={() => setSec(sec === 'bet' ? null : 'bet')} color="#8b5cf6">
+            <p className="hint">Wer ist an dieser Immobilie beteiligt und zu welchem Anteil?</p>
+            <div className="bet-checkboxes">
+              {beteiligte.map(b => {
+                const beteiligung = (p.beteiligungen || []).find(x => x.beteiligterID === b.id);
+                const isActive = beteiligung && beteiligung.anteil > 0;
+                const setAnteil = (val) => {
+                  const newBet = (p.beteiligungen || []).map(x => 
+                    x.beteiligterID === b.id ? { ...x, anteil: val } : x
+                  );
+                  upd({ ...p, beteiligungen: newBet });
+                };
+                return (
+                  <div key={b.id} className={`bet-checkbox-row ${isActive ? 'active' : ''}`}>
+                    <label className="bet-checkbox-label">
+                      <input 
+                        type="checkbox" 
+                        checked={isActive}
+                        onChange={(e) => {
+                          const newBet = (p.beteiligungen || []).filter(x => x.beteiligterID !== b.id);
+                          if (e.target.checked) {
+                            newBet.push({ beteiligterID: b.id, anteil: 100 });
+                          }
+                          upd({ ...p, beteiligungen: newBet });
+                        }}
+                      />
+                      <span className="bet-checkbox-icon" style={{ borderColor: b.farbe }}><IconPerson color={b.farbe} /></span>
+                      <span className="bet-checkbox-name">{b.name}</span>
+                    </label>
+                    {isActive && (
+                      <div className="bet-anteil-wrap">
+                        <div className="bet-anteil-presets">
+                          {[100, 50, 25].map(preset => (
+                            <button 
+                              key={preset}
+                              type="button"
+                              className={`bet-preset-btn ${beteiligung.anteil === preset ? 'active' : ''}`}
+                              onClick={() => setAnteil(preset)}
+                            >
+                              {preset}%
+                            </button>
+                          ))}
+                        </div>
+                        <div className="bet-anteil-custom">
+                          <input 
+                            type="text" 
+                            value={beteiligung.anteil}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(',', '.');
+                              const num = parseFloat(val);
+                              if (!isNaN(num) && num >= 0 && num <= 100) {
+                                setAnteil(num);
+                              } else if (val === '' || val === '0') {
+                                setAnteil(0);
+                              }
+                            }}
+                            placeholder="Individuell"
+                          />
+                          <span className="bet-anteil-suffix">%</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {(() => {
+              const summe = (p.beteiligungen || []).reduce((a, b) => a + (b.anteil || 0), 0);
+              if (summe > 0 && summe !== 100) {
+                return <div className={`bet-summe ${summe === 100 ? 'ok' : 'warn'}`}>Summe: {summe}% {summe !== 100 && '(sollte 100% sein)'}</div>;
+              }
+              return null;
+            })()}
+            {p.isContainer && einheiten.length > 0 && (
+              <div style={{marginTop:'16px',paddingTop:'12px',borderTop:'1px solid var(--border)'}}>
+                <div style={{padding:'8px 12px',marginBottom:'10px',background:'rgba(139,92,246,0.08)',borderRadius:'6px',fontSize:'11px',color:'var(--text-muted)'}}>
+                  ℹ️ Oben am Gebäude erfasste Beteiligte gelten <b>gemeinsam fürs ganze Gebäude</b>. Ist die Beteiligung <b>je Einheit</b> unterschiedlich (Regelfall), pflegst du sie in der jeweiligen Wohnung.
+                </div>
+                <div style={{fontSize:'12px',fontWeight:'600',marginBottom:'8px'}}>🏠 Beteiligte je Einheit ({einheiten.length})</div>
+                <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+                  {einheiten.map(u => {
+                    const us = u.stammdaten || {};
+                    const ub = u.beteiligungen || [];
+                    const open = betUnitOpen === u.id;
+                    return (
+                      <div key={u.id} style={{border:'1px solid var(--border)',borderRadius:'8px',overflow:'hidden'}}>
+                        <div onClick={() => setBetUnitOpen(open ? null : u.id)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 12px',cursor:'pointer',background:'rgba(255,255,255,0.02)'}}>
+                          <span style={{fontSize:'13px',fontWeight:'500'}}>{us.name || 'Einheit'}{us.wohnungsNr ? ` · Nr. ${us.wohnungsNr}` : ''}</span>
+                          <span style={{display:'flex',alignItems:'center',gap:'10px'}}><span style={{fontSize:'12px',color:'var(--text-muted)'}}>{ub.length} Beteiligte</span><span style={{color:'var(--text-muted)'}}>{open ? '▾' : '▸'}</span></span>
+                        </div>
+                        {open && (
+                          <div style={{padding:'10px 12px',borderTop:'1px solid var(--border)',fontSize:'12px'}}>
+                            {ub.length === 0 ? (
+                              <div style={{color:'var(--text-muted)'}}>Keine Beteiligten erfasst.</div>
+                            ) : ub.map((bt, bi) => {
+                              const person = (beteiligte || []).find(x => x.id === bt.beteiligterID);
+                              return <div key={bi} style={{display:'flex',justifyContent:'space-between',padding:'2px 0'}}><span style={{color:'var(--text-muted)'}}>{person?.name || 'Beteiligter'}</span><span>{bt.anteil || 0}%</span></div>;
+                            })}
+                            <div style={{marginTop:'6px'}}><button onClick={() => onSelectEinheit && onSelectEinheit(u)} style={{padding:'4px 9px',background:'transparent',color:'#8b5cf6',border:'1px solid #8b5cf6',borderRadius:'6px',fontSize:'11px',cursor:'pointer'}}>Beteiligte dieser Einheit bearbeiten →</button></div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </Acc>
+        )}
+      </div>
+      
+      {/* Sekundäre Accordions - Verwaltung & Dokumente */}
+      <div className="accs-secondary">
+        <div 
+          className={`accs-secondary-header ${secExpanded ? 'expanded' : ''}`}
+          onClick={() => setSecExpanded(!secExpanded)}
+        >
+          <span className="accs-secondary-icon"><IconDocuments color="var(--text-muted)" /></span>
+          <span className="accs-secondary-title">Verwaltung & Dokumente</span>
+          <span className="accs-secondary-toggle">{secExpanded ? '−' : '+'}</span>
+        </div>
+        {secExpanded && (
+          <div className="accs-secondary-content">
+        <Acc icon={<IconDocuments color="#f97316" />} title="Dokumente / Fotos" sum={(() => {
+          const docs = p.dokumente || [];
+          if (docs.length === 0) return 'Keine';
+          const files = docs.filter(d => d.fileData);
+          const links = docs.filter(d => !d.fileData);
+          if (files.length > 0 && links.length > 0) return `${files.length} Datei${files.length !== 1 ? 'en' : ''}, ${links.length} Link${links.length !== 1 ? 's' : ''}`;
+          if (files.length > 0) return `${files.length} Datei${files.length !== 1 ? 'en' : ''}`;
+          return `${links.length} Link${links.length !== 1 ? 's' : ''}`;
+        })()} open={sec === 'docs'} toggle={() => setSec(sec === 'docs' ? null : 'docs')} color="#f97316">
+          <p className="hint">Dateien per Drag & Drop hinzufügen oder Links zu Cloud-Ordnern hinterlegen</p>
+          
+          {/* Drag & Drop Zone */}
+          <div 
+            className="doc-dropzone"
+            onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('dragover'); }}
+            onDragLeave={(e) => { e.preventDefault(); e.currentTarget.classList.remove('dragover'); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.currentTarget.classList.remove('dragover');
+              const files = Array.from(e.dataTransfer.files);
+              files.forEach(file => {
+                if (file.size > 500000) {
+                  alert(`Datei "${file.name}" ist zu groß (max. 500KB). Bitte Cloud-Link verwenden.`);
+                  return;
+                }
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                  const fileData = ev.target.result;
+                  const fileType = file.type.startsWith('image/') ? 'fotos' : 'sonstige';
+                  const newDoc = {
+                    name: file.name,
+                    typ: fileType,
+                    fileData: fileData,
+                    fileType: file.type,
+                    fileSize: file.size
+                  };
+                  upd({ ...p, dokumente: [...(p.dokumente || []), newDoc] });
+                };
+                reader.readAsDataURL(file);
+              });
+            }}
+          >
+            <span className="dropzone-icon">📁</span>
+            <span>Dateien hierher ziehen</span>
+            <small>Bilder & PDFs (max. 500KB pro Datei)</small>
+          </div>
+          
+          {/* Datei-Liste */}
+          <div className="docs-list">
+            {(p.dokumente || []).map((doc, i) => (
+              <div key={i} className={`doc-row ${doc.fileData ? 'has-file' : ''}`}>
+                {doc.fileData ? (
+                  <>
+                    {/* Datei-Eintrag */}
+                    <div className="doc-preview">
+                      {doc.fileType?.startsWith('image/') ? (
+                        <img src={doc.fileData} alt={doc.name} />
+                      ) : doc.fileType === 'application/pdf' ? (
+                        <span className="doc-pdf-icon">PDF</span>
+                      ) : (
+                        <span className="doc-file-icon">📄</span>
+                      )}
+                    </div>
+                    <div className="doc-file-info">
+                      <span className="doc-file-name">{doc.name}</span>
+                      <span className="doc-file-size">{(doc.fileSize / 1024).toFixed(1)} KB</span>
+                    </div>
+                    <select 
+                      value={doc.typ || 'sonstige'} 
+                      onChange={e => {
+                        const newDocs = [...(p.dokumente || [])];
+                        newDocs[i] = { ...newDocs[i], typ: e.target.value };
+                        upd({ ...p, dokumente: newDocs });
+                      }}
+                      className="doc-typ-sm"
+                    >
+                      <option value="kaufvertrag">Kaufvertrag</option>
+                      <option value="grundbuch">Grundbuch</option>
+                      <option value="mietvertrag">Mietvertrag</option>
+                      <option value="darlehen">Darlehen</option>
+                      <option value="fotos">Fotos</option>
+                      <option value="sonstige">Sonstiges</option>
+                    </select>
+                    {doc.fileType?.startsWith('image/') && (
+                      <button className="doc-view" onClick={() => window.open(doc.fileData, '_blank')} title="Ansehen">◉</button>
+                    )}
+                    {doc.fileType === 'application/pdf' && (
+                      <button className="doc-view" onClick={() => {
+                        const win = window.open();
+                        win.document.write(`<iframe src="${doc.fileData}" style="width:100%;height:100%;border:none;"></iframe>`);
+                      }} title="Ansehen">◉</button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {/* Link-Eintrag */}
+                    <select 
+                      value={doc.typ || 'sonstige'} 
+                      onChange={e => {
+                        const newDocs = [...(p.dokumente || [])];
+                        newDocs[i] = { ...newDocs[i], typ: e.target.value };
+                        upd({ ...p, dokumente: newDocs });
+                      }}
+                      className="doc-typ"
+                    >
+                      <option value="kaufvertrag">Kaufvertrag</option>
+                      <option value="grundbuch">Grundbuch</option>
+                      <option value="mietvertrag">Mietvertrag</option>
+                      <option value="darlehen">Darlehensvertrag</option>
+                      <option value="fotos">Fotos</option>
+                      <option value="sonstige">Sonstiges</option>
+                    </select>
+                    <input 
+                      type="text" 
+                      value={doc.name || ''} 
+                      onChange={e => {
+                        const newDocs = [...(p.dokumente || [])];
+                        newDocs[i] = { ...newDocs[i], name: e.target.value };
+                        upd({ ...p, dokumente: newDocs });
+                      }}
+                      placeholder="Bezeichnung..."
+                      className="doc-name"
+                    />
+                    <input 
+                      type="url" 
+                      value={doc.url || ''} 
+                      onChange={e => {
+                        const newDocs = [...(p.dokumente || [])];
+                        newDocs[i] = { ...newDocs[i], url: e.target.value };
+                        upd({ ...p, dokumente: newDocs });
+                      }}
+                      placeholder="https://..."
+                      className="doc-url"
+                    />
+                    {doc.url && (
+                      <a href={doc.url} target="_blank" rel="noopener noreferrer" className="doc-open" title="Öffnen">↗</a>
+                    )}
+                  </>
+                )}
+                <button className="doc-del" onClick={() => {
+                  const newDocs = (p.dokumente || []).filter((_, x) => x !== i);
+                  upd({ ...p, dokumente: newDocs });
+                }}>×</button>
+              </div>
+            ))}
+          </div>
+          <button className="btn-add" onClick={() => upd({ ...p, dokumente: [...(p.dokumente || []), { name: '', url: '', typ: 'sonstige' }] })}>+ Link hinzufügen</button>
+          {p.isContainer && einheiten.length > 0 && (
+            <div style={{marginTop:'16px',paddingTop:'12px',borderTop:'1px solid var(--border)'}}>
+              <div style={{fontSize:'12px',fontWeight:'600',marginBottom:'8px'}}>🏠 Dokumente je Einheit ({einheiten.length})</div>
+              <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+                {einheiten.map(u => {
+                  const us = u.stammdaten || {};
+                  const ud = u.dokumente || [];
+                  const open = dokUnitOpen === u.id;
+                  return (
+                    <div key={u.id} style={{border:'1px solid var(--border)',borderRadius:'8px',overflow:'hidden'}}>
+                      <div onClick={() => setDokUnitOpen(open ? null : u.id)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 12px',cursor:'pointer',background:'rgba(255,255,255,0.02)'}}>
+                        <span style={{fontSize:'13px',fontWeight:'500'}}>{us.name || 'Einheit'}{us.wohnungsNr ? ` · Nr. ${us.wohnungsNr}` : ''}</span>
+                        <span style={{display:'flex',alignItems:'center',gap:'10px'}}><span style={{fontSize:'12px',color:'var(--text-muted)'}}>{ud.length} Dokument{ud.length !== 1 ? 'e' : ''}</span><span style={{color:'var(--text-muted)'}}>{open ? '▾' : '▸'}</span></span>
+                      </div>
+                      {open && (
+                        <div style={{padding:'10px 12px',borderTop:'1px solid var(--border)',fontSize:'12px'}}>
+                          {ud.length === 0 ? (
+                            <div style={{color:'var(--text-muted)'}}>Keine Dokumente erfasst.</div>
+                          ) : ud.map((doc, di) => (
+                            <div key={di} style={{padding:'2px 0',color:'var(--text-muted)'}}>{doc.name || doc.url || 'Dokument'}</div>
+                          ))}
+                          <div style={{marginTop:'6px'}}><button onClick={() => onSelectEinheit && onSelectEinheit(u)} style={{padding:'4px 9px',background:'transparent',color:'#f97316',border:'1px solid #f97316',borderRadius:'6px',fontSize:'11px',cursor:'pointer'}}>Dokumente dieser Einheit verwalten →</button></div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </Acc>
+        
+        {/* Nebenkostenabrechnungen */}
+        <Acc icon={<IconWerbung color="#f59e0b" />} title="Nebenkostenabrechnungen" sum={`${(p.nebenkostenabrechnungen || []).length} Abrechnungen`} open={sec === 'nk'} toggle={() => setSec(sec === 'nk' ? null : 'nk')} color="#f59e0b">
+          <NebenkostenSection immo={p} onUpdate={upd} />
+        </Acc>
+        
+        <Acc icon={<IconNotes color="#06b6d4" />} title="Notizen" sum={p.notizen ? `${p.notizen.length} Zeichen` : 'Keine'} open={sec === 'notes'} toggle={() => setSec(sec === 'notes' ? null : 'notes')} color="#06b6d4">
+          <p className="hint">Freitext für persönliche Notizen, Erinnerungen, Links, etc.</p>
+          <textarea 
+            className="notes-textarea" 
+            value={p.notizen || ''} 
+            onChange={e => upd({ ...p, notizen: e.target.value })}
+            placeholder="z.B. Kontakt Hausverwalter, Besonderheiten, geplante Renovierungen..."
+            rows={6}
+          />
+        </Acc>
+        <Acc icon={<IconBell color="#ef4444" />} title="Erinnerungen" sum={(() => {
+          const erinnerungen = p.erinnerungen || [];
+          const offen = erinnerungen.filter(e => !e.erledigt);
+          if (erinnerungen.length === 0) return 'Keine';
+          if (offen.length === 0) return `${erinnerungen.length} (alle erledigt)`;
+          return `${offen.length} offen`;
+        })()} open={sec === 'erinnerungen'} toggle={() => setSec(sec === 'erinnerungen' ? null : 'erinnerungen')} color="#ef4444">
+          <p className="hint">Termine und Fristen im Blick behalten (z.B. Zinsbindung, Nebenkostenabrechnung)</p>
+          <div className="erinnerungen-list">
+            {(p.erinnerungen || []).map((e, i) => {
+              const isOverdue = e.datum && new Date(e.datum) < new Date() && !e.erledigt;
+              const isUpcoming = e.datum && new Date(e.datum) <= new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) && new Date(e.datum) >= new Date() && !e.erledigt;
+              return (
+                <div key={i} className={`erinnerung-row ${e.erledigt ? 'done' : ''} ${isOverdue ? 'overdue' : ''} ${isUpcoming ? 'upcoming' : ''}`}>
+                  <input 
+                    type="checkbox" 
+                    checked={e.erledigt || false}
+                    onChange={ev => {
+                      const newE = [...(p.erinnerungen || [])];
+                      newE[i] = { ...newE[i], erledigt: ev.target.checked };
+                      upd({ ...p, erinnerungen: newE });
+                    }}
+                    className="erinnerung-check"
+                  />
+                  <div className="erinnerung-datum">
+                    <DateInput 
+                      value={e.datum || ''} 
+                      onChange={v => {
+                        const newE = [...(p.erinnerungen || [])];
+                        newE[i] = { ...newE[i], datum: v };
+                        upd({ ...p, erinnerungen: newE });
+                      }}
+                    />
+                  </div>
+                  <input 
+                    type="text" 
+                    value={e.titel || ''} 
+                    onChange={ev => {
+                      const newE = [...(p.erinnerungen || [])];
+                      newE[i] = { ...newE[i], titel: ev.target.value };
+                      upd({ ...p, erinnerungen: newE });
+                    }}
+                    placeholder="Titel (z.B. Zinsbindung prüfen)"
+                    className="erinnerung-titel"
+                  />
+                  <button className="erinnerung-del" onClick={() => {
+                    const newE = (p.erinnerungen || []).filter((_, x) => x !== i);
+                    upd({ ...p, erinnerungen: newE });
+                  }}>×</button>
+                </div>
+              );
+            })}
+          </div>
+          <button className="btn-add" onClick={() => upd({ ...p, erinnerungen: [...(p.erinnerungen || []), { datum: '', titel: '', erledigt: false }] })}>+ Erinnerung hinzufügen</button>
+        </Acc>
+          </div>
+        )}
+      </div>
+      {!saved && (
+        <div className="save-bottom">
+          <div className="save-bottom-main">
+            <button onClick={onSave} disabled={!canSave || hasErrors}>
+              <span className="btn-icon-sm"><IconSave color="#fff" /></span>Immobilie speichern
+            </button>
+            {!canSave && <p>Bitte Name vergeben</p>}
+          </div>
+          <div className="save-bottom-divider"><span>oder</span></div>
+          <button className="btn-import-bottom" onClick={onOpenImport}>
+            <span className="btn-icon-sm"><IconUpload color="#6366f1" /></span>Daten aus Dokumenten importieren
+          </button>
+          <p className="import-hint">Immobilienexposé, Darlehensvertrag, etc. hochladen und Daten automatisch auslesen</p>
+        </div>
+      )}
+      
+      {/* PDF Export Button */}
+      <div style={{padding:'16px',borderTop:'1px solid var(--border)',marginTop:'8px'}}>
+        <button className="btn-export-data" onClick={() => exportSingleImmobilie(p, c)} style={{width:'100%'}}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10,9 9,9 8,9"/></svg>
+          Als PDF exportieren
+        </button>
+      </div>
+      
+      {/* Darlehen Import Modal */}
+      {darlehenImportModal && (
+        <DarlehenImportModal 
+          onClose={() => setDarlehenImportModal(false)}
+          onImport={(importedDarlehen) => {
+            upd({ ...p, darlehen: [...(p.darlehen || []), ...importedDarlehen] });
+            setDarlehenImportModal(false);
+          }}
+        />
+      )}
+      
+      {/* Smart Darlehen Import Modal */}
+      {smartImportModal && (
+        <SmartLoanImportModal
+          immobilien={immobilien}
+          onClose={() => setSmartImportModal(false)}
+          onImport={(finalLoans) => {
+            if (onSmartImport) {
+              onSmartImport(finalLoans);
+            } else {
+              // Fallback: nur aktuelle Immobilie
+              const importData = finalLoans.map(l => l._importData);
+              upd({ ...p, darlehen: [...(p.darlehen || []), ...importData] });
+            }
+            setSmartImportModal(false);
+          }}
+        />
+      )}
+      
+      {/* Miethistorie Import Modal */}
+      {mhistImportModal && (
+        <MiethistorieImportModal 
+          onClose={() => setMhistImportModal(false)}
+          onImport={(importedMiethistorie) => {
+            upd({ ...p, miethistorie: [...(p.miethistorie || []), ...importedMiethistorie] });
+            setMhistImportModal(false);
+            setMhistOpen(true); // Historie öffnen um die neuen Einträge zu zeigen
+          }}
+        />
+      )}
+      
+      {/* Tilgungsplan Modal */}
+      {tilgungsplanDarlehen && (
+        <TilgungsplanModal 
+          darlehen={tilgungsplanDarlehen}
+          onClose={() => setTilgungsplanDarlehen(null)}
+        />
+      )}
+      
+      {/* Bestätigungsdialog für Felder zurücksetzen */}
+      {resetConfirm && (
+        <div className="modal-bg" onClick={() => setResetConfirm(null)}>
+          <div className="reset-confirm-modal" onClick={e => e.stopPropagation()}>
+            <div className="reset-confirm-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
+                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </div>
+            <h3>Felder zurücksetzen?</h3>
+            <p>Alle Felder in diesem Abschnitt werden geleert. Diese Aktion kann nicht rückgängig gemacht werden.</p>
+            <div className="reset-confirm-buttons">
+              <button className="btn-cancel" onClick={() => setResetConfirm(null)}>Abbrechen</button>
+              <button className="btn-reset" onClick={() => {
+                if (resetConfirm === 'objekt') {
+                  upd({
+                    ...p,
+                    stammdaten: {
+                      ...s,
+                      name: '',
+                      eigentuemer: '',
+                      adresse: '',
+                      projekt: '',
+                      typ: 'etw',
+                      objektstatus: 'neubau',
+                      nutzung: 'vermietet',
+                      bundesland: 'hessen',
+                      kaufdatum: '',
+                      baujahr: 0,
+                      wohnungsNr: '',
+                      etage: ''
+                    }
+                  });
+                } else if (resetConfirm === 'kaufpreis') {
+                  upd({
+                    ...p,
+                    stammdaten: {
+                      ...s,
+                      kaufpreisImmobilie: 0,
+                      kaufpreisStellplatz: 0,
+                      maklerProvision: 0,
+                      mehrkosten: 0,
+                      grunderwerbsteuer: 0,
+                      notarkosten: 0,
+                      verkehrswert: 0,
+                      verkehrswertDatum: ''
+                    }
+                  });
+                } else if (resetConfirm === 'afa') {
+                  upd({
+                    ...p,
+                    stammdaten: {
+                      ...s,
+                      grundstueckGroesse: 0,
+                      bodenrichtwert: 0,
+                      teileigentumsanteil: 0,
+                      afaSatz: 3,
+                      degressiveAfa: 0
+                    }
+                  });
+                } else if (resetConfirm === 'miete') {
+                  upd({
+                    ...p,
+                    miethistorie: [],
+                    mieterhöhungen: [],
+                    stammdaten: {
+                      ...s,
+                      mieterName: '',
+                      mietstatusAktiv: true,
+                      mietbeginn: '',
+                      mietende: '',
+                      kaltmiete: 0,
+                      nebenkostenVorauszahlung: 0,
+                      mieteStellplatz: 0,
+                      mieteSonderausstattung: 0,
+                      kaution: 0,
+                      kautionErhalten: false,
+                      kautionZurueckgezahlt: false
+                    }
+                  });
+                } else if (resetConfirm === 'finanzierung') {
+                  upd({
+                    ...p,
+                    darlehen: [],
+                    stammdaten: {
+                      ...s,
+                      eigenkapitalAnteil: 20,
+                      eigenkapitalBetrag: 0,
+                      eigenkapitalHerkunft: 'ersparnis',
+                      eigenleistung: 0,
+                      kfwZuschuss: 0,
+                      kfwProgramm: '',
+                      bafaFoerderung: 0,
+                      landesFoerderung: 0
+                    }
+                  });
+                } else if (resetConfirm === 'sonderausstattung') {
+                  upd({
+                    ...p,
+                    stammdaten: {
+                      ...s,
+                      sonderausstattung: []
+                    }
+                  });
+                }
+                setResetConfirm(null);
+              }}>Zurücksetzen</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Rendite
+const Rendite = ({ p, upd, c }) => {
+  const [tab, setTab] = useState('ov');
+  const s = p.stammdaten;
+  const r = p.rendite;
+  const setR = (f, v) => upd({ ...p, rendite: { ...r, [f]: v } });
+
+  const proj = useMemo(() => {
+    const ek = c.ak * (s.eigenkapitalAnteil / 100);
+    const fk = c.ak - ek;
+    const ann = fk * ((s.zinssatz + s.tilgung) / 100);
+    const jahre = [];
+    let rs = fk, lk = 0;
+    for (let j = 1; j <= 30; j++) {
+      const mf = Math.pow(1 + r.mietanpassung / 100, j - 1);
+      const m = c.jm * mf * (1 - r.mietausfall / 52);
+      const ko = m * (r.kostenProzent / 100) + s.wohnflaeche * r.instandhaltung * mf;
+      const zi = rs * (s.zinssatz / 100);
+      const vv = m - ko - c.afaGes - zi;
+      const st = vv * (s.steuersatz / 100);
+      const liq = m - ko - ann - st;
+      lk += liq;
+      jahre.push({ j, m, ko, zi, vv, st, liq, lk, rs });
+      rs = Math.max(0, rs - (ann - zi));
+    }
+    const be = jahre.findIndex(x => x.lk >= 0) + 1;
+    return { jahre, be: be || '>30', ek, fk, ann, nr: c.kp > 0 ? (c.jm * (1 - r.kostenProzent / 100)) / c.kp : 0 };
+  }, [c, s, r]);
+
+  return (
+    <div className="mod">
+      <div className="tabs">{['ov', 'set', 'proj', 'liq'].map(t => <button key={t} className={tab === t ? 'act' : ''} onClick={() => setTab(t)}>{t === 'ov' ? <><span className="tab-icon"><IconChart color={tab === t ? '#6366f1' : '#71717a'} /></span>Übersicht</> : t === 'set' ? <><span className="tab-icon"><IconSettings color={tab === t ? '#6366f1' : '#71717a'} /></span>Parameter</> : t === 'proj' ? <><span className="tab-icon"><IconTrend color={tab === t ? '#6366f1' : '#71717a'} /></span>Rendite</> : <><span className="tab-icon"><IconLiquidity color={tab === t ? '#6366f1' : '#71717a'} /></span>Liquidität</>}</button>)}</div>
+      {tab === 'ov' && (
+        <>
+          <div className="kpis">
+            <div className="kpi-c"><span>Bruttorendite</span><b>{fmtP(c.rendite)}</b></div>
+            <div className="kpi-c"><span>Nettorendite</span><b>{fmtP(proj.nr)}</b></div>
+            <div className="kpi-c"><span>€/qm</span><b>{fmt(s.wohnflaeche > 0 ? c.kp / s.wohnflaeche : 0)}</b></div>
+            <div className="kpi-c"><span>Jahres-Kaltmiete</span><b>{fmt(c.jm)}</b></div>
+            <div className="kpi-c hl"><span>Break-Even</span><b>Jahr {proj.be}</b></div>
+          </div>
+          <div className="cards">
+            <div className="card"><h4>Investition</h4><div className="row"><span>Kaufpreis</span><span>{fmt(c.kp)}</span></div><div className="row"><span>+ Nebenkosten</span><span>{fmt(c.nk)}</span></div><div className="row tot"><span>= AK</span><span>{fmt(c.ak)}</span></div></div>
+            <div className="card"><h4>Finanzierung</h4><div className="row"><span>EK ({s.eigenkapitalAnteil}%)</span><span>{fmt(proj.ek)}</span></div><div className="row"><span>FK</span><span>{fmt(proj.fk)}</span></div><div className="row tot"><span>Annuität</span><span>{fmt(proj.ann)}</span></div></div>
+          </div>
+        </>
+      )}
+      {tab === 'set' && (
+        <div className="set-panel">
+          <Input label="Mietanpassung p.a." value={r.mietanpassung} onChange={v => setR('mietanpassung', v)} suffix="%" step={0.5} />
+          <Input label="Nicht umlegbare Kosten" value={r.kostenProzent} onChange={v => setR('kostenProzent', v)} suffix="%" />
+          <Input label="Instandhaltung" value={r.instandhaltung} onChange={v => setR('instandhaltung', v)} suffix="€/qm" />
+          <Input label="Mietausfall" value={r.mietausfall} onChange={v => setR('mietausfall', v)} suffix="Wo./J." />
+        </div>
+      )}
+      {tab === 'proj' && (
+        <>
+          <h4 className="section-title-first">Jährliche Renditeübersicht</h4>
+          <div className="tbl-wrap"><table><thead><tr><th>Jahr</th><th>Miete</th><th>Kosten</th><th>AfA</th><th>Zinsen</th><th>V+V</th><th><span className="th-with-info">Steuereffekt<span className="info-tooltip"><button className="info-btn"><IconInfo color="var(--text-dim)" /></button><span className="info-tooltip-content"><strong>Was bedeutet Steuereffekt?</strong><p><span className="dot green"></span><b>Grün (negativ)</b> = Steuerersparnis – Die Immobilie mindert dein zu versteuerndes Einkommen. Du zahlst weniger Steuern.</p><p><span className="dot red"></span><b>Rot (positiv)</b> = Steuerlast – Die Mieteinnahmen übersteigen die Abzüge. Auf den Überschuss zahlst du Steuern.</p></span></span></span></th></tr></thead><tbody>
+            {proj.jahre.map(x => <tr key={x.j}><td>{x.j}</td><td>{fmt(x.m)}</td><td className="neg">{fmt(-x.ko)}</td><td className="neg">{fmt(-c.afaGes)}</td><td className="neg">{fmt(-x.zi)}</td><td className={x.vv >= 0 ? 'pos' : 'neg'}>{fmt(x.vv)}</td><td className={x.st >= 0 ? 'neg' : 'pos'}>{fmt(-x.st)}</td></tr>)}
+          </tbody></table></div>
+          <h4 className="section-title">Steuereffekt über 30 Jahre</h4>
+          <div className="chart">
+            {proj.jahre.filter((_, i) => i % 3 === 0).map(x => {
+              const maxVal = Math.max(...proj.jahre.map(y => Math.abs(y.st)));
+              return (
+                <div key={x.j} className="bar-row">
+                  <span>J{x.j}</span>
+                  <div className="bar-bg">
+                    <div className={`bar ${x.st >= 0 ? 'neg' : 'pos'}`} style={{ width: `${Math.abs(x.st) / maxVal * 100}%` }} />
+                  </div>
+                  <span className={x.st >= 0 ? 'neg' : 'pos'}>{fmt(-x.st)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+      {tab === 'liq' && (
+        <>
+          <div className="kpis">
+            <div className="kpi-c"><span>Jahr 1</span><b>{fmt(proj.jahre[0]?.liq)}</b></div>
+            <div className="kpi-c"><span>Jahr 10</span><b>{fmt(proj.jahre[9]?.liq)}</b></div>
+            <div className="kpi-c hl"><span>Break-Even</span><b>Jahr {proj.be}</b></div>
+            <div className="kpi-c"><span>Nach 30 J.</span><b>{fmt(proj.jahre[29]?.lk)}</b></div>
+          </div>
+          <h4 className="section-title-first">Jährliche Liquiditätsübersicht</h4>
+          <div className="tbl-wrap"><table><thead><tr><th>Jahr</th><th>Miete</th><th>Kosten</th><th>Annuität</th><th>Liquidität</th><th>Kumuliert</th></tr></thead><tbody>
+            {proj.jahre.map(x => <tr key={x.j}><td>{x.j}</td><td className="pos">{fmt(x.m)}</td><td className="neg">{fmt(-x.ko)}</td><td className="neg">{fmt(-x.ann)}</td><td className={x.liq >= 0 ? 'pos' : 'neg'}>{fmt(x.liq)}</td><td className={x.lk >= 0 ? 'pos' : 'neg'}>{fmt(x.lk)}</td></tr>)}
+          </tbody></table></div>
+          <h4 className="section-title">Kumulierte Liquidität über 30 Jahre</h4>
+          <div className="chart">{[0, 4, 9, 14, 19, 24, 29].map(i => { const x = proj.jahre[i]; if (!x) return null; const max = Math.max(...proj.jahre.map(y => Math.abs(y.lk))); return <div key={x.j} className="bar-row"><span>J{x.j}</span><div className="bar-bg"><div className={`bar ${x.lk >= 0 ? 'pos' : 'neg'}`} style={{ width: `${Math.abs(x.lk) / max * 100}%` }} /></div><span className={x.lk >= 0 ? 'pos' : 'neg'}>{fmt(x.lk)}</span></div>; })}</div>
+        </>
+      )}
+    </div>
+  );
+};
+
+// Steuer
+const Steuer = ({ p, upd, c, immobilien = [] }) => {
+  const kj = parseInt(p.stammdaten.kaufdatum?.split('-')[0]) || 2024;
+  const [yr, setYr] = useState(kj);
+  const [sec, setSec] = useState(null);
+  const [showExport, setShowExport] = useState(false);
+
+  // Vorjahres-Daten holen
+  const prevYd = p.steuerJahre?.[yr - 1] || null;
+  const hasOwnData = !!p.steuerJahre?.[yr];
+
+  // Wenn kein eigenes Jahr existiert, aber Vorjahr vorhanden → Vorjahreswerte als Draft
+  const EINNAHMEN_FIELDS = ['miet', 'nkVor', 'nkNach', 'nkAbr'];
+  const defaultYd = { wk: [], miet: c.jm, nkVor: 0, nkNach: 0, nkAbr: 0 };
+  const rawYd = p.steuerJahre?.[yr];
+  const isDraft = !hasOwnData && !!prevYd;
+  const yd = rawYd || (isDraft ? { ...defaultYd, miet: prevYd.miet || c.jm, nkVor: prevYd.nkVor || 0, nkNach: prevYd.nkNach || 0, nkAbr: prevYd.nkAbr || 0, wk: (prevYd.wk || []).map(w => ({ ...w })), _confirmed: [] } : defaultYd);
+
+  // Confirmed-Tracking: welche Felder wurden vom User bestätigt/bearbeitet?
+  const confirmed = new Set(yd._confirmed || (hasOwnData && !yd._confirmed ? EINNAHMEN_FIELDS : []));
+  // Wenn Jahresdaten bereits existierten (manuell eingegeben), gelten sie als bestätigt
+  const isFieldConfirmed = (field) => hasOwnData && !yd._confirmed ? true : confirmed.has(field);
+  const allConfirmed = EINNAHMEN_FIELDS.every(f => isFieldConfirmed(f));
+
+  const setYd = (f, v) => {
+    const newConfirmed = [...new Set([...(yd._confirmed || []), f])];
+    upd({ ...p, steuerJahre: { ...p.steuerJahre, [yr]: { ...yd, [f]: v, _confirmed: newConfirmed } } });
+  };
+  const confirmField = (f) => {
+    const newConfirmed = [...new Set([...(yd._confirmed || []), f])];
+    upd({ ...p, steuerJahre: { ...p.steuerJahre, [yr]: { ...yd, _confirmed: newConfirmed } } });
+  };
+  const confirmAll = () => {
+    upd({ ...p, steuerJahre: { ...p.steuerJahre, [yr]: { ...yd, _confirmed: [...EINNAHMEN_FIELDS] } } });
+  };
+
+  const addWK = () => setYd('wk', [...yd.wk, { bez: '', betrag: 0 }]);
+  const updWK = (i, f, v) => { const a = [...yd.wk]; a[i] = { ...a[i], [f]: f === 'betrag' ? parseFloat(v) || 0 : v }; setYd('wk', a); };
+  const delWK = i => setYd('wk', yd.wk.filter((_, x) => x !== i));
+  const jsk = yr - kj;
+  const afaG = jsk < 100 / p.stammdaten.afaSatz ? c.afaGeb : 0;
+  const afaS = jsk < 10 ? c.afaSA : 0;
+  const afaTot = afaG + afaS;
+  // Erbbauzins automatisch als Werbungskosten berücksichtigen (falls Erbbaurecht)
+  const erbbauzinsJahr = p.stammdaten.erbbaurecht ? (p.stammdaten.erbbauzins || 0) : 0;
+  // Darlehenszinsen automatisch als Werbungskosten (Schätzung für yr): Restschuld × Sollzins
+  const _allLoans = [...(p.darlehen || []), ...(p.isContainer ? (immobilien || []).filter(x => x.parentId === p.id).flatMap(u => u.darlehen || []) : [])];
+  const zinsenJahr = _allLoans.reduce((a, d) => a + computeYearlyInterest(d), 0);
+  const wkTot = yd.wk.reduce((a, x) => a + (x.betrag || 0), 0) + erbbauzinsJahr + zinsenJahr;
+
+  // Einnahmen nur aus bestätigten Feldern berechnen
+  const confirmedVal = (field) => isFieldConfirmed(field) ? (yd[field] || 0) : 0;
+  const ein = confirmedVal('miet') + confirmedVal('nkVor') + confirmedVal('nkNach') + confirmedVal('nkAbr');
+  const erg = allConfirmed ? ein - afaTot - wkTot : null;
+  const stEff = erg !== null ? erg * (p.stammdaten.steuersatz / 100) : null;
+  const years = []; for (let y = kj; y <= kj + 10; y++) years.push(y);
+
+  // Export-Komponente
+  const ExportView = () => {
+    const s = p.stammdaten;
+    const gwg = (s.grundstueckGroesse || 0) * (s.bodenrichtwert || 0);
+    const ga = s.erbbaurecht ? 0 : (s.eigentumsart === 'gesamt' ? gwg : (s.teileigentumsanteil > 0 ? (s.teileigentumsanteil / 10000) * gwg : 0));
+    const [copied, setCopied] = useState(false);
+    
+    const exportData = { s, c, yr, yd, afaG, afaS, afaTot, wkTot, ein, erg, stEff, gwg, ga, BUNDESLAENDER };
+    const htmlContent = generateExport(exportData);
+    
+    const handleDownload = () => {
+      const fullHtml = `<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Immobilien-Übersicht ${s.name} ${yr}</title></head><body>${htmlContent}</body></html>`;
+      const blob = new Blob([fullHtml], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Immobilien-Uebersicht_${s.name.replace(/[^a-zA-Z0-9]/g, '_')}_${yr}.html`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    };
+    
+    const handleCopyText = () => {
+      const f = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v || 0);
+      const f2 = (v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 }).format(v || 0);
+      const fp = (v) => new Intl.NumberFormat('de-DE', { style: 'percent', minimumFractionDigits: 2 }).format(v || 0);
+      
+      const text = `IMMOBILIEN-ÜBERSICHT ${yr}
+================================
+${s.typ.toUpperCase()}, ${s.adresse || 'Keine Adresse'}
+${s.name}${s.eigentuemer ? ` · Eigentümer: ${s.eigentuemer}` : ''}
+
+GRUNDDATEN
+----------
+Kaufpreis Immobilie: ${f(s.kaufpreisImmobilie)}
+${s.kaufpreisStellplatz > 0 ? `Kaufpreis Stellplatz: ${f(s.kaufpreisStellplatz)}\n` : ''}Kaufpreis Gesamt: ${f(c.kp)}
+
+MIETEINNAHMEN
+-------------
+Wohnfläche: ${s.wohnflaeche} qm × ${f(s.mieteProQm)}/qm
+Miete pro Monat: ${f(c.mm)}
+Jahres-Kaltmiete: ${f(c.jm)}
+Bruttorendite: ${fp(c.rendite)}
+
+ANSCHAFFUNGSKOSTEN
+------------------
+Anschaffungskosten Gesamt: ${f(c.ak)}
+./. Grundstücksanteil: -${f(ga)}
+Anschaffungskosten Gebäude: ${f(c.afaBasis)}
+AfA linear ${s.afaSatz}%: ${f(afaG)}
+
+ZUSAMMENFASSUNG ${yr}
+${'='.repeat(20)}
+AfA Gesamt: ${f(afaTot)}
+Werbungskosten: ${f(wkTot)}
+AfA + Werbungskosten: -${f(afaTot + wkTot)}
+
+Einnahmen Gesamt: ${f(ein)}
+
+ERGEBNIS: ${f2(erg)}
+${erg < 0 ? `→ Steuerersparnis ca. ${f(Math.abs(stEff))}` : `→ Steuerlast ca. ${f(stEff)}`} bei ${s.steuersatz}% Steuersatz
+
+---
+Erstellt mit ImmoHub · ${new Date().toLocaleDateString('de-DE')}`;
+
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      });
+    };
+    
+    return (
+      <div className="export-view">
+        <div className="export-header">
+          <h2>{s.typ.toUpperCase()}, {s.adresse || 'Keine Adresse'}</h2>
+          <p>{s.name} {s.eigentuemer ? `· Eigentümer: ${s.eigentuemer}` : ''}</p>
+        </div>
+        
+        {/* Grunddaten */}
+        <div className="export-section">
+          <h3>Grunddaten</h3>
+          <table className="export-table">
+            <tbody>
+              <tr><td>Kaufpreis der Immobilie</td><td className="val">{fmt(s.kaufpreisImmobilie)}</td></tr>
+              {s.bodenrichtwert > 0 && <tr><td>Bodenrichtwert pro qm Grundstück</td><td className="val">{fmt(s.bodenrichtwert)}</td><td className="note">Grundstückswert: {fmt(gwg)}</td></tr>}
+              {s.grundstueckGroesse > 0 && <tr><td>Grundstücksgröße</td><td className="val">{s.grundstueckGroesse} qm</td></tr>}
+              {s.kaufpreisStellplatz > 0 && <tr><td>Kaufpreis Stellplatz</td><td className="val">{fmt(s.kaufpreisStellplatz)}</td></tr>}
+              <tr className="hl"><td>Kaufpreis Gesamt</td><td className="val">{fmt(c.kp)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mieteinnahmen */}
+        <div className="export-section">
+          <h3>Mieteinnahmen</h3>
+          <table className="export-table">
+            <thead>
+              <tr><th></th><th>Kaufpreis</th><th>TEA (10.000stel)</th><th>Fläche</th><th>Miete/qm</th><th>Miete p.M.</th><th>Miete p.A.</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Wohnung</td>
+                <td className="val">{fmt(s.kaufpreisImmobilie)}</td>
+                <td className="val">{s.teileigentumsanteil || '–'}</td>
+                <td className="val">{s.wohnflaeche} qm</td>
+                <td className="val">{fmt(s.mieteProQm)}</td>
+                <td className="val">{fmt(s.wohnflaeche * s.mieteProQm)}</td>
+                <td className="val">{fmt(s.wohnflaeche * s.mieteProQm * 12)}</td>
+              </tr>
+              {s.kaufpreisStellplatz > 0 && (
+                <tr>
+                  <td>Stellplatz</td>
+                  <td className="val">{fmt(s.kaufpreisStellplatz)}</td>
+                  <td className="val">–</td>
+                  <td className="val">{s.anzahlStellplaetze} Stck.</td>
+                  <td className="val">–</td>
+                  <td className="val">{fmt(s.mieteStellplatz)}</td>
+                  <td className="val">{fmt(s.mieteStellplatz * 12)}</td>
+                </tr>
+              )}
+              {c.saSumme > 0 && (
+                <tr>
+                  <td>Sonderausstattung</td>
+                  <td className="val">{fmt(c.saSumme)}</td>
+                  <td className="val">{fmt(c.afaSA * 10)}</td>
+                  <td className="val">–</td>
+                  <td className="val">–</td>
+                  <td className="val">{fmt(s.mieteSonderausstattung || 0)}</td>
+                  <td className="val">{fmt((s.mieteSonderausstattung || 0) * 12)}</td>
+                </tr>
+              )}
+              <tr className="hl">
+                <td>Summe</td>
+                <td className="val">{fmt(c.kp + c.saSumme)}</td>
+                <td className="val"></td>
+                <td className="val">{s.wohnflaeche} qm</td>
+                <td className="val"></td>
+                <td className="val">{fmt(c.mm)}</td>
+                <td className="val">{fmt(c.jm)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Anschaffungskosten */}
+        <div className="export-section">
+          <h3>Anschaffungskosten</h3>
+          <table className="export-table">
+            <tbody>
+              <tr><td>+ Kaufpreis Immobilie</td><td className="val">{fmt(s.kaufpreisImmobilie)}</td></tr>
+              {s.mehrkosten > 0 && <tr><td>+ Mehrkosten</td><td className="val">{fmt(s.mehrkosten)}</td></tr>}
+              {s.kaufpreisStellplatz > 0 && <tr><td>+ Kaufpreis Stellplatz</td><td className="val">{fmt(s.kaufpreisStellplatz)}</td></tr>}
+              {s.maklerProvision > 0 && <tr><td>+ Vermittlungsprovision (Makler)</td><td className="val">{fmt(s.maklerProvision)}</td></tr>}
+              <tr className="sub"><td>Zwischensumme</td><td className="val">{fmt(c.kp + (s.maklerProvision || 0))}</td></tr>
+              <tr><td>+ Grunderwerbsteuer</td><td className="val">{fmt(s.grunderwerbsteuer)}</td><td className="note">{BUNDESLAENDER[s.bundesland]?.grest || 6}% vom KP</td></tr>
+              <tr><td>+ Notarkosten</td><td className="val">{fmt(s.notarkosten)}</td></tr>
+              <tr className="hl"><td>Anschaffungskosten Gesamt</td><td className="val">{fmt(c.ak)}</td></tr>
+              <tr><td>./. Grundstücksanteil (Bodenwert)</td><td className="val neg">-{fmt(ga)}</td><td className="note">{s.teileigentumsanteil}/10.000stel von {fmt(gwg)}</td></tr>
+              <tr className="hl"><td>Anschaffungskosten Gebäude</td><td className="val">{fmt(c.afaBasis)}</td></tr>
+              <tr className="hl accent"><td>AfA linear {s.afaSatz}%</td><td className="val">{fmt(afaG)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Sonderausstattung */}
+        {s.sonderausstattung?.length > 0 && (
+          <div className="export-section">
+            <h3>Sonderausstattung (AfA 10%)</h3>
+            <table className="export-table">
+              <tbody>
+                {s.sonderausstattung.map((sa, i) => (
+                  <tr key={i}><td>{sa.name || `Position ${i+1}`}</td><td className="val">{fmt(sa.betrag)}</td></tr>
+                ))}
+                <tr className="hl"><td>Summe Sonderausstattung</td><td className="val">{fmt(c.saSumme)}</td></tr>
+                <tr className="hl accent"><td>AfA Sonderausstattung (10%) p.a.</td><td className="val">{fmt(c.afaSA)}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Werbungskosten */}
+        <div className="export-section">
+          <h3>Werbungskosten {yr}</h3>
+          <table className="export-table">
+            <tbody>
+              {yd.wk.length > 0 ? yd.wk.map((w, i) => (
+                <tr key={i}><td>{w.bez || `Position ${i+1}`}</td><td className="val">{fmt(w.betrag)}</td></tr>
+              )) : (
+                <tr><td colSpan="2" className="empty-note">Keine Werbungskosten erfasst</td></tr>
+              )}
+              <tr className="hl"><td>Werbungskosten Gesamt</td><td className="val">{fmt(wkTot)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Zusammenfassung */}
+        <div className="export-section summary">
+          <h3>Zusammenfassung AfA + Werbungskosten {yr}</h3>
+          <div className="export-cols">
+            <div className="export-col">
+              <table className="export-table">
+                <tbody>
+                  {c.saSumme > 0 && <tr><td>AfA Sonderausstattung (10%) p.a.</td><td className="val">{fmt(c.afaSA)}</td></tr>}
+                  <tr><td>AfA Anschaffungskosten linear ({s.afaSatz}%)</td><td className="val">{fmt(afaG)}</td></tr>
+                  <tr><td>Werbungskosten {yr} Gesamt</td><td className="val">{fmt(wkTot)}</td></tr>
+                  <tr className="hl"><td>AfA + Werbungskosten {yr}</td><td className="val neg">-{fmt(afaTot + wkTot)}</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div className="export-col">
+              <table className="export-table">
+                <tbody>
+                  <tr><td>Mieteinnahmen {yr}</td><td className="val">{fmt(yd.miet)}</td></tr>
+                  {yd.nkVor > 0 && <tr><td>Einnahmen aus NK Vorauszahlung {yr}</td><td className="val">{fmt(yd.nkVor)}</td></tr>}
+                  {(yd.nkNach || 0) !== 0 && <tr><td>NK-Nachzahlungen VJ {yr}</td><td className="val">{fmt(yd.nkNach)}</td></tr>}
+                  {yd.nkAbr !== 0 && <tr><td>NK-Abrechnung {yr}</td><td className="val">{fmt(yd.nkAbr)}</td></tr>}
+                  <tr className="sub"><td>Einnahmen Gesamt</td><td className="val">{fmt(ein)}</td></tr>
+                  <tr><td>AfA + Werbungskosten {yr}</td><td className="val neg">-{fmt(afaTot + wkTot)}</td></tr>
+                  <tr className={`hl ${erg >= 0 ? 'pos' : 'neg'}`}><td>Ergebnis</td><td className="val">{fmtD(erg)}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="export-footer">
+            <p>Steuerliche Auswirkung bei {s.steuersatz}% Steuersatz: <strong className={erg < 0 ? 'pos' : 'neg'}>{erg < 0 ? `Ersparnis ca. ${fmt(Math.abs(stEff))}` : `Steuerlast ca. ${fmt(stEff)}`}</strong></p>
+          </div>
+        </div>
+
+        <div className="export-actions">
+          <button className="btn-print" onClick={handleDownload}><span className="btn-icon-sm"><IconDocument color="#fff" /></span>HTML herunterladen</button>
+          <button className="btn-copy" onClick={handleCopyText}>{copied ? <><span className="btn-icon-sm"><IconCheck color="#fff" /></span>Kopiert!</> : <><span className="btn-icon-sm"><IconCopy color="#fff" /></span>Als Text kopieren</>}</button>
+          <button className="btn-back" onClick={() => setShowExport(false)}><span className="btn-icon-sm"><IconArrowLeft color="#fafafa" /></span>Zurück</button>
+        </div>
+        <p className="export-hint-small"><span className="hint-icon-sm"><IconIdea color="#71717a" /></span>HTML-Datei herunterladen, im Browser öffnen und mit Strg+P als PDF drucken. Oder Text kopieren für E-Mail/Notizen.</p>
+      </div>
+    );
+  };
+
+  if (showExport) {
+    return <ExportView />;
+  }
+
+  return (
+    <div className="mod">
+      <div className="yr-bar">
+        <label>Jahr:</label>
+        <select value={yr} onChange={e => setYr(+e.target.value)}>{years.map(y => <option key={y} value={y}>{y}</option>)}</select>
+        <span className="badge">{jsk + 1}. Jahr</span>
+        <button className="btn-export" onClick={() => setShowExport(true)} disabled={erg === null} style={erg === null ? {opacity:0.4,cursor:'not-allowed'} : {}}><span className="btn-export-icon"><IconSteuer color="#6366f1" /></span>Übersicht exportieren</button>
+      </div>
+      <div className={`result-box ${erg === null ? 'draft' : erg >= 0 ? 'pos' : 'neg'}`}>
+        <div className="result-header">
+          <span>Steuerliches Ergebnis {yr}</span>
+          <div className="info-tooltip">
+            <button className="info-btn"><IconInfo color="var(--text-dim)" /></button>
+            <div className="info-tooltip-content">
+              <strong>Was bedeutet das Ergebnis?</strong>
+              <p><span className="dot green"></span><b>Grün (negativ)</b> = Steuerersparnis – Die Immobilie mindert dein zu versteuerndes Einkommen. Du zahlst weniger Steuern.</p>
+              <p><span className="dot red"></span><b>Rot (positiv)</b> = Steuerlast – Die Mieteinnahmen übersteigen die Abzüge. Auf den Überschuss zahlst du Steuern.</p>
+            </div>
+          </div>
+        </div>
+        {erg !== null ? (<>
+          <b>{fmtD(erg)}</b>
+          <small>{erg < 0 ? `→ Ersparnis ca. ${fmt(Math.abs(stEff))}` : `→ Steuerlast ca. ${fmt(stEff)}`}</small>
+        </>) : (<>
+          <b style={{color:'var(--text-dim)',fontSize:'16px'}}>Werte bestätigen</b>
+          <small style={{color:'var(--text-dim)'}}>Bitte übernommene Vorjahreswerte prüfen und bestätigen</small>
+        </>)}
+      </div>
+      <div className="accs">
+        <Acc icon={<IconAfa color="#f59e0b" />} title="AfA" sum={fmt(afaTot)} open={sec === 'afa'} toggle={() => setSec(sec === 'afa' ? null : 'afa')} color="#f59e0b">
+          <div className="afa-box"><div className="afa-r"><span>Gebäude ({p.stammdaten.afaSatz}%)</span><span>{fmt(afaG)}</span></div><small>Basis: {fmt(c.afaBasis)}</small></div>
+          {c.saSumme > 0 && <div className="afa-box"><div className="afa-r"><span>Sonderausst. (10%)</span><span>{fmt(afaS)}</span></div><small>Basis: {fmt(c.saSumme)}</small></div>}
+          <div className="res hl"><span>AfA Gesamt</span><span>{fmt(afaTot)}</span></div>
+        </Acc>
+        <Acc icon={<IconWerbung color="#3b82f6" />} title="Werbungskosten" sum={(yd.wk.length + (zinsenJahr>0?1:0) + (erbbauzinsJahr>0?1:0)) > 0 ? `${yd.wk.length + (zinsenJahr>0?1:0) + (erbbauzinsJahr>0?1:0)}x, ${fmt(wkTot)}` : 'Keine'} open={sec === 'wk'} toggle={() => setSec(sec === 'wk' ? null : 'wk')} color="#3b82f6">
+          {(zinsenJahr > 0 || erbbauzinsJahr > 0) && (
+            <div style={{marginBottom:'10px',padding:'10px',border:'1px solid #3b82f6',borderRadius:'8px',background:'rgba(59,130,246,0.06)'}}>
+              <div style={{fontSize:'12px',fontWeight:600,marginBottom:'6px'}}>⚡ Automatisch berücksichtigte Werbungskosten</div>
+              {zinsenJahr > 0 && <div style={{display:'flex',justifyContent:'space-between',fontSize:'12px',padding:'2px 0'}}><span style={{color:'var(--text-muted)'}}>Darlehenszinsen ({yr})</span><b>{fmt(zinsenJahr)}</b></div>}
+              {erbbauzinsJahr > 0 && <div style={{display:'flex',justifyContent:'space-between',fontSize:'12px',padding:'2px 0'}}><span style={{color:'var(--text-muted)'}}>Erbbauzins</span><b>{fmt(erbbauzinsJahr)}</b></div>}
+              <p style={{fontSize:'11px',color:'var(--text-muted)',margin:'6px 0 0'}}>Schätzung auf Basis Restschuld × Sollzinssatz aller Darlehen (Gebäude + Einheiten). Nicht doppelt unten erfassen.</p>
+            </div>
+          )}
+          {yd.wk.map((x, i) => <div key={i} className="wk-row"><input value={x.bez} onChange={e => updWK(i, 'bez', e.target.value)} placeholder="Bezeichnung" /><NumInput value={x.betrag} onChange={v => updWK(i, 'betrag', v)} placeholder="€" /><button onClick={() => delWK(i)}>×</button></div>)}
+          <button className="btn-add" onClick={addWK}>+ Manuelle Position</button>
+          {wkTot > 0 && <div className="res hl"><span>WK Gesamt</span><span>{fmt(wkTot)}</span></div>}
+        </Acc>
+        <Acc icon={<IconEinnahmen color="#10b981" />} title="Einnahmen" sum={allConfirmed ? fmt(ein) : '⏳ Prüfen'} open={sec === 'ein'} toggle={() => setSec(sec === 'ein' ? null : 'ein')} color="#10b981">
+          {isDraft && !allConfirmed && (
+            <div className="draft-banner">
+              <span>📋 Werte aus {yr - 1} übernommen — bitte prüfen und bestätigen</span>
+              <button className="btn-confirm-all" onClick={confirmAll}>✓ Alle übernehmen</button>
+            </div>
+          )}
+          <div className={!isFieldConfirmed('miet') ? 'steuer-draft-field' : ''}>
+            <Input label="Mieteinnahmen" value={yd.miet} onChange={v => setYd('miet', v)} suffix="€" className={!isFieldConfirmed('miet') ? 'draft-input' : ''} />
+            {!isFieldConfirmed('miet') && <button className="btn-confirm-field" onClick={() => confirmField('miet')}>✓ Übernehmen</button>}
+          </div>
+          <div className={!isFieldConfirmed('nkVor') ? 'steuer-draft-field' : ''}>
+            <Input label="NK-Vorauszahlung" value={yd.nkVor} onChange={v => setYd('nkVor', v)} suffix="€" className={!isFieldConfirmed('nkVor') ? 'draft-input' : ''} />
+            {!isFieldConfirmed('nkVor') && <button className="btn-confirm-field" onClick={() => confirmField('nkVor')}>✓ Übernehmen</button>}
+          </div>
+          <div className={!isFieldConfirmed('nkNach') ? 'steuer-draft-field' : ''}>
+            <Input label="NK-Nachzahlungen VJ" value={yd.nkNach || 0} onChange={v => setYd('nkNach', v)} suffix="€" className={!isFieldConfirmed('nkNach') ? 'draft-input' : ''} />
+            {!isFieldConfirmed('nkNach') && <button className="btn-confirm-field" onClick={() => confirmField('nkNach')}>✓ Übernehmen</button>}
+          </div>
+          <div className={!isFieldConfirmed('nkAbr') ? 'steuer-draft-field' : ''}>
+            <Input label="NK-Abrechnung" value={yd.nkAbr} onChange={v => setYd('nkAbr', v)} suffix="€" step={0.01} className={!isFieldConfirmed('nkAbr') ? 'draft-input' : ''} />
+            {!isFieldConfirmed('nkAbr') && <button className="btn-confirm-field" onClick={() => confirmField('nkAbr')}>✓ Übernehmen</button>}
+          </div>
+          <p className="hint">NK-Nachzahlungen: Vorzeichen beachten! + = Nachzahlung an dich, − = Rückzahlung an Mieter</p>
+          <div className="res hl"><span>Einnahmen</span><span className={allConfirmed ? 'pos' : ''}>{allConfirmed ? fmt(ein) : '—'}</span></div>
+        </Acc>
+      </div>
+    </div>
+  );
+};
+
+// Standorte Karte Komponente - SVG-basiert
+const StandorteMap = ({ locations }) => {
+  // Bekannte Koordinaten für deutsche Städte (lat, lon)
+  const stadtCoords = {
+    'cölbe': [50.8667, 8.7833],
+    'fronhausen': [50.7000, 8.6833],
+    'marburg': [50.8021, 8.7711],
+    'kirchhain': [50.8167, 8.7667],
+    'neustadt': [50.8000, 8.8500],
+    'gießen': [50.5833, 8.6667],
+    'giessen': [50.5833, 8.6667],
+    'frankfurt': [50.1109, 8.6821],
+    'wiesbaden': [50.0782, 8.2398],
+    'kassel': [51.3127, 9.4797],
+    'darmstadt': [49.8728, 8.6512],
+    'fulda': [50.5528, 9.6778],
+    'limburg': [50.3833, 8.0667],
+    'bad homburg': [50.2267, 8.6181],
+    'offenbach': [50.0956, 8.7761],
+    'hanau': [50.1267, 8.9169],
+    'rüsselsheim': [49.9953, 8.4114],
+    'bad vilbel': [50.1786, 8.7361],
+    'friedberg': [50.3344, 8.7556],
+    'wetterau': [50.35, 8.8],
+    'lahn-dill': [50.65, 8.35],
+  };
+  
+  // PLZ zu Koordinaten
+  const plzCoords = {
+    '35091': [50.8667, 8.7833], // Cölbe
+    '35112': [50.7000, 8.6833], // Fronhausen
+    '35037': [50.8021, 8.7711], // Marburg
+    '35274': [50.8167, 8.7667], // Kirchhain
+    '35390': [50.5833, 8.6667], // Gießen
+    '60311': [50.1109, 8.6821], // Frankfurt
+    '65183': [50.0782, 8.2398], // Wiesbaden
+    '34117': [51.3127, 9.4797], // Kassel
+    '64283': [49.8728, 8.6512], // Darmstadt
+  };
+  
+  // Finde Koordinaten für einen Ort
+  const getCoords = (ort, plz) => {
+    // PLZ-Lookup
+    if (plz) {
+      const plzPrefix = plz.substring(0, 5);
+      if (plzCoords[plzPrefix]) return plzCoords[plzPrefix];
+    }
+    
+    // Stadt-Lookup (case-insensitive)
+    const ortLower = ort.toLowerCase().trim();
+    if (stadtCoords[ortLower]) return stadtCoords[ortLower];
+    
+    // Teilstring-Match
+    for (const [stadt, coords] of Object.entries(stadtCoords)) {
+      if (ortLower.includes(stadt) || stadt.includes(ortLower)) {
+        return coords;
+      }
+    }
+    
+    // Fallback: Mitte Hessen
+    return [50.6, 8.7];
+  };
+  
+  // Berechne Marker-Positionen
+  const markers = locations.map(loc => {
+    const coords = getCoords(loc.ort, loc.plz);
+    return {
+      ...loc,
+      lat: coords[0],
+      lon: coords[1]
+    };
+  });
+  
+  // Berechne Bounds
+  const lats = markers.map(m => m.lat);
+  const lons = markers.map(m => m.lon);
+  const minLat = Math.min(...lats) - 0.1;
+  const maxLat = Math.max(...lats) + 0.1;
+  const minLon = Math.min(...lons) - 0.15;
+  const maxLon = Math.max(...lons) + 0.15;
+  
+  // Konvertiere lat/lon zu SVG-Koordinaten
+  const toSvg = (lat, lon) => {
+    const x = ((lon - minLon) / (maxLon - minLon)) * 280 + 10;
+    const y = ((maxLat - lat) / (maxLat - minLat)) * 160 + 10;
+    return { x, y };
+  };
+  
+  return (
+    <div className="svg-map-container">
+      <svg viewBox="0 0 300 180" className="svg-map">
+        {/* Hintergrund */}
+        <rect x="0" y="0" width="300" height="180" fill="var(--bg-input)" rx="8"/>
+        
+        {/* Einfache Straßen/Verbindungen */}
+        <g stroke="var(--border)" strokeWidth="1" opacity="0.3">
+          {markers.length > 1 && markers.slice(1).map((m, i) => {
+            const prev = toSvg(markers[i].lat, markers[i].lon);
+            const curr = toSvg(m.lat, m.lon);
+            return <line key={i} x1={prev.x} y1={prev.y} x2={curr.x} y2={curr.y} strokeDasharray="4,4"/>;
+          })}
+        </g>
+        
+        {/* Marker */}
+        {markers.map((m, i) => {
+          const pos = toSvg(m.lat, m.lon);
+          const color = TYP_COLORS[m.immobilien[0]?.typ]?.border || '#6366f1';
+          return (
+            <g key={i} className="map-marker-svg">
+              {/* Pin-Schatten */}
+              <ellipse cx={pos.x} cy={pos.y + 12} rx="6" ry="3" fill="rgba(0,0,0,0.2)"/>
+              {/* Pin */}
+              <path 
+                d={`M${pos.x},${pos.y + 10} 
+                    C${pos.x - 8},${pos.y + 2} ${pos.x - 8},${pos.y - 10} ${pos.x},${pos.y - 14}
+                    C${pos.x + 8},${pos.y - 10} ${pos.x + 8},${pos.y + 2} ${pos.x},${pos.y + 10}Z`}
+                fill={color}
+              />
+              {/* Kreis im Pin */}
+              <circle cx={pos.x} cy={pos.y - 6} r="4" fill="white" opacity="0.9"/>
+              {/* Anzahl */}
+              <text x={pos.x} y={pos.y - 3} textAnchor="middle" fontSize="7" fontWeight="bold" fill={color}>
+                {m.immobilien.length}
+              </text>
+              {/* Label */}
+              <text x={pos.x} y={pos.y + 24} textAnchor="middle" fontSize="8" fill="var(--text-muted)">
+                {m.ort.length > 12 ? m.ort.substring(0, 10) + '...' : m.ort}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+};
+
+// Gesamtübersicht / Dashboard
+const Dashboard = ({ immobilien, onSelectImmo, aktiveBeteiligte = [], beteiligte = [], onReorder, filter = 'alle', onFilterChange }) => {
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState('name');
+  const [sortDir, setSortDir] = useState('asc');
+  const [draggedId, setDraggedId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+
+  // Zinsbindungs-Check: Warnung wenn < 12 Monate
+  const getZinsbindungWarning = (immo) => {
+    const darlehen = immo.darlehen || [];
+    const heute = new Date();
+    
+    for (const d of darlehen) {
+      if (d.zinsbindungEnde) {
+        const ende = new Date(d.zinsbindungEnde);
+        const diffMonths = (ende.getFullYear() - heute.getFullYear()) * 12 + (ende.getMonth() - heute.getMonth());
+        if (diffMonths <= 12 && diffMonths >= 0) {
+          return {
+            monate: diffMonths,
+            datum: ende.toLocaleDateString('de-DE', { month: '2-digit', year: 'numeric' })
+          };
+        }
+      }
+    }
+    return null;
+  };
+
+  // Fortschrittsberechnung
+  const calcProgress = (s) => {
+    const fields = [
+      { key: 'name', weight: 1 },
+      { key: 'adresse', weight: 1 },
+      { key: 'kaufpreisImmobilie', weight: 1 },
+      { key: 'wohnflaeche', weight: 1 },
+      { key: 'mieteProQm', weight: 1 },
+      { key: 'kaufdatum', weight: 0.5 },
+      { key: 'baujahr', weight: 0.5 },
+      { key: 'eigenkapitalAnteil', weight: 0.5 },
+      { key: 'zinssatz', weight: 0.5 },
+      { key: 'tilgung', weight: 0.5 },
+      { key: 'grundstueckGroesse', weight: 0.5 },
+      { key: 'bodenrichtwert', weight: 0.5 },
+    ];
+    let filled = 0, total = 0;
+    fields.forEach(f => {
+      total += f.weight;
+      const val = s[f.key];
+      if (val && val !== '' && val !== 0) filled += f.weight;
+    });
+    return Math.round((filled / total) * 100);
+  };
+
+  // Berechnung für jede Immobilie
+  const immoData = immobilien.filter(immo => !immo.parentId).map(immo => {
+    const s = immo.stammdaten;
+    const kp = (s.kaufpreisImmobilie || 0) + (s.mehrkosten || 0) + (s.kaufpreisStellplatz || 0);
+    const nk = (s.maklerProvision || 0) + (s.grunderwerbsteuer || 0) + (s.notarkosten || 0);
+    const ak = kp + nk;
+    // Jahres-Kaltmiete: Kaltmiete + Stellplatz + Sonderausstattung (ohne NK-Vorauszahlung)
+    const jm = ((s.kaltmiete || 0) + (s.mieteStellplatz || 0) + (s.mieteSonderausstattung || 0)) * 12;
+    const rendite = kp > 0 ? jm / kp : 0;
+    const ek = ak * (s.eigenkapitalAnteil / 100);
+    const fkTheo = ak - ek; // theoretischer FK-Bedarf
+    const darlehen = immo.darlehen || [];
+    const _childLoans = immo.isContainer ? immobilien.filter(x => x.parentId === immo.id).flatMap(u => u.darlehen || []) : [];
+    const _allLoans = [...darlehen, ..._childLoans];
+    const fk = _allLoans.length > 0 ? _allLoans.reduce((sum, d) => sum + (d.restschuld || d.betrag || 0), 0) : fkTheo;
+    const ann = fkTheo * ((s.zinssatz + s.tilgung) / 100);
+    const gwg = (s.grundstueckGroesse || 0) * (s.bodenrichtwert || 0);
+    const ga = s.erbbaurecht ? 0 : (s.eigentumsart === 'gesamt' ? gwg : (s.teileigentumsanteil > 0 ? (s.teileigentumsanteil / 10000) * gwg : 0));
+    const afaBasis = ak - ga;
+    const afaGeb = afaBasis * ((s.afaSatz || 3) / 100);
+    const saSumme = s.sonderausstattung?.reduce((a, i) => a + (i.betrag || 0), 0) || 0;
+    const afaSA = saSumme * 0.1;
+    const afaGes = afaGeb + afaSA;
+    const progress = calcProgress(s);
+    
+    // Anteil der aktiven Beteiligten berechnen (Summe aller ausgewählten, max. 100%)
+    let anteil = 100;
+    if (aktiveBeteiligte.length > 0) {
+      const summe = (immo.beteiligungen || [])
+        .filter(b => aktiveBeteiligte.includes(b.beteiligterID))
+        .reduce((sum, b) => sum + (b.anteil || 0), 0);
+      anteil = Math.min(summe, 100); // Deckelung auf 100%
+    }
+    const faktor = anteil / 100;
+    
+    // Zinsbindungs-Warnung prüfen
+    const zinsbindungWarning = getZinsbindungWarning(immo);
+    
+    // Monatliche Darlehensrate berechnen
+    const darlehensRate = _allLoans.reduce((sum, d) => sum + (d.monatsrate > 0 ? d.monatsrate : (d.betrag > 0 && d.zinssatz > 0 ? d.betrag * ((d.zinssatz + (d.tilgung || 0)) / 100) / 12 : 0)), 0);
+    
+    const _kids = immo.isContainer ? immobilien.filter(x => x.parentId === immo.id) : [];
+    const agg = _kids.length > 0 ? cmAgg(immo, _kids) : null;
+    return { 
+      ...immo, 
+      kp: (agg ? agg.kp : kp) * faktor, 
+      nk: (agg ? agg.nk : nk) * faktor, 
+      ak: (agg ? agg.ak : ak) * faktor, 
+      jm: (agg ? agg.jm : jm) * faktor, 
+      mm: ((agg ? agg.jm : jm) / 12) * faktor, 
+      rendite: agg ? agg.rendite : rendite, 
+      ek: ek * faktor, 
+      fk: (agg ? agg.fk : fk) * faktor, 
+      ann: ann * faktor, 
+      afaGes: (agg ? agg.afaGes : afaGes) * faktor, 
+      wohnflaeche: (agg ? agg.wohnflaeche : (s.wohnflaeche || 0)) * faktor, 
+      progress,
+      anteil,
+      zinsbindungWarning,
+      darlehensRate: agg ? agg.rate : darlehensRate
+    };
+  });
+
+  // Filter nach Beteiligten (nur Immobilien wo mindestens einer der ausgewählten dabei ist)
+  const filteredByBeteiligter = aktiveBeteiligte.length > 0
+    ? immoData.filter(i => i.anteil > 0)
+    : immoData;
+
+  // Schnellfilter
+  const filteredByType = filteredByBeteiligter.filter(i => {
+    if (filter === 'alle') return true;
+    if (filter === 'vermietet') return i.stammdaten.nutzung === 'vermietet';
+    if (filter === 'eigengenutzt') return i.stammdaten.nutzung === 'eigengenutzt';
+    if (filter === 'zupruefen') return i.importiert && i.zuPruefen?.length > 0;
+    if (filter === 'zinsbindung') return i.zinsbindungWarning !== null;
+    return true;
+  });
+
+  // Filter nach Suche
+  const filtered = filteredByType.filter(i => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      i.stammdaten.name?.toLowerCase().includes(q) ||
+      i.stammdaten.adresse?.toLowerCase().includes(q) ||
+      i.stammdaten.eigentuemer?.toLowerCase().includes(q) ||
+      i.stammdaten.typ?.toLowerCase().includes(q)
+    );
+  });
+
+  // Sortierung
+  const sorted = [...filtered].sort((a, b) => {
+    let valA, valB;
+    switch (sortBy) {
+      case 'name': valA = a.stammdaten.name?.toLowerCase() || ''; valB = b.stammdaten.name?.toLowerCase() || ''; break;
+      case 'kp': valA = a.kp; valB = b.kp; break;
+      case 'jm': valA = a.jm; valB = b.jm; break;
+      case 'rendite': valA = a.rendite; valB = b.rendite; break;
+      case 'afaGes': valA = a.afaGes; valB = b.afaGes; break;
+      case 'progress': valA = a.progress; valB = b.progress; break;
+      default: valA = a.stammdaten.name?.toLowerCase() || ''; valB = b.stammdaten.name?.toLowerCase() || '';
+    }
+    if (valA < valB) return sortDir === 'asc' ? -1 : 1;
+    if (valA > valB) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const toggleSort = (col) => {
+    const scrollY = window.scrollY;
+    if (sortBy === col) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(col);
+      setSortDir('asc');
+    }
+    requestAnimationFrame(() => {
+      window.scrollTo(0, scrollY);
+    });
+  };
+
+  // Gesamtsummen (basierend auf gefilterter Liste)
+  const totals = filtered.reduce((acc, i) => ({
+    kp: acc.kp + i.kp,
+    ak: acc.ak + i.ak,
+    jm: acc.jm + i.jm,
+    ek: acc.ek + i.ek,
+    fk: acc.fk + i.fk,
+    ann: acc.ann + i.ann,
+    afaGes: acc.afaGes + i.afaGes,
+    qm: acc.qm + i.wohnflaeche,
+  }), { kp: 0, ak: 0, jm: 0, ek: 0, fk: 0, ann: 0, afaGes: 0, qm: 0 });
+
+  const avgRendite = totals.kp > 0 ? totals.jm / totals.kp : 0;
+  const weCount = filtered.reduce((acc, i) => acc + (i.isContainer ? immobilien.filter(x => x.parentId === i.id).length : 1), 0);
+  const gebaeudeCount = filtered.filter(i => i.isContainer).length;
+  const darlehensRateMonat = filtered.reduce((acc, i) => acc + (i.darlehensRate || 0), 0);
+
+  if (immobilien.length === 0) {
+    return (
+      <div className="mod">
+        <div className="empty-dash">
+          <div className="empty-dash-icon"><IconHome color="#6366f1" /></div>
+          <h3>Willkommen bei ImmoHub</h3>
+          <p>Erfasse deine erste Immobilie, um hier eine Gesamtübersicht deines Portfolios zu sehen.</p>
+          <div className="empty-dash-features">
+            <div className="edf-item"><IconChart color="#10b981" /><span>Rendite berechnen</span></div>
+            <div className="edf-item"><IconSteuer color="#3b82f6" /><span>Steuereffekt analysieren</span></div>
+            <div className="edf-item"><IconTrend color="#f59e0b" /><span>Liquidität planen</span></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mod">
+      {/* Header mit Suche */}
+      <div className="dash-header">
+        <h2>Portfolio Übersicht</h2>
+        <div className="dash-search">
+          <span className="search-icon"><IconSearch color="var(--text-dim)" /></span>
+          <input 
+            type="text" 
+            placeholder="Suchen nach Name, Adresse, Eigentümer..." 
+            value={search} 
+            onChange={e => setSearch(e.target.value)}
+          />
+          {search && <button className="search-clear" onClick={() => setSearch('')}>×</button>}
+        </div>
+        <span className="dash-count">{filtered.length} von {immobilien.length}</span>
+      </div>
+      
+      {/* Schnellfilter */}
+      <div className="dash-filters">
+        <button className={`dash-filter-btn ${filter === 'alle' ? 'active' : ''}`} onClick={() => onFilterChange('alle')}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={filter === 'alle' ? '#fff' : '#6366f1'} strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          Alle
+        </button>
+        <button className={`dash-filter-btn ${filter === 'vermietet' ? 'active' : ''}`} onClick={() => onFilterChange('vermietet')}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={filter === 'vermietet' ? '#fff' : '#ec4899'} strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          Vermietet
+        </button>
+        <button className={`dash-filter-btn ${filter === 'eigengenutzt' ? 'active' : ''}`} onClick={() => onFilterChange('eigengenutzt')}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={filter === 'eigengenutzt' ? '#fff' : '#10b981'} strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          Eigengenutzt
+        </button>
+        <button className={`dash-filter-btn ${filter === 'zupruefen' ? 'active' : ''}`} onClick={() => onFilterChange('zupruefen')}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={filter === 'zupruefen' ? '#fff' : '#f59e0b'} strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Zu prüfen
+          {immoData.filter(i => i.importiert && i.zuPruefen?.length > 0).length > 0 && (
+            <span className="filter-badge">{immoData.filter(i => i.importiert && i.zuPruefen?.length > 0).length}</span>
+          )}
+        </button>
+      </div>
+      
+      <div className="dash-totals">
+        {filter !== 'alle' && (
+          <div className="filter-active-hint">
+            Filter aktiv: {filter === 'vermietet' ? 'Vermietet' : filter === 'eigengenutzt' ? 'Eigengenutzt' : filter === 'zupruefen' ? 'Zu prüfen' : filter} ({filtered.length} Immobilien)
+          </div>
+        )}
+        <div className="dash-total-card">
+          <div className="dtc-icon"><IconKaufpreis color="#10b981" /></div>
+          <div className="dtc-info">
+            <span>Gesamtwert</span>
+            <b>{fmt(totals.kp)}</b>
+            <small>Ø {fmt(totals.kp / Math.max(filtered.length, 1))} / Immobilie</small>
+          </div>
+        </div>
+        <div className={`dash-total-card ${filter === 'eigengenutzt' ? 'disabled' : ''}`}>
+          <div className="dtc-icon"><IconMiete color={filter === 'eigengenutzt' ? 'var(--text-dim)' : '#ec4899'} /></div>
+          <div className="dtc-info">
+            <span>Jahres-Kaltmiete</span>
+            <b className={filter === 'eigengenutzt' ? '' : 'pos'}>{filter === 'eigengenutzt' ? '—' : fmt(totals.jm)}</b>
+            <small className="trend-info">{filter === 'eigengenutzt' ? 'Nicht relevant' : `${fmt(totals.jm / 12)} / Monat`}</small>
+          </div>
+        </div>
+        <div className={`dash-total-card ${filter === 'eigengenutzt' ? 'disabled' : ''}`}>
+          <div className="dtc-icon"><IconRendite color={filter === 'eigengenutzt' ? 'var(--text-dim)' : '#3b82f6'} /></div>
+          <div className="dtc-info">
+            <span>Ø Rendite</span>
+            <b className={filter === 'eigengenutzt' ? '' : 'acc'}>{filter === 'eigengenutzt' ? '—' : fmtP(avgRendite)}</b>
+            <small>{filter === 'eigengenutzt' ? 'Nicht relevant' : (avgRendite >= 0.05 ? '↑ Gute Rendite' : avgRendite >= 0.03 ? '→ Solide' : '↓ Unter 3%')}</small>
+          </div>
+        </div>
+        <div className="dash-total-card">
+          <div className="dtc-icon"><IconFinanz color="#6366f1" /></div>
+          <div className="dtc-info">
+            <span>Verbindlichkeiten</span>
+            <b>{fmt(totals.fk)}</b>
+            <small>EK-Quote: {totals.ak > 0 ? Math.round(totals.ek / totals.ak * 100) : 0}%</small>
+          </div>
+        </div>
+        <div className="dash-total-card">
+          <div className="dtc-icon"><IconAfa color="#f59e0b" /></div>
+          <div className="dtc-info">
+            <span>AfA Gesamt</span>
+            <b>{fmt(totals.afaGes)}</b>
+            <small>pro Jahr</small>
+          </div>
+        </div>
+        <div className="dash-total-card">
+          <div className="dtc-icon"><IconObjekt color="#8b5cf6" /></div>
+          <div className="dtc-info">
+            <span>Vermietete Fläche</span>
+            <b>{totals.qm.toLocaleString('de-DE')} qm</b>
+            <small>Ø {fmt(totals.kp / Math.max(totals.qm, 1))}/qm</small>
+          </div>
+        </div>
+        <div className="dash-total-card">
+          <div className="dtc-icon"><IconHome color="#6366f1" /></div>
+          <div className="dtc-info">
+            <span>Wohneinheiten (WE)</span>
+            <b>{weCount}</b>
+            <small>{gebaeudeCount > 0 ? `inkl. ${gebaeudeCount} Gebäude` : 'Einheiten gesamt'}</small>
+          </div>
+        </div>
+        <div className="dash-total-card">
+          <div className="dtc-icon"><IconFinanz color="#ef4444" /></div>
+          <div className="dtc-info">
+            <span>Darlehensrate p.a.</span>
+            <b>{fmt(darlehensRateMonat * 12)}</b>
+            <small>{fmt(darlehensRateMonat)} / Monat</small>
+          </div>
+        </div>
+      </div>
+
+      {/* Neue Dashboard Widgets */}
+      <div className="dash-widgets">
+        {/* Portfolio-Verteilung Kreisdiagramm */}
+        <div className="dash-widget">
+          <h3><span className="widget-icon"><IconChart color="#8b5cf6" /></span>Portfolio-Verteilung</h3>
+          <div className="pie-chart-container">
+            {(() => {
+              const typCounts = {};
+              const typValues = {};
+              filtered.forEach(i => {
+                const typ = i.stammdaten.typ || 'sonstig';
+                typCounts[typ] = (typCounts[typ] || 0) + 1;
+                typValues[typ] = (typValues[typ] || 0) + i.kp;
+              });
+              const types = Object.keys(typCounts);
+              const total = types.reduce((a, t) => a + typValues[t], 0);
+              let cumulativePercent = 0;
+              
+              const typLabels = { etw: 'ETW', mfh: 'MFH', efh: 'EFH', gewerbe: 'Gewerbe', grundstueck: 'Grundstück' };
+              
+              return (
+                <>
+                  <svg viewBox="0 0 100 100" className="pie-chart">
+                    {types.map((typ, idx) => {
+                      const percent = total > 0 ? (typValues[typ] / total) * 100 : 0;
+                      const startAngle = cumulativePercent * 3.6;
+                      cumulativePercent += percent;
+                      const endAngle = cumulativePercent * 3.6;
+                      
+                      const startRad = (startAngle - 90) * Math.PI / 180;
+                      const endRad = (endAngle - 90) * Math.PI / 180;
+                      
+                      const x1 = 50 + 40 * Math.cos(startRad);
+                      const y1 = 50 + 40 * Math.sin(startRad);
+                      const x2 = 50 + 40 * Math.cos(endRad);
+                      const y2 = 50 + 40 * Math.sin(endRad);
+                      
+                      const largeArc = percent > 50 ? 1 : 0;
+                      
+                      if (percent === 0) return null;
+                      if (percent >= 99.9) {
+                        return <circle key={typ} cx="50" cy="50" r="40" fill={TYP_COLORS[typ]?.border || '#6366f1'} />;
+                      }
+                      
+                      return (
+                        <path
+                          key={typ}
+                          d={`M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArc} 1 ${x2} ${y2} Z`}
+                          fill={TYP_COLORS[typ]?.border || '#6366f1'}
+                        />
+                      );
+                    })}
+                    <circle cx="50" cy="50" r="25" fill="var(--bg-card)" />
+                    <text x="50" y="47" textAnchor="middle" className="pie-center-number">{filtered.length}</text>
+                    <text x="50" y="58" textAnchor="middle" className="pie-center-label">Objekte</text>
+                  </svg>
+                  <div className="pie-legend">
+                    {types.map(typ => (
+                      <div key={typ} className="pie-legend-item">
+                        <span className="pie-legend-dot" style={{ background: TYP_COLORS[typ]?.border || '#6366f1' }}></span>
+                        <span className="pie-legend-label">{typLabels[typ] || typ}</span>
+                        <span className="pie-legend-count">{typCounts[typ]}× ({total > 0 ? Math.round(typValues[typ] / total * 100) : 0}%)</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+
+        {/* Cashflow-Übersicht */}
+        <div className="dash-widget">
+          <h3><span className="widget-icon"><IconTrend color="#10b981" /></span>Cashflow-Übersicht</h3>
+          <div className="cashflow-container">
+            {(() => {
+              // Berechne Darlehensraten aus allen Immobilien
+              let gesamtDarlehensrate = 0;
+              filtered.forEach(i => {
+                const darlehen = i.darlehen || [];
+                darlehen.forEach(d => {
+                  if (d.monatsrate > 0) {
+                    gesamtDarlehensrate += d.monatsrate;
+                  } else if (d.betrag > 0 && d.zinssatz > 0) {
+                    gesamtDarlehensrate += d.betrag * ((d.zinssatz + (d.tilgung || 0)) / 100) / 12;
+                  }
+                });
+                // Fallback auf Legacy-Felder
+                if (darlehen.length === 0 && i.fk > 0) {
+                  const s = i.stammdaten;
+                  gesamtDarlehensrate += i.fk * ((s.zinssatz + s.tilgung) / 100) / 12;
+                }
+              });
+              
+              const monatsMiete = totals.jm / 12;
+              const netCashflow = monatsMiete - gesamtDarlehensrate;
+              const isPositive = netCashflow >= 0;
+              
+              return (
+                <>
+                  <div className="cashflow-row income">
+                    <span className="cf-label"><span className="cf-icon">↓</span>Mieteinnahmen</span>
+                    <span className="cf-value pos">+{fmt(monatsMiete)}</span>
+                  </div>
+                  <div className="cashflow-row expense">
+                    <span className="cf-label"><span className="cf-icon">↑</span>Darlehensraten</span>
+                    <span className="cf-value neg">-{fmt(gesamtDarlehensrate)}</span>
+                  </div>
+                  <div className="cashflow-divider"></div>
+                  <div className={`cashflow-row net ${isPositive ? 'positive' : 'negative'}`}>
+                    <span className="cf-label"><strong>Netto-Cashflow</strong></span>
+                    <span className={`cf-value ${isPositive ? 'pos' : 'neg'}`}>
+                      <strong>{isPositive ? '+' : ''}{fmt(netCashflow)}</strong>
+                    </span>
+                  </div>
+                  <div className="cashflow-bar">
+                    <div className="cashflow-bar-track">
+                      {monatsMiete > 0 && (
+                        <>
+                          <div className="cashflow-bar-income" style={{ width: '100%' }}></div>
+                          <div className="cashflow-bar-expense" style={{ width: `${Math.min(gesamtDarlehensrate / monatsMiete * 100, 100)}%` }}></div>
+                        </>
+                      )}
+                    </div>
+                    <div className="cashflow-bar-labels">
+                      <span>0 €</span>
+                      <span>{fmt(monatsMiete)}</span>
+                    </div>
+                  </div>
+                  <p className="cashflow-hint">pro Monat (ohne Nebenkosten & Rücklagen)</p>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+
+        {/* Standorte Karte mit Leaflet */}
+        <div className="dash-widget dash-widget-map">
+          <h3><span className="widget-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></span>Standorte</h3>
+          <div className="locations-container">
+            {(() => {
+              // Sammle alle Adressen mit Koordinaten-Lookup
+              const locations = filtered.map(i => {
+                const adresse = i.stammdaten.adresse || '';
+                // Extrahiere PLZ und Ort
+                const plzMatch = adresse.match(/(\d{5})\s*([^,]+)/);
+                const plz = plzMatch ? plzMatch[1] : '';
+                const ort = plzMatch ? plzMatch[2].trim() : adresse.split(',').pop()?.trim() || '';
+                
+                return {
+                  id: i.id,
+                  name: i.stammdaten.name,
+                  adresse: adresse,
+                  ort: ort,
+                  plz: plz,
+                  typ: i.stammdaten.typ,
+                  kp: i.kp
+                };
+              }).filter(l => l.ort);
+              
+              // Gruppiere nach Ort
+              const byOrt = {};
+              locations.forEach(l => {
+                const key = l.ort.toLowerCase();
+                if (!byOrt[key]) byOrt[key] = { ort: l.ort, plz: l.plz, immobilien: [] };
+                byOrt[key].immobilien.push(l);
+              });
+              
+              const orte = Object.values(byOrt);
+              
+              return (
+                <div className="leaflet-map-container" id="immo-map">
+                  <StandorteMap locations={orte} />
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      </div>
+
+      {/* Immobilien-Kacheln */}
+      <div className="dash-cards">
+        {sorted.map(i => (
+          <div 
+            key={i.id} 
+            className={`dash-immo-card ${draggedId === i.id ? 'dragging' : ''} ${dragOverId === i.id ? 'drag-over' : ''}`}
+            onClick={() => onSelectImmo(i)} 
+            style={{ borderLeftColor: TYP_COLORS[i.stammdaten.typ]?.border }}
+            draggable
+            onDragStart={(e) => {
+              setDraggedId(i.id);
+              e.dataTransfer.effectAllowed = 'move';
+            }}
+            onDragEnd={() => {
+              setDraggedId(null);
+              setDragOverId(null);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (draggedId && draggedId !== i.id) {
+                setDragOverId(i.id);
+              }
+            }}
+            onDragLeave={() => setDragOverId(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (draggedId && draggedId !== i.id && onReorder) {
+                onReorder(draggedId, i.id);
+              }
+              setDraggedId(null);
+              setDragOverId(null);
+            }}
+          >
+            <div className="dic-header">
+              <span className="dic-type-tag" style={{ background: TYP_COLORS[i.stammdaten.typ]?.bg, borderColor: TYP_COLORS[i.stammdaten.typ]?.border, color: TYP_COLORS[i.stammdaten.typ]?.text }}>{getTypLabel(i.stammdaten.typ)}</span>
+              <div className="dic-title">
+                <strong>{i.stammdaten.name}</strong>
+                <small>{i.stammdaten.adresse || 'Keine Adresse'}</small>
+              </div>
+            </div>
+            {i.isContainer && (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginBottom: '8px', padding: '5px 10px', background: 'rgba(99,102,241,0.12)', border: '1px solid #6366f1', borderRadius: '6px', color: '#818cf8', fontSize: '11px', fontWeight: 600 }}>
+                🏢 {immobilien.filter(x => x.parentId === i.id).length} Wohnungen{i.stammdaten.wohnflaeche > 0 ? ' · ' + Number(i.stammdaten.wohnflaeche).toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' m²' : ''}
+              </div>
+            )}
+            {(i.importiert && i.zuPruefen?.length > 0) || i.zinsbindungWarning ? (
+              <div className="dic-badges-row">
+                {i.importiert && i.zuPruefen?.length > 0 && (
+                  <span className="dic-check-badge">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    {i.zuPruefen.length} prüfen
+                  </span>
+                )}
+                {i.zinsbindungWarning && (
+                  <span className="dic-warning-badge" title={`Zinsbindung läuft ${i.zinsbindungWarning.datum} aus`}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                    {i.zinsbindungWarning.datum}
+                  </span>
+                )}
+                <div className="dic-progress-inline">
+                  <div className="dic-progress-bar-inline">
+                    <div className="dic-progress-fill-inline" style={{ width: `${i.progress}%` }}></div>
+                  </div>
+                  <span>{i.progress}%</span>
+                </div>
+              </div>
+            ) : (
+              <div className="dic-progress-row">
+                <div className="dic-progress-inline">
+                  <div className="dic-progress-bar-inline">
+                    <div className="dic-progress-fill-inline" style={{ width: `${i.progress}%` }}></div>
+                  </div>
+                  <span>{i.progress}%</span>
+                </div>
+              </div>
+            )}
+            <div className="dic-stats">
+              <div className="dic-stat">
+                <span>Kaufpreis</span>
+                <b>{fmt(i.kp)}</b>
+              </div>
+              <div className="dic-stat">
+                <span>Miete/Mon.</span>
+                <b className="pos">{fmt(i.mm)}</b>
+              </div>
+              <div className="dic-stat">
+                <span>Rendite</span>
+                <b className="acc">{fmtP(i.rendite)}</b>
+              </div>
+              <div className="dic-stat">
+                <span>AfA/Jahr</span>
+                <b>{fmt(i.afaGes)}</b>
+              </div>
+            </div>
+            <div className="dic-bar">
+              <div className="dic-bar-label"><span>EK</span><span>FK</span></div>
+              <div className="dic-bar-track">
+                <div className="dic-bar-ek" style={{ width: `${i.stammdaten.eigenkapitalAnteil}%` }}></div>
+              </div>
+              <div className="dic-bar-vals"><span>{fmt(i.ek)}</span><span>{fmt(i.fk)}</span></div>
+            </div>
+            <div className="dic-click-hint">Klicken für Details →</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Immobilien-Tabelle mit sortierbaren Spalten */}
+      <div className="dash-widget dash-widget-full">
+        <h3><span className="widget-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span>Immobilien</h3>
+        <div className="dash-table-inner">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th className={`sortable ${sortBy === 'name' ? 'sorted' : ''}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSort('name'); }}>
+                  Immobilie {sortBy === 'name' && (sortDir === 'asc' ? '↑' : '↓')}
+                </th>
+                <th>Typ</th>
+                <th>Fläche</th>
+                <th className={`sortable ${sortBy === 'kp' ? 'sorted' : ''}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSort('kp'); }}>
+                  Kaufpreis {sortBy === 'kp' && (sortDir === 'asc' ? '↑' : '↓')}
+                </th>
+                <th className={`sortable ${sortBy === 'jm' ? 'sorted' : ''}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSort('jm'); }}>
+                  Miete/Jahr {sortBy === 'jm' && (sortDir === 'asc' ? '↑' : '↓')}
+                </th>
+                <th className={`sortable ${sortBy === 'rendite' ? 'sorted' : ''}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSort('rendite'); }}>
+                  Rendite {sortBy === 'rendite' && (sortDir === 'asc' ? '↑' : '↓')}
+                </th>
+                <th className={`sortable ${sortBy === 'afaGes' ? 'sorted' : ''}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSort('afaGes'); }}>
+                  AfA/Jahr {sortBy === 'afaGes' && (sortDir === 'asc' ? '↑' : '↓')}
+                </th>
+                <th className={`sortable ${sortBy === 'progress' ? 'sorted' : ''}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSort('progress'); }}>
+                  Vollst. {sortBy === 'progress' && (sortDir === 'asc' ? '↑' : '↓')}
+                </th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(i => (
+              <tr key={i.id} onClick={() => onSelectImmo(i)} className="dash-row-click">
+                <td className="dash-name">
+                  <strong>{i.stammdaten.name}</strong>
+                  <small>{i.stammdaten.adresse || '–'}</small>
+                </td>
+                <td><span className="dash-tag" style={{ background: TYP_COLORS[i.stammdaten.typ]?.bg, borderColor: TYP_COLORS[i.stammdaten.typ]?.border, color: TYP_COLORS[i.stammdaten.typ]?.text }}>{getTypLabel(i.stammdaten.typ)}</span></td>
+                <td>{i.wohnflaeche} qm</td>
+                <td>{fmt(i.kp)}</td>
+                <td className="pos">{fmt(i.jm)}</td>
+                <td className="acc">{fmtP(i.rendite)}</td>
+                <td>{fmt(i.afaGes)}</td>
+                <td>
+                  <div className="progress-cell">
+                    <div className="progress-bar-mini">
+                      <div className="progress-fill" style={{ width: `${i.progress}%` }}></div>
+                    </div>
+                    <span>{i.progress}%</span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td><strong>Gesamt ({filtered.length})</strong></td>
+              <td></td>
+              <td><strong>{totals.qm} qm</strong></td>
+              <td><strong>{fmt(totals.kp)}</strong></td>
+              <td className="pos"><strong>{fmt(totals.jm)}</strong></td>
+              <td className="acc"><strong>{fmtP(avgRendite)}</strong></td>
+              <td><strong>{fmt(totals.afaGes)}</strong></td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+        </div>
+      </div>
+
+      {/* Portfolio PDF Export */}
+      <div style={{padding:'16px 0',marginTop:'8px'}}>
+        <button className="btn-export-data" onClick={() => exportPortfolio(filtered, totals, avgRendite)} style={{width:'100%'}}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10,9 9,9 8,9"/></svg>
+          Portfolio als PDF exportieren ({filtered.length} Immobilien)
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Onboarding Tour
+const OnboardingTour = ({ onComplete }) => {
+  const [step, setStep] = useState(0);
+  
+  const steps = [
+    {
+      title: "Willkommen bei ImmoHub!",
+      content: "Dein persönliches Tool für die Verwaltung deines Immobilien-Portfolios. In dieser kurzen Tour zeige ich dir die wichtigsten Funktionen.",
+      icon: <IconHome color="#6366f1" />
+    },
+    {
+      title: "Portfolio-Übersicht 📊",
+      content: "Im Dashboard siehst du alle deine Immobilien auf einen Blick: Gesamtwert, Rendite, Cashflow und mehr. Die Widgets zeigen dir Verteilung und Standorte.",
+      icon: <IconDashboard color="#10b981" />
+    },
+    {
+      title: "Immobilie anlegen ➕",
+      content: "Klicke auf 'Alle' und dann '+ Neue Immobilie'. Du kannst Daten manuell eingeben oder direkt aus Dokumenten (Exposé, Kaufvertrag) importieren lassen.",
+      icon: <IconObjekt color="#3b82f6" />
+    },
+    {
+      title: "Dokument-Import 📄",
+      content: "Lade PDFs oder Fotos von Verträgen hoch – die KI extrahiert automatisch alle relevanten Daten wie Kaufpreis, Fläche, Miete und Darlehenskonditionen.",
+      icon: <IconUpload color="#f59e0b" />
+    },
+    {
+      title: "Rendite & Steuer 💰",
+      content: "Für jede Immobilie berechnet ImmoHub automatisch Rendite, AfA und Steuereffekte. Im Steuer-Tab siehst du die Auswirkung auf deine Steuerlast.",
+      icon: <IconRendite color="#ec4899" />
+    },
+    {
+      title: "Beteiligte verwalten 👥",
+      content: "Hast du Immobilien mit Partnern? Unter 'Beteiligte' kannst du Personen anlegen und deren Anteile pro Immobilie hinterlegen.",
+      icon: <IconPerson color="#8b5cf6" />
+    },
+    {
+      title: "Fertig! 🎉",
+      content: "Du bist startklar! Alle Daten werden lokal in deinem Browser gespeichert. Nutze 'Daten verwalten' für Backup/Export.",
+      icon: <IconCheck color="#22c55e" />
+    }
+  ];
+  
+  const currentStep = steps[step];
+  const isLast = step === steps.length - 1;
+  
+  return (
+    <div className="modal-bg" onClick={onComplete}>
+      <div className="onboarding-modal" onClick={e => e.stopPropagation()}>
+        <div className="onboarding-progress">
+          {steps.map((_, i) => (
+            <div key={i} className={`onboarding-dot ${i === step ? 'active' : ''} ${i < step ? 'done' : ''}`}></div>
+          ))}
+        </div>
+        
+        <div className="onboarding-icon">{currentStep.icon}</div>
+        <h2>{currentStep.title}</h2>
+        <p>{currentStep.content}</p>
+        
+        <div className="onboarding-actions">
+          {step > 0 && (
+            <button className="btn-sec" onClick={() => setStep(s => s - 1)}>← Zurück</button>
+          )}
+          {isLast ? (
+            <button className="btn-pri" onClick={onComplete}>Los geht's!</button>
+          ) : (
+            <button className="btn-pri" onClick={() => setStep(s => s + 1)}>Weiter →</button>
+          )}
+        </div>
+        
+        <button className="onboarding-skip" onClick={onComplete}>Überspringen</button>
+      </div>
+    </div>
+  );
+};
+
+// Haupt-App (Core ohne Auth)
+function ImmoHubCore({ initialData, initialBeteiligte, onDataChange, UserMenuComponent, CloudStatusComponent }) {
+  const [saved, setSaved] = useState(initialData || []);
+  const [curr, setCurr] = useState(null);
+  const [tab, setTab] = useState('dash');
+  const [modal, setModal] = useState(false);
+  const [importModal, setImportModal] = useState(false);
+  const [beteiligteModal, setBeteiligteModal] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    return !localStorage.getItem('immoOnboardingDone');
+  });
+  const [beteiligte, setBeteiligte] = useState(initialBeteiligte || []);
+  const [aktiveBeteiligte, setAktiveBeteiligte] = useState([]);
+  const [theme, setTheme] = useState(() => localStorage.getItem('immoTheme') || 'dark');
+  const [history, setHistory] = useState([]);
+  const [redoHistory, setRedoHistory] = useState([]);
+  const [autoSaveTimer, setAutoSaveTimer] = useState(null);
+  const [showAutoSaved, setShowAutoSaved] = useState(false);
+  const [validationErrors, setValidationErrors] = useState({});
+  const [toast, setToast] = useState(null);
+  const [dashFilter, setDashFilter] = useState('alle');
+
+  // Sync data to parent when changed
+  useEffect(() => {
+    if (onDataChange) {
+      onDataChange(saved, beteiligte);
+    }
+  }, [saved, beteiligte]);
+
+  // Update from parent
+  useEffect(() => {
+    if (initialData && JSON.stringify(initialData) !== JSON.stringify(saved)) {
+      setSaved(initialData);
+    }
+  }, [initialData]);
+
+  // Toast automatisch ausblenden
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const showToast = (type, message) => setToast({ type, message });
+
+  const completeOnboarding = () => {
+    localStorage.setItem('immoOnboardingDone', 'true');
+    setShowOnboarding(false);
+  };
+
+  // Theme persistieren
+  useEffect(() => { 
+    localStorage.setItem('immoTheme', theme);
+    document.body.className = theme;
+  }, [theme]);
+
+  // Validierung
+  const validateField = (field, value, stammdaten) => {
+    const errors = {};
+    
+    // Pflichtfelder
+    if (field === 'name' && (!value || value.trim() === '')) {
+      errors.name = 'Name ist erforderlich';
+    }
+    
+    // Numerische Felder - keine negativen Werte
+    const numericFields = ['kaufpreisImmobilie', 'kaufpreisStellplatz', 'wohnflaeche', 'mieteProQm', 
+      'grundstueckGroesse', 'bodenrichtwert', 'eigenkapitalAnteil', 'zinssatz', 'tilgung', 
+      'steuersatz', 'notarkosten', 'grunderwerbsteuer', 'maklerProvision'];
+    
+    if (numericFields.includes(field) && value < 0) {
+      errors[field] = 'Keine negativen Werte erlaubt';
+    }
+    
+    // Prozentfelder 0-100
+    const percentFields = ['eigenkapitalAnteil', 'steuersatz'];
+    if (percentFields.includes(field) && (value < 0 || value > 100)) {
+      errors[field] = 'Wert muss zwischen 0 und 100 liegen';
+    }
+    
+    // AfA-Satz
+    if (field === 'afaSatz' && (value < 0 || value > 10)) {
+      errors[field] = 'AfA-Satz muss zwischen 0 und 10 liegen';
+    }
+    
+    // Zinssatz und Tilgung
+    if ((field === 'zinssatz' || field === 'tilgung') && (value < 0 || value > 20)) {
+      errors[field] = 'Wert muss zwischen 0 und 20 liegen';
+    }
+    
+    return errors;
+  };
+
+  const validate = (stammdaten) => {
+    let allErrors = {};
+    Object.entries(stammdaten).forEach(([key, value]) => {
+      const fieldErrors = validateField(key, value, stammdaten);
+      allErrors = { ...allErrors, ...fieldErrors };
+    });
+    return allErrors;
+  };
+
+  const isSaved = curr?.saved === true;
+  const _cBase = useCalc(curr?.stammdaten);
+  const c = useMemo(() => {
+    if (!curr?.isContainer) return _cBase;
+    const kids = (saved || []).filter(x => x.parentId === curr.id);
+    const agg = cmAgg(curr, kids);
+    return { ..._cBase, kp: agg.kp, nk: agg.nk, ak: agg.ak, jm: agg.jm, mm: agg.mm, rendite: agg.rendite, kaufpreisfaktor: agg.kaufpreisfaktor, afaGeb: agg.afaGeb, afaSA: agg.afaSA, afaGes: agg.afaGes, fk: agg.fk, gwg: 0, ga: 0, saSumme: agg.saSumme };
+  }, [_cBase, curr, saved]);
+
+  const onNew = () => { 
+    setCurr(createEmpty()); 
+    setTab('stamm'); 
+    setModal(false); 
+    setHistory([]);
+    setRedoHistory([]);
+    setValidationErrors({});
+  };
+  
+  const onSelect = i => { 
+    setCurr({ ...i }); 
+    setTab('stamm'); 
+    setModal(false); 
+    setHistory([]);
+    setRedoHistory([]);
+    setValidationErrors({});
+  };
+  
+  const onAddEinheit = (parentId) => {
+    const parent = saved.find(x => x.id === parentId);
+    const ea = parent?.stammdaten?.eigentumsart || 'weg';
+    setCurr({ ...createEmpty(), parentId, isContainer: false, stammdaten: { ...createEmpty().stammdaten, eigentumsart: ea } });
+    setTab('stamm');
+    setModal(false);
+    setHistory([]);
+    setRedoHistory([]);
+    setValidationErrors({});
+  };
+
+  const onAssignEinheit = (unitId, parentId) => {
+    const updated = saved.map(x => x.id === unitId ? { ...x, parentId, isContainer: false } : x);
+    setSaved(updated); save(updated);
+  };
+
+  const onDetachEinheit = (unitId) => {
+    const updated = saved.map(x => x.id === unitId ? { ...x, parentId: null } : x);
+    setSaved(updated); save(updated);
+  };
+
+  const onUpdateUnit = (unitId, partial) => {
+    const updated = saved.map(x => x.id === unitId ? { ...x, stammdaten: { ...x.stammdaten, ...partial } } : x);
+    setSaved(updated); save(updated);
+  };
+
+  const onSplitToUnit = (containerId) => {
+    const c = saved.find(x => x.id === containerId);
+    if (!c) return;
+    const unitId = Date.now() + '_split_' + Math.random().toString(36).substr(2, 6);
+    const newUnit = { ...c, id: unitId, isContainer: false, parentId: containerId, saved: true };
+    const baseStamm = createEmpty().stammdaten;
+    const containerReset = {
+      ...c,
+      stammdaten: {
+        ...baseStamm,
+        name: c.stammdaten.name,
+        adresse: c.stammdaten.adresse,
+        projekt: c.stammdaten.projekt,
+        eigentuemer: c.stammdaten.eigentuemer,
+        eigentumsart: c.stammdaten.eigentumsart,
+        bundesland: c.stammdaten.bundesland,
+        typ: c.stammdaten.typ,
+      },
+      darlehen: [],
+      beteiligungen: [],
+    };
+    const updated = saved.map(x => x.id === containerId ? containerReset : x).concat(newUnit);
+    setSaved(updated); save(updated);
+    setCurr(containerReset);
+  };
+
+  const onConvertToContainer = () => {
+    if (!curr) return;
+    const sd = curr.stammdaten || {};
+    const hasOwnValues = (sd.kaufpreisImmobilie || 0) > 0 || (sd.kaltmiete || 0) > 0 || (sd.wohnflaeche || 0) > 0 || (curr.darlehen || []).length > 0;
+    if (!hasOwnValues) {
+      onUpd({ ...curr, isContainer: true });
+      return;
+    }
+    const containerId = curr.id;
+    const unitId = Date.now() + '_split_' + Math.random().toString(36).substr(2, 6);
+    const newUnit = { ...curr, id: unitId, isContainer: false, parentId: containerId, saved: true };
+    const baseStamm = createEmpty().stammdaten;
+    const containerShell = {
+      ...curr,
+      isContainer: true,
+      saved: true,
+      stammdaten: { ...baseStamm, name: sd.name, adresse: sd.adresse, projekt: sd.projekt, eigentuemer: sd.eigentuemer, eigentumsart: sd.eigentumsart, bundesland: sd.bundesland, typ: sd.typ },
+      darlehen: [],
+      beteiligungen: [],
+    };
+    const exists = saved.find(x => x.id === containerId);
+    let updated = exists ? saved.map(x => x.id === containerId ? containerShell : x) : [...saved, containerShell];
+    updated = [...updated, newUnit];
+    setSaved(updated); save(updated);
+    setCurr(containerShell);
+    showToast('success', 'Bestehende Wohnung wurde automatisch als Einheit angelegt.');
+  };
+
+  const onSave = () => {
+    if (!curr?.stammdaten?.name) return;
+    const errors = validate(curr.stammdaten);
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      showToast('error', 'Bitte Fehler korrigieren');
+      return;
+    }
+    const toSave = { ...curr, saved: true };
+    const exists = saved.find(x => x.id === curr.id);
+    setSaved(exists ? saved.map(x => x.id === toSave.id ? toSave : x) : [...saved, toSave]);
+    setCurr(toSave);
+    setValidationErrors({});
+    // Toast entfernt - Cloud-Status zeigt bereits "Gespeichert" an
+  };
+  
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  
+  const onDel = id => {
+    setDeleteConfirm(id);
+  };
+  
+  const confirmDelete = () => {
+    if (deleteConfirm) {
+      const target = saved.find(x => x.id === deleteConfirm);
+      const toRemove = new Set([deleteConfirm]);
+      if (target?.isContainer) saved.filter(x => x.parentId === deleteConfirm).forEach(ch => toRemove.add(ch.id));
+      setSaved(saved.filter(x => !toRemove.has(x.id)));
+      if (curr && toRemove.has(curr.id)) setCurr(null);
+      setDeleteConfirm(null);
+      setModal(false);
+    }
+  };
+  
+  // Update mit History für Undo
+  const onUpd = p => {
+    // History speichern (max 20 Schritte)
+    setHistory(prev => [...prev.slice(-19), curr]);
+    // Redo-History leeren bei neuer Änderung
+    setRedoHistory([]);
+    
+    setCurr(p);
+    
+    // Validierung bei Änderung
+    const errors = validate(p.stammdaten);
+    setValidationErrors(errors);
+    
+    // Auto-Save für gespeicherte Immobilien (mit Debounce)
+    if (p.saved) {
+      if (autoSaveTimer) clearTimeout(autoSaveTimer);
+      const timer = setTimeout(() => {
+        const validationErrors = validate(p.stammdaten);
+        if (Object.keys(validationErrors).length === 0) {
+          setSaved(saved.map(x => x.id === p.id ? p : x));
+          setShowAutoSaved(true);
+          setTimeout(() => setShowAutoSaved(false), 2000);
+        }
+      }, 1500);
+      setAutoSaveTimer(timer);
+    }
+  };
+  
+  // Smart Loan Import: Darlehen mehreren Immobilien zuordnen
+  const handleSmartImport = (finalLoans) => {
+    // Gruppiere nach propertyId
+    const byProperty = {};
+    const unassigned = [];
+    for (const loan of finalLoans) {
+      const pid = loan.match?.propertyId;
+      if (pid && loan.match.status !== 'unassigned') {
+        if (!byProperty[pid]) byProperty[pid] = [];
+        byProperty[pid].push(loan._importData);
+      } else {
+        unassigned.push(loan._importData);
+      }
+    }
+    // Immobilien updaten
+    let newSaved = [...saved];
+    for (const [pid, darlehen] of Object.entries(byProperty)) {
+      newSaved = newSaved.map(immo => {
+        if (String(immo.id) === String(pid)) {
+          return { ...immo, darlehen: [...(immo.darlehen || []), ...darlehen] };
+        }
+        return immo;
+      });
+    }
+    // Unzugeordnete: zur aktuellen Immobilie hinzufügen
+    if (unassigned.length > 0 && curr) {
+      newSaved = newSaved.map(immo => {
+        if (immo.id === curr.id) {
+          return { ...immo, darlehen: [...(immo.darlehen || []), ...unassigned] };
+        }
+        return immo;
+      });
+    }
+    setSaved(newSaved);
+    // curr aktualisieren falls betroffen
+    const updatedCurr = newSaved.find(i => i.id === curr?.id);
+    if (updatedCurr) setCurr(updatedCurr);
+  };
+
+  // Undo Funktion
+  const onUndo = () => {
+    if (history.length > 0) {
+      const prev = history[history.length - 1];
+      setHistory(history.slice(0, -1));
+      // Aktuellen State in Redo-History speichern
+      setRedoHistory(prevRedo => [...prevRedo, curr]);
+      setCurr(prev);
+    }
+  };
+  
+  // Redo Funktion
+  const onRedo = () => {
+    if (redoHistory.length > 0) {
+      const next = redoHistory[redoHistory.length - 1];
+      setRedoHistory(redoHistory.slice(0, -1));
+      // Aktuellen State in Undo-History speichern
+      setHistory(prev => [...prev, curr]);
+      setCurr(next);
+    }
+  };
+  
+  const onImport = (newImmoOrArray) => {
+    // Wenn Array von Immobilien (Multi-Import)
+    if (Array.isArray(newImmoOrArray)) {
+      const newImmobilien = newImmoOrArray.map(immo => ({
+        ...immo,
+        id: immo.id || Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        saved: false
+      }));
+      
+      // Alle direkt zu saved hinzufügen (mit importiert-Flag)
+      const updatedSaved = [...saved, ...newImmobilien.map(immo => ({
+        ...immo,
+        saved: true
+      }))];
+      setSaved(updatedSaved);
+      save(updatedSaved);
+      
+      // Erste importierte Immobilie zur Bearbeitung öffnen
+      if (newImmobilien.length > 0) {
+        setCurr(newImmobilien[0]);
+        setTab('stamm');
+      }
+      setImportModal(false);
+      setHistory([]);
+      setRedoHistory([]);
+    } else {
+      // Einzelne Immobilie (wie bisher)
+      setCurr(newImmoOrArray);
+      setTab('stamm');
+      setImportModal(false);
+      setHistory([]);
+      setRedoHistory([]);
+    }
+  };
+
+  // Theme Toggle
+  const toggleTheme = () => {
+    setTheme(t => t === 'dark' ? 'light' : 'dark');
+  };
+
+  const themeVars = theme === 'dark' ? {
+    '--bg-app': '#09090b',
+    '--bg-card': '#18181b',
+    '--bg-input': '#27272a',
+    '--border': '#27272a',
+    '--border-hover': '#3f3f46',
+    '--text': '#fafafa',
+    '--text-muted': '#a1a1aa',
+    '--text-dim': '#71717a',
+  } : {
+    '--bg-app': '#f4f4f5',
+    '--bg-card': '#ffffff',
+    '--bg-input': '#f4f4f5',
+    '--border': '#e4e4e7',
+    '--border-hover': '#d4d4d8',
+    '--text': '#18181b',
+    '--text-muted': '#52525b',
+    '--text-dim': '#71717a',
+  };
+
+  return (
+    <div className={`app ${theme}`} style={themeVars}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+        *{margin:0;padding:0;box-sizing:border-box}
+        
+        /* Theme Variables */
+        .app{font-family:'Inter',sans-serif;min-height:100vh;transition:background 0.3s,color 0.3s}
+        .app.dark{background:var(--bg-app,#09090b);color:var(--text,#fafafa)}
+        .app.light{background:var(--bg-app,#f4f4f5);color:var(--text,#18181b)}
+        
+        .hdr{background:var(--bg-card);border-bottom:1px solid var(--border);padding:10px 20px;position:sticky;top:0;z-index:100}
+        .hdr-in{max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:16px}
+        .logo{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700}
+        .logo-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center}
+        .logo-text{display:flex}
+        .logo-immo{color:var(--text)}
+        .logo-hub{color:#6366f1}
+        .hdr-acts{margin-left:auto;display:flex;gap:8px;align-items:center}
+        .hdr-btn{padding:7px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px}
+        .hdr-btn:hover{background:var(--border-hover);color:var(--text)}
+        .hdr-btn.pri{background:#3b82f6;border-color:#3b82f6;color:#fff}
+        .hdr-btn.pri:hover{background:#2563eb}
+        .hdr-btn:disabled{opacity:.5;cursor:not-allowed}
+        
+        .theme-toggle{width:36px;height:36px;border-radius:50%;background:var(--bg-input);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all 0.2s}
+        .theme-toggle:hover{background:var(--border-hover);border-color:#6366f1}
+        .theme-toggle-icon{width:18px;height:18px}
+        
+        .auto-save-indicator{position:fixed;bottom:20px;right:20px;padding:10px 16px;background:#10b981;color:#fff;border-radius:8px;font-size:12px;font-weight:500;display:flex;align-items:center;gap:8px;animation:slideIn 0.3s ease;z-index:1000;box-shadow:0 4px 12px rgba(0,0,0,0.3)}
+        .auto-save-indicator .icon{width:16px;height:16px}
+        @keyframes slideIn{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+        
+        .undo-redo-group{display:flex;gap:2px}
+        .undo-btn{padding:7px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:4px}
+        .undo-redo-group .undo-btn:first-child{border-radius:6px 0 0 6px}
+        .undo-redo-group .undo-btn:last-child{border-radius:0 6px 6px 0;border-left:none}
+        .undo-btn:hover:not(:disabled){background:var(--border-hover);color:var(--text)}
+        .undo-btn:disabled{opacity:0.3;cursor:not-allowed}
+        .undo-icon{width:14px;height:14px}
+        
+        .validation-error{color:#ef4444;font-size:10px;margin-top:4px}
+        .input-error{border-color:#ef4444 !important;background:rgba(239,68,68,0.1) !important}
+        
+        .nav{background:var(--bg-card);border-bottom:1px solid var(--border);padding:0 20px;position:sticky;top:56px;z-index:90}
+        .nav-in{max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:8px}
+        .nav-tab-btn{display:flex;align-items:center;gap:6px;padding:12px 14px;background:none;border:none;color:var(--text-dim);font-size:12px;font-weight:500;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.15s}
+        .nav-tab-btn:hover{color:var(--text-muted)}
+        .nav-tab-btn.act{color:var(--text);border-color:#6366f1;background:rgba(99,102,241,0.1)}
+        .nav-divider{width:1px;height:24px;background:var(--border)}
+        .nav-immo-select{display:flex;align-items:center;gap:6px;padding:8px 0}
+        .sel-btn{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;cursor:pointer;min-width:160px;max-width:220px}
+        .sel-btn:hover{background:var(--border-hover)}
+        .sel-btn.draft{border-color:#f59e0b;background:rgba(245,158,11,0.1)}
+        .sel-icon{width:18px;height:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+        .sel-text{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .sel-arrow{color:var(--text-dim);font-size:10px;flex-shrink:0}
+        .draft-tag{font-size:8px;padding:2px 5px;background:#f59e0b;color:#000;border-radius:3px;font-weight:600;flex-shrink:0}
+        .nav-new-btn{width:32px;height:32px;border-radius:6px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-muted);font-size:16px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center}
+        .nav-new-btn:hover{background:var(--border-hover);color:var(--text)}
+        .nav-tabs{display:flex;gap:2px;margin-left:4px}
+        .nav-tabs button{display:flex;align-items:center;gap:6px;padding:12px 12px;background:none;border:none;color:var(--text-dim);font-size:12px;font-weight:500;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.15s}
+        .nav-tabs button:hover{color:var(--text-muted)}
+        .nav-tabs button.act{color:var(--text);border-color:#6366f1;background:rgba(99,102,241,0.1)}
+        .nav-tabs button:disabled{opacity:.4;cursor:not-allowed}
+        .nav-icon{width:18px;height:18px;display:flex;align-items:center;justify-content:center}
+        .main{max-width:1200px;margin:0 auto;padding:20px}
+        .mod{animation:fi .2s}
+        @keyframes fi{from{opacity:0}to{opacity:1}}
+        
+        .draft-bar{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;margin-bottom:14px;font-size:13px}
+        .draft-bar span{margin-right:8px}
+        .draft-bar strong{color:#f59e0b}
+        .draft-bar-actions{display:flex;align-items:center;gap:12px}
+        .draft-bar button{padding:6px 14px;background:#f59e0b;border:none;border-radius:5px;color:#000;font-weight:600;font-size:12px;cursor:pointer}
+        .draft-bar button:disabled{opacity:.5;cursor:not-allowed}
+        .draft-close{width:28px;height:28px;padding:0!important;background:transparent!important;border:1px solid rgba(245,158,11,0.5)!important;border-radius:4px!important;color:#f59e0b!important;font-size:18px!important;font-weight:400!important;display:flex;align-items:center;justify-content:center}
+        .draft-close:hover{background:rgba(245,158,11,0.2)!important;border-color:#f59e0b!important}
+        
+        .kpi-bar{display:flex;gap:12px;padding:14px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;margin-bottom:14px;overflow-x:auto}
+        .kpi{display:flex;flex-direction:column;gap:2px;white-space:nowrap}
+        .kpi span{font-size:10px;color:var(--text-dim)}
+        .kpi b{font-family:'JetBrains Mono',monospace;font-size:13px}
+        .kpi b.pos{color:#22c55e}
+        .kpi b.acc{color:#3b82f6}
+        
+        .accs{display:flex;flex-direction:column;gap:6px}
+        
+        /* Sekundäre Akkordeon-Sektion */
+        .accs-secondary{margin-top:16px;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+        .accs-secondary-header{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--bg-input);cursor:pointer;transition:all 0.15s;user-select:none}
+        .accs-secondary-header:hover{background:var(--border-hover)}
+        .accs-secondary-header.expanded{border-bottom:1px solid var(--border)}
+        .accs-secondary-icon{width:20px;height:20px;opacity:0.6;display:inline-flex;align-items:center}
+        .accs-secondary-icon svg{width:20px;height:20px}
+        .accs-secondary-title{flex:1;font-size:13px;font-weight:500;color:var(--text-muted)}
+        .accs-secondary-toggle{width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:14px}
+        .accs-secondary-content{padding:10px;display:flex;flex-direction:column;gap:6px}
+        .acc{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+        .acc.open{border-color:var(--c)}
+        .acc-h{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer}
+        .acc-h:hover{background:var(--bg-input)}
+        .acc-i{width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.06);overflow:hidden}
+        .acc-i svg{width:20px;height:20px}
+        .app.light .acc-i{background:rgba(0,0,0,0.03);border-color:rgba(0,0,0,0.06)}
+        .acc.open .acc-i{background:rgba(255,255,255,0.05);border-color:var(--c)}
+        .app.light .acc.open .acc-i{background:rgba(99,102,241,0.1)}
+        .acc-info{flex:1;min-width:0}
+        .acc-t{font-size:13px;font-weight:600}
+        .acc-s{font-size:11px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'JetBrains Mono',monospace}
+        .acc-tog{width:20px;color:var(--text-dim);font-size:16px}
+        .acc-import-btn{display:flex;align-items:center;gap:6px;padding:4px 10px;background:transparent;border:1px solid var(--c);border-radius:4px;color:var(--c);font-size:11px;cursor:pointer;margin-right:12px;white-space:nowrap}
+        .acc-import-btn:hover{background:rgba(99,102,241,0.1)}
+        .acc-import-btn svg{flex-shrink:0}
+        .acc.disabled{opacity:0.5}
+        .acc.disabled .acc-h{cursor:not-allowed}
+        .acc.disabled .acc-h:hover{background:transparent}
+        .acc-body{padding:0 14px 14px;border-top:1px solid var(--border);animation:sd .2s}
+        .acc-body>svg,.acc-body .nk-section>svg{max-width:48px;max-height:48px}
+        @keyframes sd{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+        
+        .irow{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);gap:12px}
+        .irow:last-child{border-bottom:none}
+        .irow label{font-size:12px;color:var(--text-muted);flex-shrink:0;min-width:100px}
+        .ifld-wrap{display:flex;flex-direction:column;gap:2px;flex:1}
+        .ifld{display:flex;align-items:center;gap:5px;flex:1}
+        .ifld.input-error input,.ifld.input-error select{border-color:#ef4444;background:rgba(239,68,68,0.1)}
+        .validation-error{color:#ef4444;font-size:10px}
+        .validation-banner{display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;margin-bottom:14px;font-size:13px;color:#ef4444}
+        .validation-banner-icon{width:20px;height:20px;display:flex;align-items:center}
+        .validation-banner-icon svg{width:20px;height:20px}
+        .ifld input,.ifld select{width:110px;padding:7px 9px;background:var(--bg-input);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;text-align:right}
+        .ifld input[type="text"]{flex:1;min-width:200px;width:100%;text-align:left;font-family:'Inter',sans-serif}
+        
+        /* DateInput Component */
+        .date-input-wrapper{display:flex;align-items:center;flex:1;position:relative}
+        .date-input-text{flex:1;min-width:100px;padding:8px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px 0 0 6px;color:var(--text);font-size:13px;font-family:'JetBrains Mono',monospace}
+        .date-input-text:focus{outline:none;border-color:#6366f1}
+        .date-calendar-btn{padding:8px 10px;background:var(--bg-input);border:1px solid var(--border);border-left:none;border-radius:0 6px 6px 0;color:var(--text-dim);cursor:pointer;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+        .date-calendar-btn:hover{background:rgba(99,102,241,0.1);color:#6366f1}
+        .date-calendar-btn svg{position:relative;z-index:1;pointer-events:none}
+        .date-input-native{position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer}
+        .ifld .date-input-wrapper{width:100%}
+        .ifld .date-input-text{border-radius:6px 0 0 6px}
+        
+        /* Erinnerung Datum mit DateInput */
+        .erinnerung-datum{flex-shrink:0}
+        .erinnerung-datum .date-input-wrapper{width:auto}
+        .erinnerung-datum .date-input-text{width:100px;min-width:100px;font-size:12px;padding:6px 8px}
+        .erinnerung-datum .date-calendar-btn{padding:6px 8px}
+        
+        /* Mieter/Miethistorie Datum mit DateInput */
+        .mhist-date-field .date-input-wrapper{width:100%}
+        .mhist-date-field .date-input-text{font-size:12px;padding:6px 8px}
+        .mhist-date-field .date-calendar-btn{padding:6px 8px}
+        .mieter-form-row .date-input-wrapper{width:100%}
+        .mieter-form-row .date-input-text{padding:8px 10px;font-size:12px}
+        
+        /* Darlehen Datum mit DateInput */
+        .darlehen-field .date-input-wrapper{width:100%}
+        .darlehen-field .date-input-text{font-size:12px;padding:6px 8px}
+        .ifld input:focus,.ifld select:focus{outline:none;border-color:#3b82f6}
+        .ifld .suf{font-size:11px;color:var(--text-dim);min-width:20px;flex-shrink:0}
+        
+        .res{display:flex;justify-content:space-between;padding:6px 0;font-size:12px;color:var(--text-muted)}
+        .res span:last-child{font-family:'JetBrains Mono',monospace}
+        .res.hl{color:var(--text);font-weight:500;padding-top:10px;margin-top:4px;border-top:1px solid var(--border-hover)}
+        hr{border:none;height:1px;background:var(--border);margin:10px 0}
+        .hint{font-size:11px;color:var(--text-dim);margin:10px 0}
+        .hint-small{font-size:10px;color:var(--text-dim);margin:-6px 0 10px 0;font-style:italic}
+        .foerderung-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+        .field-row-2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+        .field-with-btn{display:flex;gap:6px;align-items:flex-end}
+        .field-with-btn .field{flex:1}
+        .auto-gen-btn{display:flex;align-items:center;justify-content:center;padding:6px 8px;background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--text-dim);font-size:10px;cursor:pointer;white-space:nowrap;margin-bottom:10px;height:34px;opacity:0.6;transition:all 0.15s}
+        .auto-gen-btn:hover{opacity:1;color:#6366f1;border-color:#6366f1}
+        .btn-reset-section{display:flex;align-items:center;gap:6px;padding:6px 10px;background:transparent;border:none;color:var(--text-dim);font-size:10px;cursor:pointer;opacity:0.5;transition:all 0.15s;margin-top:4px}
+        .btn-reset-section:hover{opacity:1;color:#ef4444}
+        .reset-confirm-modal{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:360px;text-align:center}
+        .reset-confirm-icon{width:48px;height:48px;margin:0 auto 16px;background:rgba(239,68,68,0.1);border-radius:50%;display:flex;align-items:center;justify-content:center}
+        .reset-confirm-modal h3{font-size:16px;color:var(--text);margin:0 0 8px}
+        .reset-confirm-modal p{font-size:13px;color:var(--text-muted);margin:0 0 20px;line-height:1.5}
+        .reset-confirm-buttons{display:flex;gap:10px;justify-content:center}
+        .reset-confirm-buttons .btn-cancel{padding:8px 16px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;cursor:pointer}
+        .reset-confirm-buttons .btn-cancel:hover{background:var(--border-hover)}
+        .reset-confirm-buttons .btn-reset{padding:8px 16px;background:#ef4444;border:none;border-radius:6px;color:#fff;font-size:13px;cursor:pointer}
+        .reset-confirm-buttons .btn-reset:hover{background:#dc2626}
+        
+        .sa-row,.wk-row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+        .sa-row input,.wk-row input{padding:7px 9px;background:var(--bg-input);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:11px}
+        .sa-row input:first-child,.wk-row input:first-child{flex:2}
+        .sa-row input:nth-child(2),.wk-row input:nth-child(2){flex:1;font-family:'JetBrains Mono',monospace;text-align:right}
+        .sa-row button,.wk-row button{width:26px;height:26px;border:none;background:#7f1d1d;color:#fca5a5;border-radius:5px;cursor:pointer;font-size:14px}
+        .btn-add{width:100%;padding:9px;background:transparent;border:1px dashed var(--border);border-radius:5px;color:var(--text-dim);font-size:11px;cursor:pointer;margin-top:6px}
+        .btn-add:hover{border-color:#3b82f6;color:#3b82f6}
+        
+        .btn-import-inline{width:100%;padding:12px;background:rgba(99,102,241,0.1);border:1px dashed #6366f1;border-radius:8px;color:#6366f1;font-size:13px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all 0.15s;margin-top:8px}
+        .btn-import-inline:hover{background:rgba(99,102,241,0.2);border-style:solid}
+        
+        .field-group-label{font-size:11px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:0.5px;margin:4px 0 8px}
+        .miet-datum-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px}
+        .miet-datum-field{display:flex;flex-direction:column;gap:6px}
+        .miet-datum-field label{font-size:12px;color:var(--text-dim)}
+        .miet-datum-field .date-input-wrapper{width:100%}
+        .miet-datum-field .date-input-text{width:100%;min-width:0}
+        .gesamtmiete-row{background:rgba(236,72,153,0.08);border:1px dashed rgba(236,72,153,0.3);margin-top:8px}
+        .gesamtmiete-row span:last-child{color:#ec4899;font-weight:600}
+        .mietstatus-checkboxes{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:10px 0}
+        .mietstatus-option{display:flex;align-items:center;gap:8px;cursor:pointer}
+        .mietstatus-option input[type="radio"],.mietstatus-option input[type="checkbox"]{width:16px;height:16px;accent-color:#ec4899;cursor:pointer}
+        .mietstatus-option input[type="checkbox"]{border-radius:50%;-webkit-appearance:none;appearance:none;border:2px solid var(--border);background:transparent}
+        .mietstatus-option input[type="checkbox"]:checked{background:#ec4899;border-color:#ec4899}
+        .mietstatus-label{font-size:13px;color:var(--text)}
+        .btn-archive-mieter{display:flex;align-items:center;gap:6px;padding:6px 12px;background:transparent;border:1px solid #ec4899;border-radius:6px;color:#ec4899;font-size:11px;cursor:pointer;margin-left:auto}
+        .btn-archive-mieter:hover:not(:disabled){background:rgba(236,72,153,0.1)}
+        .btn-archive-mieter:disabled{opacity:0.4;cursor:not-allowed}
+        .btn-archive-mieter svg{width:14px;height:14px}
+        .archive-confirm{margin:12px 0;padding:16px;background:rgba(236,72,153,0.08);border:1px solid rgba(236,72,153,0.3);border-radius:8px}
+        .archive-confirm-content p{margin:0 0 8px;font-size:13px;color:var(--text)}
+        .archive-confirm-content p:first-child{margin-bottom:12px}
+        .archive-preview-list{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+        .archive-preview{font-family:'JetBrains Mono',monospace;font-size:12px;color:#ec4899;background:var(--bg-card);padding:4px 8px;border-radius:4px;display:inline-block}
+        .archive-confirm-buttons{display:flex;gap:10px;margin-top:16px}
+        .archive-confirm-buttons .btn-confirm{padding:8px 16px;background:#ec4899;border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:500;cursor:pointer}
+        .archive-confirm-buttons .btn-confirm:hover{background:#db2777}
+        .archive-confirm-buttons .btn-confirm.btn-warning{background:#f59e0b}
+        .archive-confirm-buttons .btn-confirm.btn-warning:hover{background:#d97706}
+        .archive-confirm-buttons .btn-cancel{padding:8px 16px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;cursor:pointer}
+        .archive-confirm-buttons .btn-cancel:hover{background:var(--bg-input)}
+        .archive-overlap-warning{display:flex;gap:12px;padding:12px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);border-radius:6px;margin:12px 0}
+        .archive-overlap-warning .warning-icon{font-size:20px}
+        .archive-overlap-warning strong{color:#f59e0b;display:block;margin-bottom:4px}
+        .archive-overlap-warning p{margin:0;font-size:12px;color:var(--text)}
+        .archive-overlap-warning .overlap-details{font-family:'JetBrains Mono',monospace;color:#f59e0b;margin-top:6px}
+        
+        .save-bottom{margin-top:20px;padding:18px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;text-align:center}
+        .save-bottom-main button{padding:12px 28px;background:#22c55e;border:none;border-radius:6px;color:#fff;font-weight:600;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+        .save-bottom-main button:disabled{background:var(--border-hover);color:var(--text-dim);cursor:not-allowed}
+        .save-bottom-main p{margin-top:8px;font-size:11px;color:var(--text-dim)}
+        .save-bottom-divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:var(--text-dim);font-size:12px}
+        .save-bottom-divider::before,.save-bottom-divider::after{content:'';flex:1;height:1px;background:var(--border)}
+        .btn-import-bottom{padding:10px 20px;background:transparent;border:1px solid #6366f1;border-radius:6px;color:#6366f1;font-weight:500;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+        .btn-import-bottom:hover{background:rgba(99,102,241,0.1)}
+        .import-hint{margin-top:8px;font-size:11px;color:var(--text-dim)}
+        
+        /* Toast Notifications */
+        .toast{position:fixed;top:20px;right:20px;display:flex;align-items:center;gap:10px;padding:14px 20px;border-radius:10px;font-size:13px;font-weight:500;box-shadow:0 4px 20px rgba(0,0,0,0.3);z-index:2000;animation:toastIn 0.3s ease}
+        @keyframes toastIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+        .toast-success{background:#22c55e;color:#fff}
+        .toast-warning{background:#f59e0b;color:#fff}
+        .toast-error{background:#ef4444;color:#fff}
+        .toast-icon{display:flex;align-items:center;justify-content:center;width:20px;height:20px;background:rgba(255,255,255,0.2);border-radius:50%;padding:4px}
+        .toast-icon svg{width:14px;height:14px}
+        .toast-message{flex:1}
+        
+        .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
+        .modal{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;width:100%;max-width:440px;max-height:80vh;display:flex;flex-direction:column;animation:mi .2s}
+        @keyframes mi{from{opacity:0;transform:scale(0.95)}to{opacity:1;transform:scale(1)}}
+        .modal-h{display:flex;align-items:center;justify-content:space-between;padding:18px;border-bottom:1px solid var(--border)}
+        .modal-h h2{display:flex;align-items:center;gap:10px;font-size:16px}
+        .modal-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center}
+        .modal-icon svg{width:28px;height:28px}
+        .modal-h button{width:30px;height:30px;border:none;background:var(--bg-input);color:var(--text-muted);border-radius:6px;font-size:18px;cursor:pointer}
+        .modal-b{padding:16px;overflow-y:auto;flex:1}
+        .modal-f{padding:14px 18px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px}
+        .modal-f2{display:flex;justify-content:center;padding:0 18px 14px}
+        .btn-data{width:100%;padding:10px;background:transparent;border:1px dashed var(--border);border-radius:6px;color:var(--text-dim);font-size:12px;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;justify-content:center;gap:6px}
+        .btn-data:hover{border-color:#6366f1;color:#6366f1;background:rgba(99,102,241,0.05)}
+        
+        .data-modal-bg{z-index:1001}
+        .data-modal{max-width:400px}
+        .data-section{padding:16px 0}
+        .data-section h3{font-size:14px;margin-bottom:8px}
+        .data-section p{font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5}
+        .data-divider{display:flex;align-items:center;gap:12px;color:var(--text-dim);font-size:11px;margin:8px 0}
+        .data-divider::before,.data-divider::after{content:'';flex:1;height:1px;background:var(--border)}
+        
+        .btn-export-data{width:100%;padding:12px;background:#10b981;border:none;border-radius:6px;color:#fff;font-weight:600;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+        .btn-export-data:hover{background:#059669}
+        .btn-import-data{width:100%;padding:12px;background:#3b82f6;border:none;border-radius:6px;color:#fff;font-weight:600;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+        .btn-import-data:hover{background:#2563eb}
+        
+        .file-input-json{width:100%;padding:12px;background:var(--bg-input);border:1px dashed var(--border);border-radius:6px;color:var(--text);font-size:12px;cursor:pointer;margin-bottom:12px}
+        .file-input-json::-webkit-file-upload-button{background:var(--border-hover);border:none;padding:6px 12px;border-radius:4px;color:var(--text);cursor:pointer;margin-right:10px}
+        
+        .import-preview{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(16,185,129,0.1);border:1px solid #10b981;border-radius:6px;margin-bottom:12px}
+        .import-preview span{color:#10b981;font-weight:500}
+        .import-preview small{color:var(--text-dim)}
+        
+        .import-error{padding:10px 12px;background:rgba(239,68,68,0.1);border:1px solid #ef4444;border-radius:6px;color:#ef4444;font-size:12px;margin-bottom:12px}
+        .import-success{padding:10px 12px;background:rgba(16,185,129,0.1);border:1px solid #10b981;border-radius:6px;color:#10b981;font-size:12px;margin-bottom:12px}
+        
+        .import-actions-data{display:flex;gap:10px;margin-top:12px}
+        .btn-do-import{flex:1;padding:12px;background:#f59e0b;border:none;border-radius:6px;color:#000;font-weight:600;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+        .btn-do-import:hover{background:#d97706}
+        .btn-do-import:disabled{opacity:0.5;cursor:not-allowed}
+        .btn-pri{width:100%;padding:11px;background:#3b82f6;border:none;border-radius:6px;color:#fff;font-weight:600;font-size:13px;cursor:pointer}
+        .btn-pri:hover{background:#2563eb}
+        .btn-import{width:100%;padding:11px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-weight:500;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+        .btn-import:hover{background:var(--bg-input);color:var(--text);border-color:#6366f1}
+        .btn-import-icon{width:18px;height:18px;display:inline-flex;align-items:center}
+        .btn-import-icon svg{width:18px;height:18px}
+        .empty{text-align:center;padding:30px;color:var(--text-dim)}
+        .empty-icon{display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;margin-bottom:12px}
+        .empty-icon svg{width:48px;height:48px}
+        
+        .btn-data-icon,.btn-icon-sm,.btn-icon-xs,.section-icon,.tab-icon,.draft-icon,.nav-icon,.hint-icon,.hint-icon-sm,.parse-icon{display:inline-flex;vertical-align:middle}
+        .btn-data-icon{width:16px;height:16px;margin-right:6px;display:inline-flex;align-items:center}
+        .btn-data-icon svg{width:16px;height:16px}
+        .btn-icon-sm{width:16px;height:16px;margin-right:6px;display:inline-flex;align-items:center}
+        .btn-icon-sm svg{width:16px;height:16px}
+        .btn-icon-xs{width:14px;height:14px;margin-right:4px;display:inline-flex;align-items:center}
+        .btn-icon-xs svg{width:14px;height:14px}
+        .section-icon{width:18px;height:18px;margin-right:8px;display:inline-flex;align-items:center}
+        .section-icon svg{width:18px;height:18px}
+        .tab-icon{width:16px;height:16px;margin-right:6px}
+        .draft-icon{width:18px;height:18px;margin-right:8px;display:inline-flex;align-items:center}
+        .draft-icon svg{width:18px;height:18px}
+        .nav-icon{width:18px;height:18px}
+        .hint-icon{width:20px;height:20px;margin-right:6px;vertical-align:middle;display:inline-flex;align-items:center}
+        .hint-icon svg{width:20px;height:20px}
+        .hint-icon-sm{width:16px;height:16px;margin-right:4px;vertical-align:middle}
+        .parse-icon{width:24px;height:24px}
+        
+        .empty-p-icon{display:block;width:64px;height:64px;margin:0 auto 16px}
+        .confirm-icon{display:block;width:48px;height:48px;margin:0 auto 12px}
+        .empty span{font-size:40px;display:block;margin-bottom:12px}
+        .empty p{color:var(--text-dim)}
+        .immo-list{display:flex;flex-direction:column;gap:8px}
+        .immo-card{display:flex;align-items:center;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;cursor:pointer;border-left:3px solid #6366f1;transition:all 0.15s}
+        .immo-card:hover{background:var(--border-hover);border-color:#3b82f6}
+        .immo-typ-tag{font-size:8px;padding:2px 5px;border-radius:3px;font-weight:700;margin-right:8px;border:1px solid;letter-spacing:0.5px}
+        .immo-info{flex:1}
+        .immo-name{font-weight:600;font-size:13px}
+        .immo-addr{font-size:11px;color:var(--text-muted)}
+        .immo-meta{font-size:10px;color:var(--text-dim);margin-top:3px;font-family:'JetBrains Mono',monospace}
+        .immo-actions{display:flex;gap:4px}
+        .del-sm,.dup-sm{width:28px;height:28px;border:none;background:transparent;cursor:pointer;border-radius:5px;display:flex;align-items:center;justify-content:center;padding:4px}
+        .del-sm svg,.dup-sm svg{width:16px;height:16px}
+        .del-sm:hover{background:rgba(239,68,68,0.15)}
+        .dup-sm:hover{background:rgba(99,102,241,0.15)}
+        .del-icon{width:18px;height:18px}
+        
+        .confirm-modal{max-width:320px;text-align:center}
+        .confirm-content{padding:24px}
+        .confirm-content h3{font-size:16px;margin-bottom:8px}
+        .confirm-content p{font-size:13px;color:var(--text-dim);margin-bottom:20px}
+        .confirm-btns{display:flex;gap:10px}
+        .btn-cancel{flex:1;padding:10px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-weight:500;cursor:pointer}
+        .btn-cancel:hover{background:var(--border-hover)}
+        .btn-delete{flex:1;padding:10px;background:#dc2626;border:none;border-radius:6px;color:#fff;font-weight:600;cursor:pointer}
+        .btn-delete:hover{background:#b91c1c}
+        
+        .empty-p{text-align:center;padding:60px 20px}
+        .empty-p span{font-size:50px;display:block;margin-bottom:16px}
+        .empty-p h2{font-size:18px;margin-bottom:6px}
+        .empty-p p{color:var(--text-dim);margin-bottom:20px}
+        .empty-p button{padding:12px 28px;background:#3b82f6;border:none;border-radius:6px;color:#fff;font-weight:600;font-size:14px;cursor:pointer}
+        
+        .tabs{display:flex;gap:4px;margin-bottom:14px;background:var(--bg-card);padding:4px;border-radius:6px;width:fit-content;border:1px solid var(--border)}
+        .tabs button{padding:7px 12px;background:none;border:none;color:var(--text-dim);font-size:11px;font-weight:500;cursor:pointer;border-radius:5px;display:flex;align-items:center;gap:6px}
+        .tabs button:hover{color:var(--text-muted)}
+        .tabs button.act{background:#3b82f6;color:#fff}
+        
+        .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:14px}
+        .kpi-c{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center}
+        .kpi-c.hl{border-color:#22c55e;background:rgba(34,197,94,0.05)}
+        .kpi-c.hl b{color:#22c55e}
+        .kpi-c span{font-size:9px;color:var(--text-dim);text-transform:uppercase;display:block;margin-bottom:3px}
+        .kpi-c b{font-family:'JetBrains Mono',monospace;font-size:14px}
+        
+        .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+        .card{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:14px}
+        .card h4{font-size:11px;color:var(--text-dim);text-transform:uppercase;margin-bottom:10px}
+        .card .row{display:flex;justify-content:space-between;padding:5px 0;font-size:12px;color:var(--text-muted)}
+        .card .row span:last-child{font-family:'JetBrains Mono',monospace}
+        .card .row.tot{color:var(--text);font-weight:500;border-top:1px solid var(--border-hover);padding-top:8px;margin-top:4px}
+        
+        .set-panel{max-width:400px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:14px}
+        
+        .tbl-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+        .tbl-wrap{overflow-x:auto;max-height:400px}
+        table{width:100%;border-collapse:collapse;font-size:11px}
+        th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
+        th{background:var(--bg-input);color:var(--text-dim);font-weight:600;font-size:9px;text-transform:uppercase;position:sticky;top:0}
+        td{font-family:'JetBrains Mono',monospace;color:var(--text-muted)}
+        td:first-child{position:sticky;left:0;background:var(--bg-card);text-align:left;font-weight:600;color:var(--text)}
+        .pos{color:#22c55e}
+        .neg{color:#ef4444}
+        
+        .chart{display:flex;flex-direction:column;gap:8px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px}
+        .bar-row{display:flex;align-items:center;gap:8px}
+        .bar-row>span:first-child{width:28px;font-size:10px;color:var(--text-dim)}
+        .bar-bg{flex:1;height:18px;background:var(--bg-input);border-radius:3px;overflow:hidden}
+        .bar{height:100%;border-radius:3px}
+        .bar.pos{background:linear-gradient(90deg,#22c55e,#16a34a)}
+        .bar.neg{background:linear-gradient(90deg,#ef4444,#dc2626)}
+        .bar-row>span:last-child{width:80px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:10px}
+        
+        .section-title{font-size:13px;font-weight:600;color:var(--text);margin:20px 0 12px;padding-top:16px;border-top:1px solid var(--border)}
+        .section-title-first{font-size:13px;font-weight:600;color:var(--text);margin:0 0 12px}
+        
+        .chart-section{margin-top:20px;padding:16px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px}
+        .chart-section h4{font-size:12px;font-weight:600;color:var(--text-muted);margin:0 0 16px;text-transform:uppercase;letter-spacing:0.5px}
+        .chart-stacked{display:flex;align-items:flex-end;gap:4px;height:120px;padding:0 8px}
+        .chart-bar-col{display:flex;flex-direction:column;align-items:center;flex:1;height:100%}
+        .chart-bar-wrapper{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center}
+        .chart-bar-v{width:70%;max-width:24px;border-radius:3px 3px 0 0;min-height:4px;transition:height 0.3s}
+        .chart-bar-v.pos{background:linear-gradient(180deg,#22c55e,#16a34a)}
+        .chart-bar-v.neg{background:linear-gradient(180deg,#ef4444,#dc2626)}
+        .chart-bar-label{font-size:9px;color:var(--text-dim);margin-top:6px}
+        .chart-legend{display:flex;justify-content:center;gap:16px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+        .chart-legend span{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text-muted)}
+        
+        .yr-bar{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+        .yr-bar label{font-size:12px;color:var(--text-muted)}
+        .yr-bar select{padding:7px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:5px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:13px}
+        .badge{font-size:10px;color:#3b82f6;background:rgba(59,130,246,0.1);padding:3px 8px;border-radius:4px}
+        
+        .result-box{text-align:center;padding:18px;border-radius:8px;margin-bottom:14px;border:1px solid}
+        .result-box.pos{background:rgba(34,197,94,0.05);border-color:rgba(34,197,94,0.2)}
+        .result-box.neg{background:rgba(239,68,68,0.05);border-color:rgba(239,68,68,0.2)}
+        .result-box.draft{background:rgba(148,163,184,0.05);border-color:rgba(148,163,184,0.2);border-style:dashed}
+        
+        .draft-banner{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;background:rgba(245,158,11,0.08);border:1px dashed rgba(245,158,11,0.3);border-radius:8px;margin-bottom:12px;flex-wrap:wrap}
+        .draft-banner span{color:#f59e0b;font-size:12px}
+        .btn-confirm-all{padding:5px 12px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:6px;color:#22c55e;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all 0.15s}
+        .btn-confirm-all:hover{background:rgba(34,197,94,0.2)}
+        
+        .steuer-draft-field{position:relative;display:flex;align-items:center;gap:4px}
+        .steuer-draft-field .irow{flex:1}
+        .steuer-draft-field .irow .ifld{border-style:dashed;border-color:rgba(245,158,11,0.4);background:rgba(245,158,11,0.03)}
+        .steuer-draft-field .irow .ifld input{color:var(--text-dim);opacity:0.5}
+        .steuer-draft-field .irow label{color:var(--text-dim);opacity:0.6}
+        .btn-confirm-field{padding:4px 8px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);border-radius:6px;color:#22c55e;font-size:10px;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:all 0.15s}
+        .btn-confirm-field:hover{background:rgba(34,197,94,0.2)}
+        .result-header{display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:4px}
+        .result-header span{font-size:10px;color:var(--text-dim);text-transform:uppercase}
+        .result-box b{font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;display:block}
+        .result-box.pos b{color:#22c55e}
+        .result-box.neg b{color:#ef4444}
+        .result-box small{font-size:11px;color:var(--text-dim);display:block;margin-top:4px}
+        
+        .info-tooltip{position:relative;display:inline-flex}
+        .info-btn{width:18px;height:18px;padding:0;background:none;border:none;cursor:pointer;opacity:0.6;transition:opacity 0.15s}
+        .info-btn:hover{opacity:1}
+        .info-tooltip-content{position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:8px;width:280px;padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:100;text-align:left;opacity:0;visibility:hidden;transition:all 0.15s}
+        .info-tooltip:hover .info-tooltip-content{opacity:1;visibility:visible}
+        .info-tooltip-content strong{font-size:11px;color:var(--text);display:block;margin-bottom:8px}
+        .info-tooltip-content p{font-size:11px;color:var(--text-muted);margin:6px 0;display:flex;align-items:flex-start;gap:6px}
+        .info-tooltip-content b{color:var(--text)}
+        .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:3px}
+        .dot.green{background:#22c55e}
+        .dot.red{background:#ef4444}
+        .th-with-info{display:inline-flex;align-items:center;gap:4px}
+        .th-with-info .info-tooltip-content{left:auto;right:0;transform:none}
+        
+        .afa-box{background:var(--bg-input);border-radius:6px;padding:10px;margin-bottom:8px}
+        .afa-r{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px}
+        .afa-r span:last-child{font-family:'JetBrains Mono',monospace}
+        .afa-box small{font-size:10px;color:var(--text-dim)}
+        
+        @media(max-width:640px){
+          .hdr{padding:10px 14px}
+          .nav{padding:0 14px}
+          .nav-in{flex-wrap:wrap;gap:4px}
+          .nav-tab-btn{padding:10px 12px}
+          .nav-divider{display:none}
+          .nav-immo-select{width:100%;order:10;padding:6px 0 8px}
+          .sel-btn{flex:1;max-width:none}
+          .nav-tabs{width:100%;overflow-x:auto}
+          .hdr-acts .hdr-btn span:not(.btn-icon-sm):not(.hdr-btn-icon){display:none}
+          .main{padding:14px}
+          .dash-totals{grid-template-columns:repeat(2,1fr)}
+          .dash-table-wrap{overflow-x:auto}
+          .dash-cards{grid-template-columns:1fr}
+          .user-email-text{display:none}
+          .user-menu-btn{padding:6px 8px;gap:4px}
+          .cloud-status-text{display:none}
+          .cloud-status{margin-left:8px}
+        }
+        
+        /* Dashboard Styles */
+        .dash-header{display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+        .dash-header h2{font-size:18px;font-weight:600}
+        .dash-search{display:flex;align-items:center;flex:1;max-width:280px;background:var(--bg-input);border:1px solid var(--border);border-radius:5px;padding:0 8px;gap:6px}
+        .dash-search:focus-within{border-color:#6366f1}
+        .search-icon{width:12px;height:12px;flex-shrink:0;opacity:0.6}
+        .dash-search input{flex:1;padding:5px 0;background:transparent;border:none;color:var(--text);font-size:11px;outline:none}
+        .dash-search input::placeholder{color:var(--text-dim)}
+        .search-clear{width:16px;height:16px;border:none;background:var(--border);color:var(--text-muted);border-radius:50%;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center}
+        .search-clear:hover{background:#ef4444;color:#fff}
+        .dash-count{font-size:11px;color:var(--text-dim);background:var(--bg-input);padding:4px 10px;border-radius:20px;white-space:nowrap}
+        
+        /* Dashboard Filter Buttons */
+        .dash-filters{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+        .dash-filter-btn{display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:12px;cursor:pointer;transition:all 0.15s}
+        .dash-filter-btn svg{width:14px;height:14px;flex-shrink:0}
+        .dash-filter-btn:hover{border-color:var(--border-hover);color:var(--text);background:var(--bg-card)}
+        .dash-filter-btn.active{background:#6366f1;border-color:#6366f1;color:#fff}
+        .dash-filter-btn.warning.active{background:#f59e0b;border-color:#f59e0b}
+        .filter-badge{background:rgba(99,102,241,0.2);color:#6366f1;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600;margin-left:2px}
+        .dash-filter-btn.active .filter-badge{background:rgba(255,255,255,0.25);color:#fff}
+        .filter-badge.warn{background:rgba(245,158,11,0.2);color:#f59e0b}
+        .dash-filter-btn.active .filter-badge.warn{background:rgba(255,255,255,0.25);color:#fff}
+        
+        /* Zinsbindungs-Warnung Badge in Karten */
+        .dic-warning-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);border-radius:4px;color:#f59e0b;font-size:10px;font-weight:500}
+        .dic-warning-badge svg{width:12px;height:12px}
+        .dic-check-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);border-radius:4px;color:#f59e0b;font-size:10px;font-weight:500}
+        .dic-check-badge svg{width:12px;height:12px}
+        
+        .dash-totals{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
+        .filter-active-hint{grid-column:1/-1;padding:8px 12px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);border-radius:6px;color:#6366f1;font-size:11px;text-align:center}
+        .dash-total-card{display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+        .dash-total-card.disabled{opacity:0.5;filter:grayscale(0.5)}
+        .dtc-icon{width:40px;height:40px;flex-shrink:0}
+        .dtc-icon svg{width:40px;height:40px}
+        .dtc-info{flex:1;min-width:0;overflow:hidden}
+        .dtc-info span{font-size:10px;color:var(--text-dim);text-transform:uppercase;display:block}
+        .dtc-info b{font-family:'JetBrains Mono',monospace;font-size:15px;display:block;margin:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .dtc-info small{font-size:10px;color:var(--text-dim);white-space:nowrap}
+        
+        .dash-table-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:20px;margin-top:24px}
+        .dash-widget-full{grid-column:1/-1;margin-top:24px}
+        .dash-table-inner{overflow-x:auto}
+        .dash-table{width:100%;border-collapse:collapse;font-size:12px}
+        .dash-table th,.dash-table td{padding:12px;text-align:right;border-bottom:1px solid var(--border)}
+        .dash-table th{background:var(--bg-input);color:var(--text-dim);font-size:10px;text-transform:uppercase;font-weight:600}
+        .dash-table th:first-child,.dash-table td:first-child{text-align:left}
+        .dash-table th.sortable{cursor:pointer;user-select:none;transition:color 0.15s}
+        .dash-table th.sortable:hover{color:#6366f1}
+        .dash-table th.sorted{color:#6366f1}
+        .dash-table td{font-family:'JetBrains Mono',monospace;color:var(--text-muted)}
+        .dash-table tbody tr:hover td{background:rgba(59,130,246,0.03)}
+        .dash-row-click{cursor:pointer}
+        .dash-row-click:hover td{background:rgba(99,102,241,0.1)!important}
+        .dash-table tfoot td{background:var(--bg-input);border-top:2px solid var(--border-hover)}
+        .dash-name{font-family:'Inter',sans-serif}
+        .dash-name strong{display:block;color:var(--text);font-size:13px}
+        .dash-name small{color:var(--text-dim);font-size:11px}
+        .dash-tag{font-size:9px;padding:3px 6px;border-radius:4px;font-weight:600;border:1px solid}
+        
+        .progress-cell{display:flex;align-items:center;gap:6px}
+        .progress-bar-mini{flex:1;height:4px;background:var(--border);border-radius:2px;overflow:hidden;min-width:30px}
+        .progress-fill{height:100%;border-radius:2px;background:var(--text-dim);transition:width 0.3s}
+        .progress-cell span{font-size:10px;color:var(--text-dim);min-width:28px;text-align:right}
+        
+        .dash-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:8px}
+        .dash-immo-card{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:16px;cursor:pointer;transition:all 0.15s;border-left:4px solid #6366f1}
+        .dash-immo-card:hover{border-color:#6366f1;transform:translateY(-2px);box-shadow:0 4px 12px rgba(99,102,241,0.15)}
+        .dash-immo-card.dragging{opacity:0.5;transform:scale(0.98)}
+        .dash-immo-card.drag-over{border-color:#22c55e;box-shadow:0 0 0 2px rgba(34,197,94,0.3)}
+        
+        /* Dashboard Widgets */
+        .dash-widgets{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:20px 0}
+        .dash-widget{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:16px}
+        .dash-widget h3{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;margin-bottom:16px;color:var(--text)}
+        .widget-icon{width:20px;height:20px;display:inline-flex;align-items:center}
+        .widget-icon svg{width:20px;height:20px}
+        
+        /* Pie Chart */
+        .pie-chart-container{display:flex;align-items:center;gap:20px}
+        .pie-chart{width:100px;height:100px;flex-shrink:0}
+        .pie-center-number{font-size:18px;font-weight:700;fill:var(--text)}
+        .pie-center-label{font-size:8px;fill:var(--text-dim)}
+        .pie-legend{display:flex;flex-direction:column;gap:6px;flex:1}
+        .pie-legend-item{display:flex;align-items:center;gap:8px;font-size:12px}
+        .pie-legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+        .pie-legend-label{flex:1;color:var(--text)}
+        .pie-legend-count{color:var(--text-dim);font-size:11px}
+        
+        /* Cashflow */
+        .cashflow-container{display:flex;flex-direction:column;gap:10px}
+        .cashflow-row{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-radius:6px}
+        .cashflow-row.income{background:rgba(34,197,94,0.1)}
+        .cashflow-row.expense{background:rgba(239,68,68,0.1)}
+        .cashflow-row.net{background:var(--bg-input);border:1px solid var(--border)}
+        .cashflow-row.net.positive{border-color:rgba(34,197,94,0.3)}
+        .cashflow-row.net.negative{border-color:rgba(239,68,68,0.3)}
+        .cf-label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted)}
+        .cf-icon{font-size:14px}
+        .cf-value{font-family:'JetBrains Mono',monospace;font-size:13px}
+        .cashflow-divider{height:1px;background:var(--border);margin:4px 0}
+        .cashflow-bar{margin-top:8px}
+        .cashflow-bar-track{height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden;position:relative}
+        .cashflow-bar-income{position:absolute;top:0;left:0;height:100%;background:#22c55e;border-radius:4px}
+        .cashflow-bar-expense{position:absolute;top:0;left:0;height:100%;background:#ef4444;border-radius:4px}
+        .cashflow-bar-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-top:4px}
+        .cashflow-hint{font-size:10px;color:var(--text-dim);text-align:center;margin-top:8px}
+        
+        /* Locations */
+        .locations-container{display:flex;flex-direction:column;gap:12px}
+        .dash-widget-map{grid-column:span 1}
+        .svg-map-container{height:180px;border-radius:8px;overflow:hidden;background:var(--bg-input)}
+        .svg-map{width:100%;height:100%}
+        .map-marker-svg{cursor:pointer}
+        .map-marker-svg:hover path{filter:brightness(1.2)}
+        
+        .location-list{display:flex;flex-direction:column;gap:4px}
+        .location-item{display:flex;align-items:center;gap:8px;font-size:11px;padding:4px 0}
+        .location-item.location-more{color:var(--text-dim);font-style:italic}
+        .loc-marker{width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-size:10px}
+        .loc-name{flex:1;color:var(--text)}
+        .loc-count{color:var(--text-dim)}
+        .loc-value{font-family:'JetBrains Mono',monospace;color:var(--text-muted);font-size:10px}
+        
+        /* Tilgungsplan Modal */
+        .tilgungsplan-modal{max-width:700px;max-height:90vh;overflow-y:auto}
+        .tp-header{display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--bg-input);border-radius:8px;margin-bottom:16px}
+        .tp-info strong{display:block;color:var(--text)}
+        .tp-info span{font-size:12px;color:var(--text-dim)}
+        .tp-rate{text-align:right}
+        .tp-rate span{font-size:11px;color:var(--text-dim);display:block}
+        .tp-rate strong{font-size:18px;color:#3b82f6}
+        .tp-control{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+        .tp-control label{font-size:12px;color:var(--text-muted)}
+        .tp-control input[type="range"]{flex:1;accent-color:#3b82f6}
+        .tp-control span{font-size:12px;font-weight:600;min-width:60px}
+        .tp-summary{display:flex;gap:12px;margin-bottom:16px}
+        .tp-sum-item{flex:1;padding:12px;background:var(--bg-input);border-radius:8px;text-align:center}
+        .tp-sum-item span{display:block;font-size:11px;color:var(--text-dim);margin-bottom:4px}
+        .tp-sum-item b{font-size:14px}
+        .tp-chart{margin-bottom:16px;padding:12px;background:var(--bg-input);border-radius:8px}
+        .tp-chart-bars{display:flex;align-items:flex-end;gap:2px;height:80px}
+        .tp-bar-group{flex:1;display:flex;flex-direction:column;align-items:center}
+        .tp-bar-stack{width:100%;display:flex;flex-direction:column-reverse;height:60px}
+        .tp-bar-zinsen{background:#ef4444;border-radius:2px 2px 0 0;min-height:1px}
+        .tp-bar-tilgung{background:#22c55e;border-radius:2px 2px 0 0;min-height:1px}
+        .tp-bar-label{font-size:8px;color:var(--text-dim);margin-top:4px}
+        .tp-chart-legend{display:flex;justify-content:center;gap:16px;margin-top:8px;font-size:11px}
+        .tp-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+        .tp-dot.zinsen{background:#ef4444}
+        .tp-dot.tilgung{background:#22c55e}
+        .tp-table-wrap{max-height:250px;overflow-y:auto;border:1px solid var(--border);border-radius:8px}
+        .tp-table{width:100%;border-collapse:collapse;font-size:12px}
+        .tp-table th{background:var(--bg-input);padding:8px;text-align:left;position:sticky;top:0;font-weight:500;color:var(--text-muted)}
+        .tp-table td{padding:8px;border-top:1px solid var(--border)}
+        .btn-tilgungsplan{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;background:transparent;border:1px solid #3b82f6;border-radius:4px;color:#3b82f6;font-size:10px;cursor:pointer;margin-left:auto}
+        .btn-tilgungsplan:hover{background:rgba(59,130,246,0.1)}
+        .btn-tilgungsplan svg{width:12px;height:12px;flex-shrink:0;max-width:12px;max-height:12px}
+        
+        /* Onboarding Tour */
+        .onboarding-modal{background:var(--bg-card);border-radius:16px;padding:32px;max-width:420px;text-align:center;position:relative}
+        .onboarding-progress{display:flex;justify-content:center;gap:6px;margin-bottom:24px}
+        .onboarding-dot{width:8px;height:8px;border-radius:50%;background:var(--border)}
+        .onboarding-dot.active{background:#6366f1;transform:scale(1.2)}
+        .onboarding-dot.done{background:#22c55e}
+        .onboarding-icon{width:64px;height:64px;margin:0 auto 16px;background:rgba(99,102,241,0.1);border-radius:50%;display:flex;align-items:center;justify-content:center;padding:16px}
+        .onboarding-modal h2{font-size:20px;margin-bottom:12px;color:var(--text)}
+        .onboarding-modal p{font-size:14px;color:var(--text-muted);line-height:1.6;margin-bottom:24px}
+        .onboarding-actions{display:flex;gap:12px;justify-content:center}
+        .onboarding-skip{position:absolute;top:16px;right:16px;background:none;border:none;color:var(--text-dim);font-size:12px;cursor:pointer}
+        .onboarding-skip:hover{color:var(--text)}
+        
+        @media(max-width:900px){
+          .dash-widgets{grid-template-columns:1fr}
+        }
+        .dic-header{display:flex;align-items:flex-start;gap:10px;margin-bottom:8px}
+        .dic-type-tag{font-size:10px;padding:6px 10px;border-radius:6px;font-weight:600;border:1px solid;flex-shrink:0;text-align:center;min-width:50px}
+        .dic-title{flex:1;min-width:0}
+        .dic-title strong{display:block;font-size:14px;line-height:1.3}
+        .dic-title small{font-size:11px;color:var(--text-dim);display:block;margin-top:2px}
+        .dic-badges-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+        .dic-progress-row{display:flex;justify-content:flex-end;margin-bottom:12px}
+        .dic-tag{font-size:9px;padding:3px 8px;border-radius:4px;font-weight:600;border:1px solid}
+        .dic-progress-inline{display:flex;align-items:center;gap:6px;margin-left:auto}
+        .dic-progress-bar-inline{width:50px;height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+        .dic-progress-fill-inline{height:100%;background:var(--text-dim);border-radius:2px}
+        .dic-progress-inline span{font-size:10px;color:var(--text-dim)}
+        .dic-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px}
+        .dic-stat{background:var(--bg-input);border-radius:6px;padding:10px;text-align:center}
+        .dic-stat span{font-size:9px;color:var(--text-dim);text-transform:uppercase;display:block;margin-bottom:2px}
+        .dic-stat b{font-family:'JetBrains Mono',monospace;font-size:13px}
+        .dic-bar{margin-top:10px}
+        .dic-bar-label{display:flex;justify-content:space-between;font-size:9px;color:var(--text-dim);margin-bottom:4px}
+        .dic-bar-track{height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden}
+        .dic-bar-ek{height:100%;background:linear-gradient(90deg,#22c55e,#16a34a);border-radius:4px}
+        .dic-bar-vals{display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-top:4px;font-family:'JetBrains Mono',monospace}
+        .dic-click-hint{text-align:center;font-size:10px;color:var(--text-dim);margin-top:12px;padding-top:10px;border-top:1px solid var(--border);transition:color 0.15s}
+        .dash-immo-card:hover .dic-click-hint{color:#6366f1}
+        
+        .notes-textarea{width:100%;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'Inter',sans-serif;font-size:13px;resize:vertical;min-height:100px;line-height:1.5}
+        .notes-textarea:focus{outline:none;border-color:#6366f1}
+        .notes-textarea::placeholder{color:var(--text-dim)}
+        
+        /* Dokumente/Fotos */
+        .docs-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+        .doc-row{display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px}
+        .doc-typ{width:120px;padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px}
+        .doc-name{flex:1;min-width:100px;padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px}
+        .doc-url{flex:2;min-width:150px;padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px;font-family:'JetBrains Mono',monospace}
+        .doc-typ:focus,.doc-name:focus,.doc-url:focus{outline:none;border-color:#f97316}
+        .doc-open{width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(249,115,22,0.1);border:1px solid #f97316;border-radius:4px;color:#f97316;text-decoration:none;font-size:14px;font-weight:600}
+        .doc-open:hover{background:#f97316;color:#fff}
+        .doc-del{width:28px;height:28px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;border-radius:4px;font-size:16px}
+        .doc-del:hover{background:rgba(239,68,68,0.15);color:#ef4444}
+        
+        /* Dropzone */
+        .doc-dropzone{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:24px;border:2px dashed var(--border);border-radius:8px;margin-bottom:12px;cursor:pointer;transition:all 0.2s}
+        .doc-dropzone:hover,.doc-dropzone.dragover{border-color:#f97316;background:rgba(249,115,22,0.05)}
+        .doc-dropzone.dragover{border-style:solid;background:rgba(249,115,22,0.1)}
+        .dropzone-icon{font-size:28px;opacity:0.6}
+        .doc-dropzone span{font-size:13px;color:var(--text-muted)}
+        .doc-dropzone small{font-size:11px;color:var(--text-dim)}
+        
+        /* File entries */
+        .doc-row.has-file{background:rgba(249,115,22,0.05);border-color:rgba(249,115,22,0.3)}
+        .doc-preview{width:48px;height:48px;border-radius:6px;overflow:hidden;background:var(--bg-card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+        .doc-preview img{width:100%;height:100%;object-fit:cover}
+        .doc-pdf-icon{background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:4px 6px;border-radius:3px}
+        .doc-file-icon{font-size:20px}
+        .doc-file-info{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+        .doc-file-name{font-size:12px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .doc-file-size{font-size:10px;color:var(--text-dim)}
+        .doc-typ-sm{width:90px;padding:4px 6px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:10px}
+        .doc-view{width:28px;height:28px;border:none;background:rgba(249,115,22,0.1);border-radius:4px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center}
+        .doc-view:hover{background:#f97316}
+        
+        /* Darlehen */
+        .darlehen-card{background:var(--bg-input);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px}
+        .darlehen-header{display:flex;gap:8px;margin-bottom:10px}
+        .darlehen-name{flex:1;padding:8px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;font-weight:500}
+        .darlehen-typ{width:120px;padding:8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:11px}
+        .darlehen-del{width:32px;height:32px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;border-radius:4px;font-size:18px}
+        .darlehen-del:hover{background:rgba(239,68,68,0.15);color:#ef4444}
+        .darlehen-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+        .darlehen-field{display:flex;flex-direction:column;gap:4px}
+        .darlehen-field label{font-size:10px;color:var(--text-dim);text-transform:uppercase}
+        .darlehen-field input{padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px}
+        .darlehen-field input:focus{outline:none;border-color:#3b82f6}
+        .darlehen-field .ifld{display:flex;align-items:center;gap:4px}
+        .darlehen-field .ifld input{flex:1}
+        .darlehen-field .ifld span{font-size:11px;color:var(--text-dim)}
+        .darlehen-calc{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted)}
+        .darlehen-section{margin-top:12px;padding-top:10px;border-top:1px dashed var(--border)}
+        .darlehen-section:first-of-type{margin-top:10px;padding-top:0;border-top:none}
+        .darlehen-section-label{font-size:10px;text-transform:uppercase;color:var(--text-dim);margin-bottom:8px;font-weight:600;letter-spacing:0.5px}
+        .darlehen-field.wide{grid-column:span 2}
+        .darlehen-field select{width:100%;padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px}
+        .darlehen-buttons{display:flex;gap:10px;flex-wrap:wrap}
+        .btn-import-darlehen{padding:8px 14px;background:transparent;border:1px solid #3b82f6;border-radius:6px;color:#3b82f6;font-size:12px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+        .btn-import-darlehen:hover{background:rgba(59,130,246,0.1)}
+        .miete-import-section{margin-top:16px;padding-top:12px;border-top:1px solid var(--border)}
+        .miete-import-section .btn-import-darlehen{border-color:#ec4899;color:#ec4899}
+        .miete-import-section .btn-import-darlehen:hover{background:rgba(236,72,153,0.1)}
+        .import-section-top{margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+        
+        /* Darlehen Import Modal */
+        .darlehen-import-modal{max-width:500px}
+        .parsed-darlehen-header{display:flex;align-items:center;gap:10px;padding:12px;background:rgba(34,197,94,0.1);border-radius:8px;margin-bottom:12px}
+        .parsed-darlehen-header .parsed-icon{width:24px;height:24px}
+        .parsed-darlehen-list{display:flex;flex-direction:column;gap:10px;max-height:350px;overflow-y:auto}
+        .parsed-darlehen-card{padding:14px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px}
+        .pdc-header{margin-bottom:10px}
+        .pdc-header strong{display:block;font-size:14px;color:var(--text)}
+        .pdc-header small{color:var(--text-dim);font-size:11px}
+        .pdc-details{display:flex;flex-wrap:wrap;gap:8px 16px;margin-bottom:12px}
+        .pdc-details span{font-size:12px;color:var(--text-muted)}
+        .pdc-details b{color:var(--text-dim);font-weight:500}
+        .btn-import-single{padding:6px 12px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;cursor:pointer}
+        .btn-import-single:hover{background:var(--border-hover);color:var(--text)}
+        .legacy-hint{padding:8px;background:rgba(59,130,246,0.1);border-radius:4px;margin-bottom:10px}
+        .legacy-hint small{color:var(--text-dim);font-size:11px}
+        
+        /* Miethistorie */
+        .mhist-toggle{display:flex;align-items:center;gap:10px;padding:10px 12px;margin-top:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;cursor:pointer;transition:all 0.15s}
+        .mhist-toggle:hover{border-color:#ec4899;background:rgba(236,72,153,0.05)}
+        .mhist-toggle-icon{width:20px;height:20px;display:flex;align-items:center;justify-content:center;background:rgba(236,72,153,0.15);border-radius:4px;color:#ec4899;font-weight:600;font-size:14px}
+        .mhist-toggle-count{margin-left:auto;font-size:11px;color:var(--text-dim)}
+        .mhist-import-btn{display:flex;align-items:center;gap:6px;padding:4px 10px;background:transparent;border:1px solid #ec4899;border-radius:4px;color:#ec4899;font-size:11px;cursor:pointer;margin-left:auto;white-space:nowrap}
+        .mhist-import-btn:hover{background:rgba(236,72,153,0.1)}
+        .mhist-content{margin-top:10px;padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px}
+        .mhist-list{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+        .mhist-row{display:flex;flex-direction:column;gap:10px;padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px}
+        .mhist-dates{display:flex;gap:12px;flex-wrap:wrap}
+        .mhist-date-field{display:flex;flex-direction:column;gap:4px}
+        .mhist-date-field label{font-size:10px;color:var(--text-dim);text-transform:uppercase}
+        .mhist-date-field input{width:130px;padding:6px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px}
+        .mhist-values{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+        .mhist-field{display:flex;flex-direction:column;gap:4px}
+        .mhist-field label{font-size:10px;color:var(--text-dim);text-transform:uppercase}
+        .mhist-field input{width:80px;padding:6px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;text-align:right}
+        .mhist-field span{font-size:11px;color:var(--text-dim);align-self:flex-end;padding-bottom:6px}
+        .mhist-gesamt{background:rgba(236,72,153,0.08);padding:6px 10px;border-radius:4px;border:1px dashed rgba(236,72,153,0.3)}
+        .mhist-gesamt-value{font-size:13px;font-weight:600;color:#ec4899;font-family:'JetBrains Mono',monospace;padding:6px 0}
+        .mhist-grund{flex:1;min-width:150px;padding:6px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px}
+        .mhist-del{position:absolute;top:8px;right:8px;width:24px;height:24px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;border-radius:4px;font-size:14px}
+        .mhist-del:hover{background:rgba(239,68,68,0.15);color:#ef4444}
+        .mhist-row{position:relative}
+        
+        /* Geplante Mieterhöhungen */
+        .miet-erhoehungen-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+        .miet-erhoehung-row{display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(34,197,94,0.05);border:1px solid rgba(34,197,94,0.2);border-radius:6px;position:relative}
+        .miet-erhoehung-datum{width:130px}
+        .miet-erhoehung-datum input{width:100%;padding:6px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px}
+        .miet-erhoehung-betrag{display:flex;align-items:center;gap:4px}
+        .miet-erhoehung-betrag input{width:100px;padding:6px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;font-family:'JetBrains Mono',monospace;text-align:right}
+        .miet-erhoehung-betrag span{font-size:11px;color:var(--text-dim)}
+        .miet-erhoehung-grund{flex:1;min-width:100px;padding:6px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px}
+        .miet-erhoehung-del{width:28px;height:28px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;border-radius:4px;font-size:16px}
+        .miet-erhoehung-del:hover{background:rgba(239,68,68,0.15);color:#ef4444}
+        
+        /* Frühere Mieter */
+        .frueherer-mieter-section{margin-top:16px;padding-top:12px;border-top:1px solid var(--border)}
+        .frueherer-mieter-list{display:flex;flex-direction:column;gap:6px}
+        .frueherer-mieter-item{display:flex;align-items:center;gap:12px;padding:8px 10px;background:rgba(14,165,233,0.05);border:1px solid rgba(14,165,233,0.2);border-radius:6px;font-size:12px}
+        .fm-name{flex:1;font-weight:500;color:var(--text)}
+        .fm-datum{color:var(--text-dim);font-size:11px}
+        .fm-miete{font-family:'JetBrains Mono',monospace;color:#0ea5e9;font-size:11px}
+        
+        /* Erinnerungen */
+        .erinnerungen-list{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+        .erinnerung-row{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;transition:all 0.15s}
+        .erinnerung-row.done{opacity:0.5}
+        .erinnerung-row.done .erinnerung-titel{text-decoration:line-through}
+        .erinnerung-row.overdue{border-color:#ef4444;background:rgba(239,68,68,0.05)}
+        .erinnerung-row.upcoming{border-color:#f59e0b;background:rgba(245,158,11,0.05)}
+        .erinnerung-check{width:18px;height:18px;accent-color:#22c55e}
+        .erinnerung-datum{width:130px;padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px}
+        .erinnerung-titel{flex:1;padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px}
+        .erinnerung-del{width:28px;height:28px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;border-radius:4px;font-size:16px}
+        .erinnerung-del:hover{background:rgba(239,68,68,0.15);color:#ef4444}
+        
+        /* Nebenkosten Section */
+        .nk-section{display:flex;flex-direction:column;gap:10px}
+        .nk-list{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+        .nk-item{display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;font-size:12px}
+        .nk-jahr{font-weight:600;min-width:50px}
+        .nk-voraus,.nk-tatsaechlich{color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:11px}
+        .nk-ergebnis{flex:1;text-align:right;font-family:'JetBrains Mono',monospace;font-weight:500}
+        .nk-ergebnis.pos{color:#22c55e}
+        .nk-ergebnis.neg{color:#ef4444}
+        .btn-del-small{width:28px;height:28px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;border-radius:4px;font-size:16px}
+        .btn-del-small:hover{background:rgba(239,68,68,0.15);color:#ef4444}
+        .nk-form{padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;margin-bottom:12px}
+        .nk-form-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)}
+        .nk-form-row:last-of-type{border-bottom:none}
+        .nk-form-row label{font-size:12px;color:var(--text-muted)}
+        .nk-form-row input{width:100px;padding:6px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;text-align:right}
+        .nk-form-row.result{background:rgba(99,102,241,0.05);padding:10px;margin:8px -12px -12px;border-radius:0 0 8px 8px}
+        .nk-calc{font-family:'JetBrains Mono',monospace;font-size:12px}
+        .nk-form-buttons{display:flex;gap:8px;margin-top:12px}
+        
+        /* Mieter Section */
+        .mieter-section{display:flex;flex-direction:column;gap:10px}
+        .mieter-aktiv{display:flex;align-items:center;gap:12px;padding:12px;background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.3);border-radius:8px;font-size:12px;margin-bottom:8px}
+        .mieter-aktiv-label{background:#8b5cf6;color:#fff;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase}
+        .mieter-historie{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+        .mieter-item{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;font-size:12px}
+        .mieter-item.aktiv{border-color:rgba(139,92,246,0.4);background:rgba(139,92,246,0.05)}
+        .mieter-item-main{display:flex;align-items:center;gap:8px;min-width:150px}
+        .mieter-badge{background:#8b5cf6;color:#fff;padding:2px 6px;border-radius:3px;font-size:9px;font-weight:600}
+        .mieter-item-details{display:flex;gap:16px;flex:1;color:var(--text-muted);font-family:'JetBrains Mono',monospace;font-size:11px}
+        .mieter-item-actions{display:flex;gap:4px}
+        .mieter-item-actions button{width:28px;height:28px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;border-radius:4px;font-size:14px}
+        .mieter-item-actions button:first-child:hover{background:rgba(99,102,241,0.15);color:#6366f1}
+        .mieter-item-actions button:last-child:hover{background:rgba(239,68,68,0.15);color:#ef4444}
+        .mieter-form{padding:12px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;margin-bottom:12px}
+        .mieter-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+        .mieter-form-row{display:flex;flex-direction:column;gap:4px}
+        .mieter-form-row.full{grid-column:1/-1}
+        .mieter-form-row label{font-size:11px;color:var(--text-muted)}
+        .mieter-form-row input[type="text"],.mieter-form-row input[type="date"]{padding:8px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px}
+        .mieter-form-row input[type="checkbox"]{width:18px;height:18px;accent-color:#8b5cf6}
+        .mieter-form-row textarea{padding:8px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:12px;resize:vertical;min-height:60px}
+        .mieter-form-row.calculated{background:rgba(99,102,241,0.05);padding:8px 10px;border-radius:4px;border:1px dashed var(--border)}
+        .mieter-warmmiete{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:#6366f1}
+        .mieter-form-buttons{display:flex;gap:8px;margin-top:12px}
+        
+        /* Beteiligte Modal */
+        .bet-modal{max-width:400px}
+        .bet-list{display:flex;flex-direction:column;gap:4px;margin-bottom:16px;max-height:300px;overflow-y:auto}
+        .bet-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;cursor:pointer;transition:all 0.15s}
+        .bet-item:hover{border-color:var(--border-hover);background:var(--border-hover)}
+        .bet-item.active{border-color:#8b5cf6;background:rgba(139,92,246,0.1)}
+        .bet-icon{width:28px;height:28px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;padding:4px}
+        .bet-icon svg{width:16px;height:16px}
+        .bet-icon.all{border-color:#6366f1;background:rgba(99,102,241,0.1)}
+        .bet-item span{flex:1;font-size:13px}
+        .bet-check{color:#8b5cf6;font-weight:600}
+        .bet-del{width:24px;height:24px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;border-radius:4px;font-size:16px}
+        .bet-del:hover{background:#ef4444;color:#fff}
+        .bet-add{display:flex;gap:8px}
+        .bet-add input{flex:1;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px}
+        .bet-add input:focus{outline:none;border-color:#8b5cf6}
+        .bet-add button{padding:10px 16px;background:#8b5cf6;border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap}
+        .bet-add button:disabled{opacity:0.5;cursor:not-allowed}
+        .bet-add button:hover:not(:disabled){background:#7c3aed}
+        .bet-sel-btn{min-width:100px;max-width:160px}
+        
+        /* Beteiligungen in Stammdaten */
+        .bet-checkboxes{display:flex;flex-direction:column;gap:8px}
+        .bet-checkbox-row{display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;transition:all 0.15s}
+        .bet-checkbox-row.active{border-color:#8b5cf6;background:rgba(139,92,246,0.05)}
+        .bet-checkbox-label{display:flex;align-items:center;gap:10px;flex:1;cursor:pointer}
+        .bet-checkbox-label input{accent-color:#8b5cf6;width:16px;height:16px}
+        .bet-checkbox-icon{width:24px;height:24px;border-radius:50%;border:2px solid var(--border);padding:3px}
+        .bet-checkbox-name{font-size:13px}
+        .bet-anteil-wrap{display:flex;align-items:center;gap:8px;margin-left:auto}
+        .bet-anteil-presets{display:flex;gap:4px}
+        .bet-preset-btn{padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:10px;font-weight:500;cursor:pointer;transition:all 0.15s}
+        .bet-preset-btn:hover{border-color:#8b5cf6;background:rgba(139,92,246,0.1)}
+        .bet-preset-btn.active{background:#8b5cf6;border-color:#8b5cf6;color:#fff}
+        .bet-anteil-custom{display:flex;align-items:center;gap:4px}
+        .bet-anteil-custom input{width:50px;padding:4px 6px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;text-align:right}
+        .bet-anteil-custom input:focus{outline:none;border-color:#8b5cf6}
+        .bet-anteil-custom input::placeholder{color:var(--text-dim);font-family:'Inter',sans-serif;font-size:10px}
+        .bet-anteil-suffix{font-size:11px;color:var(--text-dim);font-weight:500}
+        .bet-summe{margin-top:8px;padding:8px 12px;border-radius:6px;font-size:12px;text-align:right}
+        .bet-summe.ok{background:rgba(34,197,94,0.1);color:#22c55e}
+        .bet-summe.warn{background:rgba(245,158,11,0.1);color:#f59e0b}
+        
+        .empty-dash{text-align:center;padding:60px 20px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px}
+        .empty-dash-icon{width:64px;height:64px;margin:0 auto 20px;background:rgba(99,102,241,0.1);border:2px solid rgba(99,102,241,0.2);border-radius:50%;display:flex;align-items:center;justify-content:center;padding:14px}
+        .empty-dash-icon svg{width:36px;height:36px}
+        .empty-dash h3{font-size:20px;margin-bottom:8px;color:var(--text)}
+        .empty-dash p{color:var(--text-muted);margin-bottom:24px;max-width:400px;margin-left:auto;margin-right:auto}
+        .empty-dash-features{display:flex;justify-content:center;gap:24px;flex-wrap:wrap}
+        .edf-item{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-dim)}
+        .edf-item svg{width:20px;height:20px}
+        
+        /* Import Modal Styles */
+        .import-modal{max-width:520px}
+        .upload-zone{border:2px dashed var(--border);border-radius:12px;padding:40px 20px;text-align:center;cursor:pointer;transition:all 0.2s}
+        .upload-zone:hover{border-color:#6366f1;background:rgba(99,102,241,0.05)}
+        .upload-zone.has-file{border-color:#6366f1;border-style:solid}
+        .upload-icon{width:48px;height:48px;margin:0 auto 12px;display:flex;align-items:center;justify-content:center}
+        .upload-icon svg{width:48px;height:48px}
+        .upload-zone p{color:var(--text);margin-bottom:4px}
+        .upload-zone small{color:var(--text-dim);font-size:11px}
+        .upload-preview{max-width:100%;max-height:200px;border-radius:8px}
+        .file-info{display:flex;justify-content:space-between;padding:10px 12px;background:var(--bg-input);border-radius:6px;margin-top:12px;font-size:12px}
+        .files-list{display:flex;flex-direction:column;gap:4px;margin-top:12px;padding:10px;background:var(--bg-input);border-radius:8px}
+        .file-item{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;font-size:12px;transition:all 0.15s}
+        .file-item.current{border-color:#6366f1;background:rgba(99,102,241,0.05)}
+        .file-item.done{opacity:0.6}
+        .file-item.done .file-status{background:#22c55e;color:#fff}
+        .file-status{width:22px;height:22px;border-radius:50%;background:var(--bg-input);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--text-dim)}
+        .file-item.current .file-status{background:#6366f1;color:#fff}
+        .file-item .file-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .file-item .file-size{color:var(--text-dim);font-size:11px}
+        .file-name{color:var(--text)}
+        .file-size{color:var(--text-dim)}
+        .import-error{padding:10px 12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;color:#fca5a5;font-size:12px;margin-top:12px}
+        .import-hint{padding:12px;background:rgba(99,102,241,0.1);border-radius:8px;font-size:12px;color:var(--text-muted);margin-top:16px}
+        .import-hint strong{color:#6366f1;display:block;margin-bottom:4px}
+        
+        .parse-results{display:flex;flex-direction:column;gap:12px}
+        .parse-header{display:flex;align-items:center;gap:12px;padding:12px;background:rgba(34,197,94,0.1);border-radius:8px}
+        .parse-icon{width:32px;height:32px;background:#22c55e;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px}
+        .parse-header strong{display:block;color:var(--text)}
+        .parse-header small{color:var(--text-dim);font-size:11px}
+        .parse-hint{font-size:12px;color:var(--text-dim);padding:8px 0}
+        .parse-found-info{font-size:12px;color:var(--text-muted);margin:8px 0}
+        .parse-icon-wrap{width:40px;height:40px;background:rgba(34,197,94,0.1);border-radius:10px;display:flex;align-items:center;justify-content:center}
+        
+        .import-target-info{display:flex;align-items:center;gap:12px;padding:12px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);border-radius:8px;margin-bottom:16px}
+        .import-target-icon{width:32px;height:32px;display:flex;align-items:center;justify-content:center}
+        .import-target-icon svg{width:32px;height:32px}
+        .import-target-info strong{display:block;font-size:11px;color:var(--text-dim);text-transform:uppercase}
+        .import-target-info span{font-size:14px;font-weight:600;color:#6366f1}
+        
+        .import-doctype-hint{margin-top:12px;padding:12px;background:var(--bg-input);border-radius:8px;font-size:12px}
+        .import-doctype-hint strong{display:block;color:var(--text-muted);margin-bottom:8px}
+        .doctype-list{display:flex;flex-wrap:wrap;gap:6px}
+        .doctype-list span{display:flex;align-items:center;gap:4px;padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;font-size:11px;color:var(--text-muted)}
+        .doctype-icon{width:16px;height:16px;display:flex;align-items:center;justify-content:center}
+        .doctype-icon svg{width:16px;height:16px}
+        
+        .parsed-immo{background:var(--bg-input);border-radius:10px;padding:14px}
+        .parsed-immo-header{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+        .parsed-icon{width:32px;height:32px;display:flex;align-items:center;justify-content:center}
+        .parsed-icon svg{width:32px;height:32px}
+        .parsed-immo-header strong{display:block;color:var(--text);font-size:14px}
+        .parsed-immo-header small{color:#f59e0b;font-size:11px}
+        .parsed-immo-idx{color:var(--text-dim)}
+        .parsed-source-badge{margin-left:auto;font-size:10px;padding:3px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-dim)}
+        .parsed-fields{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+        .pf{display:flex;justify-content:space-between;font-size:12px;padding:6px 10px;background:var(--bg-card);border-radius:4px}
+        .pf span:first-child{color:var(--text-dim)}
+        .pf span:last-child{color:var(--text);font-family:'JetBrains Mono',monospace}
+        .btn-import-immo{width:100%;padding:10px;background:#6366f1;border:none;border-radius:6px;color:#fff;font-weight:600;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+        .btn-import-immo:hover{background:#4f46e5}
+        
+        .parse-found-info-bar{display:flex;align-items:center;justify-content:space-between;padding:12px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:8px;margin-bottom:12px}
+        .parse-found-count{font-size:14px;color:var(--text)}
+        .parse-found-count strong{font-size:18px;color:#22c55e}
+        .parse-darlehen-hint{color:#3b82f6;font-size:12px;margin-left:4px}
+        .parsed-darlehen-badge{color:#3b82f6;font-weight:500}
+        .pf-darlehen{background:rgba(59,130,246,0.1);border-left:3px solid #3b82f6}
+        .pf-darlehen span:first-child{display:flex;align-items:center;gap:6px}
+        .pf-darlehen span:first-child svg{width:14px;height:14px}
+        .pf-darlehen-details{display:flex;flex-direction:column;gap:6px;padding:8px;background:rgba(59,130,246,0.05);border-radius:6px;border:1px dashed rgba(59,130,246,0.3)}
+        .pf-darlehen-item{display:flex;flex-direction:column;gap:2px;padding:6px 8px;background:var(--bg-card);border-radius:4px}
+        .pf-darlehen-item strong{font-size:12px;color:var(--text)}
+        .pf-darlehen-item span{font-size:11px;color:var(--text-dim)}
+        .btn-import-all{padding:8px 14px;background:#22c55e;border:none;border-radius:6px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px}
+        .btn-import-all:hover{background:#16a34a}
+        .btn-import-all svg{width:14px;height:14px}
+        
+        .parse-multi-hint{display:flex;align-items:flex-start;gap:10px;padding:12px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.3);border-radius:8px;margin-top:12px}
+        .parse-multi-hint svg{width:20px;height:20px;flex-shrink:0}
+        .parse-multi-hint span{font-size:12px;color:var(--text-muted);line-height:1.5}
+        
+        .parsed-immos-scroll{max-height:350px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+        .pf.more{justify-content:center;color:#6366f1;font-style:italic}
+        .pf-more-btn{width:100%;padding:8px;background:rgba(99,102,241,0.1);border:1px dashed #6366f1;border-radius:4px;color:#6366f1;font-size:11px;cursor:pointer;transition:all 0.15s}
+        .pf-more-btn:hover{background:rgba(99,102,241,0.2);border-style:solid}
+        .pf-extra{background:rgba(99,102,241,0.05);border-left:2px solid #6366f1}
+        
+        /* Merge View Styles */
+        .merge-view{display:flex;flex-direction:column;gap:16px}
+        .merge-header{display:flex;align-items:center;gap:12px;padding:12px;background:rgba(99,102,241,0.1);border-radius:8px}
+        .merge-header-icon{width:40px;height:40px}
+        .merge-header-info strong{display:block;font-size:14px}
+        .merge-header-info small{font-size:12px;color:var(--text-dim)}
+        
+        .merge-section{background:var(--bg-input);border-radius:8px;padding:12px}
+        .merge-section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+        .merge-section-header small{font-size:11px;color:var(--text-dim)}
+        .merge-badge{font-size:12px;font-weight:600}
+        .merge-badge.auto{color:#22c55e}
+        .merge-badge.conflict{color:#f59e0b}
+        .merge-badge.unchanged{color:var(--text-dim)}
+        
+        .merge-fields{display:flex;flex-direction:column;gap:6px}
+        .merge-field{display:flex;justify-content:space-between;padding:8px 10px;background:var(--bg-card);border-radius:4px;font-size:12px}
+        .merge-field.auto{border-left:3px solid #22c55e}
+        .merge-field.unchanged{opacity:0.7}
+        .merge-field-name{color:var(--text-dim)}
+        .merge-field-value{font-family:'JetBrains Mono',monospace}
+        .merge-field-value.new{color:#22c55e}
+        .merge-field-more{text-align:center;font-size:11px;color:var(--text-dim);padding:6px}
+        
+        .merge-conflicts{display:flex;flex-direction:column;gap:10px}
+        .merge-conflict{background:var(--bg-card);border-radius:6px;padding:12px;border:1px solid var(--border)}
+        .merge-conflict-header{margin-bottom:10px}
+        .merge-conflict-header strong{font-size:13px}
+        .merge-conflict-options{display:flex;flex-direction:column;gap:6px}
+        .merge-option{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg-input);border-radius:6px;cursor:pointer;border:2px solid transparent;transition:all 0.15s}
+        .merge-option:hover{border-color:var(--border-hover)}
+        .merge-option.selected{border-color:#6366f1;background:rgba(99,102,241,0.05)}
+        .merge-option input{accent-color:#6366f1}
+        .merge-option-label{display:flex;align-items:center;gap:8px;flex:1}
+        .merge-option-tag{font-size:10px;padding:2px 6px;border-radius:3px;font-weight:600}
+        .merge-option-tag.keep{background:var(--bg-card);color:var(--text-muted)}
+        .merge-option-tag.new{background:rgba(34,197,94,0.15);color:#22c55e}
+        .merge-option-value{font-family:'JetBrains Mono',monospace;font-size:12px;margin-left:auto}
+        
+        .merge-actions{display:flex;gap:10px;margin-top:8px}
+        .merge-actions .btn-back{flex:1;background:var(--bg-input);border:1px solid var(--border);color:var(--text)}
+        .merge-actions .btn-back:hover{background:var(--border-hover)}
+        .btn-merge{flex:2;padding:12px;background:#22c55e;border:none;border-radius:6px;color:#fff;font-weight:600;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+        .btn-merge:hover{background:#16a34a}
+        
+        .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;margin-right:8px;vertical-align:middle}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        
+        .btn-pri:disabled{opacity:0.7;cursor:wait}
+        
+        .btn-sec{width:100%;padding:11px;background:#27272a;border:1px solid #3f3f46;border-radius:6px;color:#fafafa;font-weight:500;font-size:13px;cursor:pointer}
+        .btn-sec:hover{background:#3f3f46}
+        
+        .hdr-btn-icon{width:14px;height:14px;display:inline-flex;align-items:center;vertical-align:middle;margin-right:4px}
+        .hdr-btn-icon svg{width:14px;height:14px}
+        
+        /* Review Badge */
+        .review-badge{display:inline-flex;align-items:center;margin-left:8px;padding:2px 6px;background:rgba(245,158,11,0.2);border:1px solid rgba(245,158,11,0.4);border-radius:4px;font-size:9px;color:#f59e0b;font-weight:500}
+        .review-badge-icon{width:12px;height:12px;margin-right:3px;display:inline-flex;align-items:center}
+        .review-badge-icon svg{width:12px;height:12px}
+        
+        /* Field Review Indicator in Stammdaten */
+        .field-review{position:relative}
+        .field-review{position:relative;border-color:#f59e0b}
+        .review-banner{display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;margin-bottom:14px;flex-wrap:wrap}
+        .review-banner-icon{width:32px;height:32px;display:flex;align-items:center;justify-content:center}
+        .review-banner-icon svg{width:32px;height:32px}
+        .review-banner-text{flex:1;font-size:13px;min-width:200px}
+        .review-banner-text strong{color:#f59e0b;display:block}
+        .review-banner-text span{color:#a1a1aa}
+        .review-banner-actions{display:flex;gap:8px}
+        .btn-review-done{padding:6px 12px;background:#22c55e;border:none;border-radius:5px;color:#fff;font-size:11px;font-weight:600;cursor:pointer}
+        .btn-review-done:hover{background:#16a34a}
+        .btn-review-delete{padding:6px 12px;background:#ef4444;border:none;border-radius:5px;color:#fff;font-size:11px;font-weight:600;cursor:pointer}
+        .btn-review-delete:hover{background:#dc2626}
+        
+        /* Export View Styles */
+        .yr-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+        .btn-export{margin-left:auto;display:flex;align-items:center;gap:6px;padding:8px 14px;background:rgba(99,102,241,0.1);border:1px solid #6366f1;border-radius:6px;color:#6366f1;font-size:12px;font-weight:500;cursor:pointer}
+        .btn-export:hover{background:rgba(99,102,241,0.2)}
+        .btn-export-icon{width:16px;height:16px}
+        
+        .export-view{background:#18181b;border:1px solid #27272a;border-radius:10px;overflow:hidden}
+        .export-header{padding:20px;background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%);text-align:center}
+        .export-header h2{font-size:16px;margin-bottom:4px}
+        .export-header p{font-size:12px;opacity:0.8}
+        
+        .export-section{padding:16px 20px;border-bottom:1px solid #27272a}
+        .export-section h3{font-size:13px;font-weight:600;color:#6366f1;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px}
+        .export-section.summary{background:rgba(99,102,241,0.05)}
+        
+        .export-table{width:100%;border-collapse:collapse;font-size:12px}
+        .export-table th{text-align:left;padding:6px 8px;background:#27272a;color:#71717a;font-size:10px;text-transform:uppercase;font-weight:600}
+        .export-table td{padding:6px 8px;border-bottom:1px solid #27272a}
+        .export-table td.val{text-align:right;font-family:'JetBrains Mono',monospace;white-space:nowrap}
+        .export-table td.note{color:#71717a;font-size:10px;padding-left:12px}
+        .export-table td.neg{color:#ef4444}
+        .export-table td.empty-note{color:#52525b;font-style:italic;text-align:center;padding:12px}
+        .export-table tr.hl td{background:rgba(99,102,241,0.1);font-weight:600;border-top:1px solid #6366f1}
+        .export-table tr.hl.pos td{background:rgba(34,197,94,0.1);border-top-color:#22c55e}
+        .export-table tr.hl.neg td{background:rgba(239,68,68,0.1);border-top-color:#ef4444}
+        .export-table tr.hl.accent td{background:#6366f1;color:#fff}
+        .export-table tr.sub td{background:#27272a;font-weight:500}
+        
+        .export-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+        .export-col{background:#27272a;border-radius:8px;padding:12px;overflow:hidden}
+        .export-col .export-table td{border-color:#3f3f46}
+        
+        .export-footer{margin-top:16px;padding:12px;background:#27272a;border-radius:8px;text-align:center;font-size:13px}
+        .export-footer .pos{color:#22c55e}
+        .export-footer .neg{color:#ef4444}
+        
+        .export-actions{display:flex;gap:10px;padding:16px 20px;background:#0f0f11;flex-wrap:wrap}
+        .btn-print{flex:1;padding:12px;background:#6366f1;border:none;border-radius:6px;color:#fff;font-weight:600;font-size:13px;cursor:pointer;min-width:140px}
+        .btn-print:hover{background:#4f46e5}
+        .btn-copy{flex:1;padding:12px;background:#10b981;border:none;border-radius:6px;color:#fff;font-weight:600;font-size:13px;cursor:pointer;min-width:140px}
+        .btn-copy:hover{background:#059669}
+        .btn-back{flex:1;padding:12px;background:#27272a;border:1px solid #3f3f46;border-radius:6px;color:#fafafa;font-weight:500;font-size:13px;cursor:pointer;min-width:100px}
+        .btn-back:hover{background:#3f3f46}
+        
+        .export-hint-small{text-align:center;font-size:11px;color:#71717a;padding:0 20px 16px}
+        
+        @media print{
+          body{background:#fff!important;color:#000!important}
+          .hdr,.nav,.export-actions{display:none!important}
+          .export-view{border:none;box-shadow:none}
+          .export-header{background:#6366f1!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+          .export-table tr.hl td,.export-table tr.hl.accent td{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+        }
+        
+        @media(max-width:640px){
+          .export-cols{grid-template-columns:1fr}
+        }
+      `}</style>
+
+      <header className="hdr">
+        <div className="hdr-in">
+          <div className="logo">
+            <span className="logo-icon"><IconObjekt color="#6366f1" /></span>
+            <span className="logo-text"><span className="logo-immo">Immo</span><span className="logo-hub">Hub</span></span>
+            {CloudStatusComponent && <CloudStatusComponent />}
+          </div>
+          <div className="hdr-acts">
+            {(history.length > 0 || redoHistory.length > 0) && (
+              <div className="undo-redo-group">
+                <button className="undo-btn" onClick={onUndo} disabled={history.length === 0} title="Rückgängig (Strg+Z)">
+                  <span className="undo-icon"><IconUndo color="var(--text-muted)" /></span>
+                </button>
+                <button className="undo-btn" onClick={onRedo} disabled={redoHistory.length === 0} title="Wiederholen (Strg+Y)">
+                  <span className="undo-icon"><IconRedo color="var(--text-muted)" /></span>
+                </button>
+              </div>
+            )}
+            {curr && !isSaved && <button className="hdr-btn pri" onClick={onSave} disabled={!curr?.stammdaten?.name || Object.keys(validationErrors).length > 0}><span className="btn-icon-sm"><IconSave color="#fff" /></span>Speichern</button>}
+            <button className="hdr-btn" onClick={() => setImportModal(true)}><span className="hdr-btn-icon"><IconUpload color="var(--text-muted)" /></span>Import</button>
+            <button className="theme-toggle" onClick={toggleTheme} title={theme === 'dark' ? 'Hellmodus' : 'Dunkelmodus'}>
+              <span className="theme-toggle-icon">
+                {theme === 'dark' ? <IconSun color="#f59e0b" /> : <IconMoon color="#6366f1" />}
+              </span>
+            </button>
+            {UserMenuComponent && <UserMenuComponent />}
+          </div>
+        </div>
+      </header>
+
+      {/* Auto-Save Indicator */}
+      {showAutoSaved && (
+        <div className="auto-save-indicator">
+          <span className="icon"><IconCheck color="#fff" /></span>
+          Automatisch gespeichert
+        </div>
+      )}
+
+      <nav className="nav">
+        <div className="nav-in">
+          <button className={`nav-tab-btn ${tab === 'dash' ? 'act' : ''}`} onClick={() => { setTab('dash'); setCurr(null); }}><span className="nav-icon"><IconDashboard color={tab === 'dash' ? '#fff' : 'var(--text-dim)'} /></span>Übersicht</button>
+          
+          <div className="nav-divider"></div>
+          
+          <button className="sel-btn bet-sel-btn" onClick={() => setBeteiligteModal(true)}>
+            <span className="sel-icon"><IconPerson color="var(--text-muted)" /></span>
+            <span className="sel-text">
+              {(() => {
+                if (aktiveBeteiligte.length === 0) return 'Alle';
+                if (aktiveBeteiligte.length === 1) return beteiligte.find(b => b.id === aktiveBeteiligte[0])?.name || 'Unbekannt';
+                return `${aktiveBeteiligte.length} ausgewählt`;
+              })()}
+            </span>
+            <span className="sel-arrow">▼</span>
+          </button>
+          
+          <div className="nav-divider"></div>
+          
+          <div className="nav-immo-select">
+            <button className={`sel-btn ${curr && !isSaved ? 'draft' : ''}`} onClick={() => setModal(true)}>
+              <span className="sel-icon"><IconObjekt color="var(--text-muted)" /></span>
+              <span className="sel-text">
+                {curr ? (curr.stammdaten.name || 'Unbenannt') : 'Immobilie wählen...'}
+              </span>
+              {curr && !isSaved && <span className="draft-tag">Entwurf</span>}
+              <span className="sel-arrow">▼</span>
+            </button>
+            <button className="nav-new-btn" onClick={onNew} title="Neue Immobilie">+</button>
+          </div>
+          
+          {curr && (
+            <div className="nav-tabs">
+              <button className={tab === 'stamm' ? 'act' : ''} onClick={() => setTab('stamm')}><span className="nav-icon"><IconObjekt color={tab === 'stamm' ? '#fff' : 'var(--text-dim)'} /></span>Stammdaten</button>
+              <button className={tab === 'rendite' ? 'act' : ''} onClick={() => setTab('rendite')} disabled={!isSaved}><span className="nav-icon"><IconRendite color={tab === 'rendite' ? '#fff' : 'var(--text-dim)'} /></span>Rendite</button>
+              <button className={tab === 'steuer' ? 'act' : ''} onClick={() => setTab('steuer')} disabled={!isSaved}><span className="nav-icon"><IconSteuer color={tab === 'steuer' ? '#fff' : 'var(--text-dim)'} /></span>Steuer</button>
+            </div>
+          )}
+        </div>
+      </nav>
+
+      <main className="main">
+        {tab === 'dash' ? (
+          <Dashboard 
+            immobilien={saved} 
+            onSelectImmo={(i) => { setCurr({...i}); setTab('stamm'); }} 
+            aktiveBeteiligte={aktiveBeteiligte} 
+            beteiligte={beteiligte}
+            filter={dashFilter}
+            onFilterChange={setDashFilter}
+            onReorder={(draggedId, targetId) => {
+              const draggedIdx = saved.findIndex(i => i.id === draggedId);
+              const targetIdx = saved.findIndex(i => i.id === targetId);
+              if (draggedIdx !== -1 && targetIdx !== -1) {
+                const newSaved = [...saved];
+                const [dragged] = newSaved.splice(draggedIdx, 1);
+                newSaved.splice(targetIdx, 0, dragged);
+                setSaved(newSaved);
+                save(newSaved);
+              }
+            }}
+          />
+        ) : !curr ? (
+          <div className="empty-p">
+            <span className="empty-p-icon"><IconHome color="#6366f1" /></span>
+            <h2>Keine Immobilie ausgewählt</h2>
+            <p>Wähle eine gespeicherte Immobilie oder lege eine neue an.</p>
+            <button onClick={() => setModal(true)}>Immobilie wählen</button>
+          </div>
+        ) : (
+          <>
+            {tab === 'stamm' && <Stamm p={curr} upd={onUpd} c={c} onSave={onSave} saved={isSaved} onOpenImport={() => setImportModal(true)} onDelete={() => setDeleteConfirm(curr?.id)} onDiscard={() => { setCurr(null); setTab('dash'); }} validationErrors={validationErrors} beteiligte={beteiligte} immobilien={saved} onSmartImport={handleSmartImport} onAddEinheit={onAddEinheit} onSelectEinheit={onSelect} onAssignEinheit={onAssignEinheit} onDetachEinheit={onDetachEinheit} onDeleteUnit={onDel} onUpdateUnit={onUpdateUnit} onSplitToUnit={onSplitToUnit} onConvertToContainer={onConvertToContainer} />}
+            {tab === 'rendite' && isSaved && <Rendite p={curr} upd={onUpd} c={c} />}
+            {tab === 'steuer' && isSaved && <Steuer p={curr} upd={onUpd} c={c} immobilien={saved} />}
+          </>
+        )}
+      </main>
+
+      {modal && <Modal items={saved} onSelect={onSelect} onNew={onNew} onClose={() => setModal(false)} onDel={onDel} onOpenImport={() => { setModal(false); setImportModal(true); }} onDuplicate={(i) => {
+        const dup = {
+          ...JSON.parse(JSON.stringify(i)),
+          id: Date.now(),
+          saved: false,
+          stammdaten: {
+            ...i.stammdaten,
+            name: i.stammdaten.name + ' (Kopie)'
+          }
+        };
+        setCurr(dup);
+        setTab('stamm');
+        setModal(false);
+      }} />}
+      {importModal && <ImportModal onClose={() => setImportModal(false)} onImport={onImport} existingImmo={curr?.saved ? curr : null} existingEinheiten={curr?.saved ? saved.filter(x => x.parentId === curr.id) : []} />}
+      {beteiligteModal && (
+        <BeteiligteModal 
+          beteiligte={beteiligte}
+          aktiveBeteiligte={aktiveBeteiligte}
+          onClose={() => setBeteiligteModal(false)}
+          onAdd={(b) => setBeteiligte([...beteiligte, b])}
+          onDelete={(id) => {
+            setBeteiligte(beteiligte.filter(b => b.id !== id));
+            setAktiveBeteiligte(aktiveBeteiligte.filter(a => a !== id));
+          }}
+          onToggle={(id) => {
+            if (id === null) {
+              // "Alle" geklickt -> leeres Array
+              setAktiveBeteiligte([]);
+            } else if (aktiveBeteiligte.includes(id)) {
+              // Bereits aktiv -> entfernen
+              setAktiveBeteiligte(aktiveBeteiligte.filter(a => a !== id));
+            } else {
+              // Nicht aktiv -> hinzufügen
+              setAktiveBeteiligte([...aktiveBeteiligte, id]);
+            }
+          }}
+        />
+      )}
+      {deleteConfirm && (
+        <div className="modal-bg" onClick={() => setDeleteConfirm(null)}>
+          <div className="modal confirm-modal" onClick={e => e.stopPropagation()}>
+            <div className="confirm-content">
+              <span className="confirm-icon"><IconTrash color="#ef4444" /></span>
+              <h3>Immobilie löschen?</h3>
+              <p>{(() => { const t = saved.find(x => x.id === deleteConfirm); const ch = t?.isContainer ? saved.filter(x => x.parentId === deleteConfirm).length : 0; return ch > 0 ? `Dieses Gebäude enthält ${ch} Einheit(en), die ebenfalls gelöscht werden. Diese Aktion kann nicht rückgängig gemacht werden.` : 'Diese Aktion kann nicht rückgängig gemacht werden.'; })()}</p>
+              <div className="confirm-btns">
+                <button className="btn-cancel" onClick={() => setDeleteConfirm(null)}>Abbrechen</button>
+                <button className="btn-delete" onClick={confirmDelete}>Löschen</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showOnboarding && (
+        <OnboardingTour onComplete={completeOnboarding} />
+      )}
+      
+      {/* Toast Notification */}
+      <Toast toast={toast} />
+    </div>
+  );
+}
+
+// ============================================================================
+// AUTH SCREENS & CLOUD COMPONENTS
+// ============================================================================
+
+// Cloud Status Component
+const CloudStatus = ({ status }) => {
+  const getDisplay = () => {
+    switch (status) {
+      case "saving": return { text: "Speichert...", color: "#f59e0b", icon: "⟳" };
+      case "saved": return { text: "Gespeichert", color: "#22c55e", icon: "✓" };
+      case "error": return { text: "Fehler", color: "#ef4444", icon: "✗" };
+      default: return { text: "", color: "transparent", icon: "" };
+    }
+  };
+  const d = getDisplay();
+  return (
+    <span className="cloud-status" style={{ marginLeft: "12px", fontSize: "11px", color: d.color, display: "flex", alignItems: "center", gap: "4px" }}>
+      <span style={{ fontSize: "13px" }}>{d.icon}</span>
+      <span className="cloud-status-text">{d.text}</span>
+    </span>
+  );
+};
+
+// User Menu Component
+const UserMenu = ({ user, onSignOut }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="user-menu-btn"
+        style={{
+          display: "flex", alignItems: "center", gap: "6px", padding: "6px 10px",
+          background: "var(--bg-input)", border: "1px solid var(--border)", borderRadius: "8px",
+          color: "var(--text)", fontSize: "13px", cursor: "pointer"
+        }}
+      >
+        <span style={{
+          width: "28px", height: "28px", borderRadius: "50%", background: "#6366f1",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          color: "#fff", fontWeight: "600", fontSize: "12px", flexShrink: 0
+        }}>
+          {user?.email?.[0]?.toUpperCase() || "?"}
+        </span>
+        <span className="user-email-text" style={{ maxWidth: "100px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {user?.email || "Benutzer"}
+        </span>
+        <span style={{ fontSize: "10px" }}>▼</span>
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", right: 0, marginTop: "4px",
+          background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: "8px",
+          padding: "8px", minWidth: "160px", zIndex: 1000, boxShadow: "0 4px 12px rgba(0,0,0,0.3)"
+        }}>
+          <div style={{ padding: "8px", fontSize: "12px", color: "var(--text-muted)", borderBottom: "1px solid var(--border)", wordBreak: "break-all" }}>
+            {user?.email}
+          </div>
+          <button
+            onClick={() => { setOpen(false); onSignOut(); }}
+            style={{
+              width: "100%", padding: "10px", marginTop: "4px", background: "transparent",
+              border: "none", color: "#ef4444", fontSize: "13px", cursor: "pointer",
+              textAlign: "left", borderRadius: "4px"
+            }}
+            onMouseOver={(e) => e.target.style.background = "rgba(239,68,68,0.1)"}
+            onMouseOut={(e) => e.target.style.background = "transparent"}
+          >
+            Abmelden
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Loading Screen
+const LoadingScreen = () => (
+  <div style={{
+    height: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+    background: "#0a0a0f", color: "#fff", fontFamily: "'Inter', system-ui, -apple-system, sans-serif"
+  }}>
+    <div style={{ textAlign: "center" }}>
+      <div style={{ width: "48px", height: "48px", margin: "0 auto 16px" }}>
+        <svg viewBox="0 0 40 40" width="48" height="48">
+          <defs>
+            <linearGradient id="loadGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.9" />
+              <stop offset="100%" stopColor="#6366f1" stopOpacity="0.4" />
+            </linearGradient>
+          </defs>
+          <path d="M20 8L8 18v14h8v-8h8v8h8V18L20 8z" fill="url(#loadGrad)" />
+          <circle cx="20" cy="18" r="2" fill="rgba(0,0,0,0.3)" />
+        </svg>
+      </div>
+      <div style={{ fontSize: "14px", color: "#888" }}>Laden...</div>
+    </div>
+  </div>
+);
+
+// Auth Screen (Login/Register)
+const AuthScreen = () => {
+  const { signIn, signUp, resetPassword } = useAuth();
+  const [mode, setMode] = useState("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setMessage("");
+    setLoading(true);
+    if (mode === "reset") {
+      const { error } = await resetPassword(email);
+      setLoading(false);
+      if (error) setError(error.message);
+      else setMessage("E-Mail zum Zurücksetzen wurde gesendet!");
+      return;
+    }
+    const { error } = mode === "login" ? await signIn(email, password) : await signUp(email, password);
+    setLoading(false);
+    if (error) setError(error.message);
+    else if (mode === "register") setMessage("Registrierung erfolgreich! Du kannst dich jetzt anmelden.");
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#0a0a0f", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px", fontFamily: "'Inter', system-ui, -apple-system, sans-serif" }}>
+      <div style={{ width: "100%", maxWidth: "400px" }}>
+        <div style={{ textAlign: "center", marginBottom: "32px" }}>
+          <div style={{ width: "64px", height: "64px", margin: "0 auto 12px" }}>
+            <svg viewBox="0 0 40 40" width="64" height="64">
+              <defs>
+                <linearGradient id="authGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#6366f1" stopOpacity="0.9" />
+                  <stop offset="100%" stopColor="#6366f1" stopOpacity="0.4" />
+                </linearGradient>
+              </defs>
+              <path d="M20 8L8 18v14h8v-8h8v8h8V18L20 8z" fill="url(#authGrad)" />
+              <circle cx="20" cy="18" r="2" fill="rgba(0,0,0,0.3)" />
+            </svg>
+          </div>
+          <h1 style={{ fontSize: "28px", color: "#fff", margin: "0 0 4px", fontWeight: "600" }}>
+            <span>Immo</span><span style={{ color: "#6366f1" }}>Hub</span>
+          </h1>
+          <p style={{ color: "#888", fontSize: "14px", fontWeight: "400" }}>Dein Immobilien-Portfolio</p>
+        </div>
+        <div style={{ background: "#111118", border: "1px solid #2a2a3a", borderRadius: "12px", padding: "24px" }}>
+          <h2 style={{ color: "#fff", fontSize: "18px", marginBottom: "20px", textAlign: "center", fontWeight: "600" }}>
+            {mode === "login" ? "Anmelden" : mode === "register" ? "Registrieren" : "Passwort zurücksetzen"}
+          </h2>
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: "16px" }}>
+              <label style={{ display: "block", color: "#888", fontSize: "12px", marginBottom: "6px" }}>E-Mail</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required
+                style={{ width: "100%", padding: "12px", background: "#1a1a24", border: "1px solid #2a2a3a", borderRadius: "8px", color: "#fff", fontSize: "14px", boxSizing: "border-box" }}
+              />
+            </div>
+            {mode !== "reset" && (
+              <div style={{ marginBottom: "16px", position: "relative" }}>
+                <label style={{ display: "block", color: "#888", fontSize: "12px", marginBottom: "6px" }}>Passwort</label>
+                <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} required
+                  style={{ width: "100%", padding: "12px", paddingRight: "44px", background: "#1a1a24", border: "1px solid #2a2a3a", borderRadius: "8px", color: "#fff", fontSize: "14px", boxSizing: "border-box" }}
+                />
+                <button type="button" onClick={() => setShowPw(!showPw)}
+                  style={{ position: "absolute", right: "12px", top: "32px", background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: "16px" }}>
+                  {showPw ? "○" : "◉"}
+                </button>
+              </div>
+            )}
+            {error && <div style={{ color: "#ef4444", fontSize: "13px", marginBottom: "16px", padding: "10px", background: "rgba(239,68,68,0.1)", borderRadius: "6px" }}>{error}</div>}
+            {message && <div style={{ color: "#22c55e", fontSize: "13px", marginBottom: "16px", padding: "10px", background: "rgba(34,197,94,0.1)", borderRadius: "6px" }}>{message}</div>}
+            <button type="submit" disabled={loading}
+              style={{ width: "100%", padding: "12px", background: "#6366f1", border: "none", borderRadius: "8px", color: "#fff", fontSize: "14px", fontWeight: "600", cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+              {loading ? (
+                <>
+                  <span style={{ 
+                    display: "inline-block", width: "16px", height: "16px", 
+                    border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", 
+                    borderRadius: "50%", animation: "spin 0.8s linear infinite" 
+                  }}></span>
+                  <span>Wird geladen...</span>
+                </>
+              ) : mode === "login" ? "Anmelden" : mode === "register" ? "Registrieren" : "Link senden"}
+            </button>
+          </form>
+          <div style={{ marginTop: "16px", textAlign: "center" }}>
+            {mode === "login" && (
+              <>
+                <button onClick={() => setMode("register")} style={{ background: "none", border: "none", color: "#6366f1", cursor: "pointer", fontSize: "13px" }}>Noch kein Konto? Registrieren</button>
+                <br />
+                <button onClick={() => setMode("reset")} style={{ background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: "12px", marginTop: "8px" }}>Passwort vergessen?</button>
+              </>
+            )}
+            {mode !== "login" && (
+              <button onClick={() => setMode("login")} style={{ background: "none", border: "none", color: "#6366f1", cursor: "pointer", fontSize: "13px" }}>Zurück zur Anmeldung</button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ImmoHub App with Cloud Sync
+const ImmoHubApp = () => {
+  const { user, signOut } = useAuth();
+  const [portfolioId, setPortfolioId] = useState(null);
+  const [immobilien, setImmobilien] = useState([]);
+  const [beteiligte, setBeteiligte] = useState([]);
+  const [cloudStatus, setCloudStatus] = useState("saved");
+  const [loading, setLoading] = useState(true);
+  const saveTimeoutRef = useRef(null);
+
+  // Load portfolio on mount
+  useEffect(() => {
+    if (!user) return;
+    loadPortfolio();
+  }, [user]);
+
+  const loadPortfolio = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from("portfolios").select("*").eq("user_id", user.id).single();
+    if (data) {
+      setPortfolioId(data.id);
+      setImmobilien(data.data?.immobilien || []);
+      setBeteiligte(data.data?.beteiligte || []);
+    } else if (!error || error.message?.includes("no rows")) {
+      // Create new portfolio
+      const { data: newData } = await supabase.from("portfolios").insert({ user_id: user.id, name: "Mein Portfolio", data: { immobilien: [], beteiligte: [] } }).select().single();
+      if (newData) setPortfolioId(newData.id);
+    }
+    setLoading(false);
+  };
+
+  const savePortfolio = async (newImmobilien, newBeteiligte) => {
+    if (!portfolioId) return;
+    setCloudStatus("saving");
+    const { error } = await supabase.from("portfolios").update({ data: { immobilien: newImmobilien, beteiligte: newBeteiligte }, updated_at: new Date().toISOString() }).eq("id", portfolioId).select().single();
+    setCloudStatus(error ? "error" : "saved");
+  };
+
+  const handleDataChange = (newImmobilien, newBeteiligte) => {
+    setImmobilien(newImmobilien);
+    setBeteiligte(newBeteiligte);
+    // Debounced save
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => savePortfolio(newImmobilien, newBeteiligte), 1500);
+  };
+
+  if (loading) return <LoadingScreen />;
+
+  return (
+    <ImmoHubCore
+      initialData={immobilien}
+      initialBeteiligte={beteiligte}
+      onDataChange={handleDataChange}
+      UserMenuComponent={() => <UserMenu user={user} onSignOut={signOut} />}
+      CloudStatusComponent={() => <CloudStatus status={cloudStatus} />}
+    />
+  );
+};
+
+// Export default with Auth wrapper
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+}
+
+function AppContent() {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!user) return <AuthScreen />;
+  return <ImmoHubApp />;
 }
